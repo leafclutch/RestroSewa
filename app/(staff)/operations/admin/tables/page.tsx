@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getAuthUser, hasPermission } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/service'
+import { getAppUrl } from '@/lib/app-url'
 import { GroupManager } from './group-manager'
 import { TableRow } from './table-row'
 
@@ -35,7 +36,7 @@ export default async function TablesPage() {
   for (const g of groups) byGroup.set(g.id, [])
   for (const t of tables) byGroup.get(t.table_group_id ?? null)?.push(t)
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+  const appUrl = getAppUrl()
 
   return (
     <div className="space-y-8">

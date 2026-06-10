@@ -2,6 +2,7 @@ import Image from 'next/image'
 import { notFound, redirect } from 'next/navigation'
 import { getAuthUser, hasPermission } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/service'
+import { getTableUrl } from '@/lib/app-url'
 
 export default async function QrPage({ params }: { params: Promise<{ tableId: string }> }) {
   const { tableId } = await params
@@ -19,8 +20,7 @@ export default async function QrPage({ params }: { params: Promise<{ tableId: st
   if (!data) notFound()
 
   const table = data as { display_name: string; qr_token: string }
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-  const tableUrl = `${appUrl}/t/${table.qr_token}`
+  const tableUrl = getTableUrl(table.qr_token)
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&ecc=M&data=${encodeURIComponent(tableUrl)}`
 
   return (
