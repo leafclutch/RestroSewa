@@ -1,247 +1,215 @@
-'use server'
+"use server";
 
-import { revalidatePath } from 'next/cache'
-import { createServiceClient } from '@/lib/supabase/service'
-import type { ActionResult } from '@/types/app'
+import { createServiceClient } from "@/lib/supabase/service";
+import { revalidatePath } from "next/cache";
 
-// Resolves qr_token + sessionId into validated table + session objects.
-// All customer actions require both — qr_token is the customer's "key".
-type ValidTable = { id: string; restaurant_id: string; display_name: string; status: string }
-type ValidSession = { id: string; table_id: string; restaurant_id: string; status: string; ordering_locked: boolean; bill_requested: boolean }
-type ValidationOk = { table: ValidTable; session: ValidSession }
-type ValidationErr = { error: string }
+export type CustomerCartItem = {
+  menu_item_id: string;
+  item_name: string;
+  item_price: number;
+  workstation_id: string;
+  workstation_name: string;
+  quantity: number;
+};
 
-async function validateSession(qrToken: string, sessionId: string): Promise<ValidationOk | ValidationErr> {
-  const service = createServiceClient()
+export async function verifyCustomerPin(
+  sessionId: string | null,
+  pin: string,
+  tableId?: string | null,
+  roomId?: string | null
+): Promise<{ success: boolean; resolvedSessionId: string | null }> {
+  const service = createServiceClient();
 
-  const [tableRes, sessionRes] = await Promise.all([
-    service
-      .from('restaurant_tables')
-      .select('id, restaurant_id, display_name, status')
-      .eq('qr_token', qrToken)
-      .single(),
-    service
-      .from('sessions')
-      .select('id, table_id, restaurant_id, status, ordering_locked, bill_requested')
-      .eq('id', sessionId)
-      .single(),
-  ])
+  // Try exact session lookup first
+  if (sessionId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: session } = await (service as any)
+      .from("sessions")
+      .select("id, customer_pin")
+      .eq("id", sessionId)
+      .eq("status", "active")
+      .maybeSingle();
 
-  if (!tableRes.data) return { error: 'Invalid QR code.' }
-  if (!sessionRes.data) return { error: 'Session not found.' }
-
-  const table = tableRes.data as ValidTable
-  const session = sessionRes.data as ValidSession
-
-  if (session.table_id !== table.id) return { error: 'Session does not match this table.' }
-  if (session.status !== 'active') return { error: 'Session is no longer active.' }
-
-  return { table, session }
-}
-
-export type ClientCartItem = {
-  menuItemId: string
-  variantId: string | null
-  addonIds: string[]
-  quantity: number
-  notes: string
-}
-
-export async function submitOrder(
-  qrToken: string,
-  sessionId: string,
-  items: ClientCartItem[],
-): Promise<ActionResult<void>> {
-  if (items.length === 0) return { success: false, error: 'Cart is empty.' }
-
-  const validation = await validateSession(qrToken, sessionId)
-  if (!('table' in validation)) return { success: false, error: (validation as ValidationErr).error }
-  const { table, session } = validation
-
-  if (session.ordering_locked) return { success: false, error: 'Ordering is currently locked.' }
-
-  const service = createServiceClient()
-
-  // Re-fetch current prices from DB — price snapshot at submission time
-  const menuItemIds = [...new Set(items.map((i) => i.menuItemId))]
-  const variantIds = items.map((i) => i.variantId).filter(Boolean) as string[]
-  const addonIds = [...new Set(items.flatMap((i) => i.addonIds))]
-
-  const [menuItemsRes, variantsRes, addonsRes] = await Promise.all([
-    service
-      .from('menu_items')
-      .select('id, name, base_price, status')
-      .in('id', menuItemIds)
-      .eq('restaurant_id', table.restaurant_id),
-    variantIds.length > 0
-      ? service.from('variants').select('id, name, additional_price').in('id', variantIds)
-      : { data: [] as any[] },
-    addonIds.length > 0
-      ? service.from('addons').select('id, name, additional_price').in('id', addonIds)
-      : { data: [] as any[] },
-  ])
-
-  const menuMap = new Map<string, any>((menuItemsRes.data ?? []).map((m: any) => [m.id, m]))
-  const variantMap = new Map<string, any>((variantsRes.data ?? []).map((v: any) => [v.id, v]))
-  const addonMap = new Map<string, any>((addonsRes.data ?? []).map((a: any) => [a.id, a]))
-
-  // Validate availability
-  for (const item of items) {
-    const m = menuMap.get(item.menuItemId)
-    if (!m) return { success: false, error: 'A menu item in your cart was not found.' }
-    if (m.status === 'hidden') return { success: false, error: `"${m.name}" is no longer available.` }
-    if (m.status === 'out_of_stock') return { success: false, error: `"${m.name}" is currently out of stock.` }
-    if (item.variantId && !variantMap.has(item.variantId))
-      return { success: false, error: 'A selected variant is no longer available.' }
-  }
-
-  // Build order items with DB-sourced price snapshots
-  type BuiltItem = {
-    menu_item_id: string; menu_item_name: string
-    variant_id: string | null; variant_name: string | null
-    unit_price: number; quantity: number; addons_snapshot: object[]
-    notes: string | null; itemTotal: number
-  }
-  const builtItems: BuiltItem[] = items.map((item) => {
-    const m = menuMap.get(item.menuItemId)
-    const v = item.variantId ? variantMap.get(item.variantId) : null
-    const selectedAddons = item.addonIds.map((id) => addonMap.get(id)).filter(Boolean)
-
-    const unitPrice: number = m.base_price + (v?.additional_price ?? 0)
-    const addonTotal: number = selectedAddons.reduce((s: number, a: any) => s + a.additional_price, 0)
-
-    return {
-      menu_item_id: item.menuItemId,
-      menu_item_name: m.name,
-      variant_id: item.variantId,
-      variant_name: v?.name ?? null,
-      unit_price: unitPrice,
-      quantity: item.quantity,
-      addons_snapshot: selectedAddons.map((a: any) => ({
-        id: a.id,
-        name: a.name,
-        additional_price: a.additional_price,
-      })),
-      notes: item.notes || null,
-      itemTotal: (unitPrice + addonTotal) * item.quantity,
+    if (session) {
+      const success = session.customer_pin === pin;
+      return { success, resolvedSessionId: success ? (session.id as string) : null };
     }
-  })
-
-  const totalAmount = builtItems.reduce((s, i) => s + i.itemTotal, 0)
-
-  // Create order header
-  const { data: order, error: orderError } = await service
-    .from('session_orders')
-    .insert({ restaurant_id: table.restaurant_id, session_id: sessionId, total_amount: totalAmount })
-    .select('id')
-    .single()
-
-  if (orderError) return { success: false, error: 'Failed to place order. Please try again.' }
-
-  const orderId = (order as { id: string }).id
-
-  // Create order items
-  const { error: itemsError } = await service.from('session_order_items').insert(
-    builtItems.map(({ itemTotal: _drop, ...item }) => ({
-      ...item,
-      order_id: orderId,
-      restaurant_id: table.restaurant_id,
-    })),
-  )
-
-  if (itemsError) {
-    await service.from('session_orders').delete().eq('id', orderId)
-    return { success: false, error: 'Failed to save order items. Please try again.' }
   }
 
-  // Create notification for staff
-  await service.from('notifications').insert({
-    restaurant_id: table.restaurant_id,
-    type: 'new_order',
-    session_id: sessionId,
-    order_id: orderId,
-    table_id: table.id,
-    message: `New order from ${table.display_name}`,
-  })
+  // Session not found (stale page) — look up the current active session for this table/room
+  if (!tableId && !roomId) return { success: false, resolvedSessionId: null };
 
-  revalidatePath(`/t/${qrToken}`)
-  return { success: true, data: undefined }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let q = (service as any)
+    .from("sessions")
+    .select("id, customer_pin")
+    .eq("status", "active")
+    .not("customer_pin", "is", null);
+
+  if (tableId) q = q.eq("table_id", tableId);
+  else q = q.eq("room_id", roomId);
+
+  const { data: fresh } = await q.maybeSingle();
+  if (!fresh) return { success: false, resolvedSessionId: null };
+
+  const success = fresh.customer_pin === pin;
+  return { success, resolvedSessionId: success ? (fresh.id as string) : null };
 }
 
-export async function submitHelpRequest(
-  qrToken: string,
-  sessionId: string,
-): Promise<ActionResult<void>> {
-  const validation = await validateSession(qrToken, sessionId)
-  if (!('table' in validation)) return { success: false, error: (validation as ValidationErr).error }
-  const { table, session } = validation
-
-  const service = createServiceClient()
-
-  // Check for existing open help request (one at a time per product spec)
-  const { count } = await service
-    .from('help_requests')
-    .select('id', { count: 'exact', head: true })
-    .eq('session_id', sessionId)
-    .in('status', ['open', 'claimed'])
-
-  if ((count ?? 0) > 0) {
-    return { success: false, error: 'A help request is already active. Please wait for staff.' }
-  }
-
-  const { error } = await service
-    .from('help_requests')
-    .insert({ restaurant_id: table.restaurant_id, session_id: sessionId })
-
-  if (error) return { success: false, error: 'Failed to send help request. Please try again.' }
-
-  await service.from('notifications').insert({
-    restaurant_id: table.restaurant_id,
-    type: 'help_request',
-    session_id: sessionId,
-    table_id: table.id,
-    message: `Help requested at ${table.display_name}`,
-  })
-
-  revalidatePath(`/t/${qrToken}`)
-  return { success: true, data: undefined }
+export async function checkSessionActive(
+  sessionId: string
+): Promise<{ active: boolean }> {
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: session } = await (service as any)
+    .from("sessions")
+    .select("status")
+    .eq("id", sessionId)
+    .maybeSingle();
+  return { active: session?.status === "active" };
 }
 
-export async function submitBillRequest(
-  qrToken: string,
+export async function submitCustomerOrder(
   sessionId: string,
-): Promise<ActionResult<void>> {
-  const validation = await validateSession(qrToken, sessionId)
-  if (!('table' in validation)) return { success: false, error: (validation as ValidationErr).error }
-  const { table, session } = validation
+  restaurantId: string,
+  items: CustomerCartItem[]
+): Promise<{ error?: string }> {
+  if (!items.length) return { error: "No items in cart." };
 
-  if (session.bill_requested) {
-    return { success: false, error: 'Bill has already been requested.' }
+  const service = createServiceClient();
+
+  // Verify session is still active
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: session } = await (service as any)
+    .from("sessions")
+    .select("status, restaurant_id")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (!session || session.status !== "active") return { error: "Session is no longer active." };
+  if (session.restaurant_id !== restaurantId) return { error: "Invalid session." };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: order, error: orderErr } = await (service as any)
+    .from("session_orders")
+    .insert({ session_id: sessionId, restaurant_id: restaurantId, created_by: null })
+    .select("id")
+    .single();
+  if (orderErr) return { error: "Failed to create order." };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: itemsErr } = await (service as any)
+    .from("session_order_items")
+    .insert(
+      items.map((item) => ({
+        order_id: order.id,
+        menu_item_id: item.menu_item_id,
+        variant_id: null,
+        workstation_id: item.workstation_id,
+        item_name: item.item_name,
+        item_price: item.item_price,
+        workstation_name: item.workstation_name,
+        quantity: item.quantity,
+        notes: null,
+      }))
+    );
+  if (itemsErr) return { error: "Failed to add items." };
+
+  revalidatePath("/employee/queue");
+  revalidatePath(`/employee/session/${sessionId}`);
+  return {};
+}
+
+export type NotificationStatus = "new" | "acknowledged" | null;
+
+export type CustomerNotifState = {
+  call_waiter: NotificationStatus;
+  request_bill: NotificationStatus;
+};
+
+export async function getCustomerNotifState(
+  restaurantId: string,
+  tableId: string | null,
+  roomId?: string | null,
+  sessionId?: string | null
+): Promise<CustomerNotifState> {
+  if (!tableId && !roomId) return { call_waiter: null, request_bill: null };
+  // Without a session we have no scope to filter by — return clean state so
+  // buttons are enabled and the server-side dedup handles actual conflicts.
+  if (!sessionId) return { call_waiter: null, request_bill: null };
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("notifications")
+    .select("type, status")
+    .eq("restaurant_id", restaurantId)
+    .eq("session_id", sessionId)
+    .in("type", ["call_waiter", "request_bill"])
+    .in("status", ["new", "acknowledged"]);
+
+  const rows = (data ?? []) as { type: string; status: string }[];
+  const find = (t: string) =>
+    (rows.find((r) => r.type === t)?.status as NotificationStatus) ?? null;
+
+  return { call_waiter: find("call_waiter"), request_bill: find("request_bill") };
+}
+
+export async function sendNotification(
+  restaurantId: string,
+  tableId: string | null,
+  type: "call_waiter" | "request_bill",
+  roomId?: string | null
+): Promise<{ error?: string; alreadyPending?: boolean }> {
+  const service = createServiceClient();
+
+  const contextId = tableId ?? roomId ?? null;
+  if (!contextId) return { error: "No table or room context." };
+
+  // Resolve the active session first — dedup is scoped to the session so that
+  // stale notifications from previous dining sessions don't block new guests.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let sessionQuery = (service as any)
+    .from("sessions")
+    .select("id")
+    .eq("restaurant_id", restaurantId)
+    .eq("status", "active");
+  if (tableId) sessionQuery = sessionQuery.eq("table_id", tableId);
+  else if (roomId) sessionQuery = sessionQuery.eq("room_id", roomId);
+
+  const { data: session } = await sessionQuery.maybeSingle();
+  const sessionId: string | null = session?.id ?? null;
+
+  // Prevent duplicate active notifications within the same session.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let dupQuery = (service as any)
+    .from("notifications")
+    .select("id")
+    .eq("restaurant_id", restaurantId)
+    .eq("type", type)
+    .in("status", ["new", "acknowledged"]);
+
+  if (sessionId) {
+    dupQuery = dupQuery.eq("session_id", sessionId);
+  } else {
+    // No active session — fall back to table/room scope to prevent spam.
+    if (tableId) dupQuery = dupQuery.eq("table_id", tableId);
+    else if (roomId) dupQuery = dupQuery.eq("room_id", roomId);
   }
 
-  const service = createServiceClient()
+  const { data: existing } = await dupQuery.maybeSingle();
+  if (existing) return { alreadyPending: true };
 
-  // Create bill request (unique index will block duplicates)
-  const { error: brError } = await service
-    .from('bill_requests')
-    .insert({ restaurant_id: table.restaurant_id, session_id: sessionId })
-
-  if (brError) return { success: false, error: 'Failed to request bill. Please try again.' }
-
-  // Lock ordering + mark bill requested
-  await service
-    .from('sessions')
-    .update({ ordering_locked: true, bill_requested: true })
-    .eq('id', sessionId)
-
-  await service.from('notifications').insert({
-    restaurant_id: table.restaurant_id,
-    type: 'bill_request',
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).from("notifications").insert({
+    restaurant_id: restaurantId,
+    table_id: tableId ?? null,
+    room_id: roomId ?? null,
     session_id: sessionId,
-    table_id: table.id,
-    message: `Bill requested at ${table.display_name}`,
-  })
+    type,
+    status: "new",
+  });
 
-  revalidatePath(`/t/${qrToken}`)
-  return { success: true, data: undefined }
+  if (error) return { error: error.message };
+  revalidatePath("/employee/notifications");
+  return {};
 }
