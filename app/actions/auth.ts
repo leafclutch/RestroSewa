@@ -1,72 +1,171 @@
-'use server'
+"use server";
 
-import { redirect } from 'next/navigation'
-import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { createServiceClient } from '@/lib/supabase/service'
-import type { ActionResult } from '@/types/app'
+import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
-export async function signInEmployee(
-  employeeId: string,
-  restaurantSlug: string,
-  pin: string
-): Promise<ActionResult<void>> {
-  const service = createServiceClient()
+export type AuthResult = { error: string } | { redirectTo: string } | null;
 
-  const { data: restaurant } = await service
-    .from('restaurants')
-    .select('id, status')
-    .eq('slug', restaurantSlug.toLowerCase().trim())
-    .single()
+export async function loginWithEmail(
+  _prevState: AuthResult,
+  formData: FormData
+): Promise<AuthResult> {
+  const email = formData.get("email") as string;
+  const password = formData.get("password") as string;
 
-  if (!restaurant) {
-    return { success: false, error: 'Restaurant not found.', code: 'RESTAURANT_NOT_FOUND' }
-  }
-  if ((restaurant as { id: string; status: string }).status !== 'active') {
-    return { success: false, error: 'This restaurant is currently unavailable.', code: 'RESTAURANT_INACTIVE' }
-  }
-
-  const email = `emp-${employeeId.trim()}-${(restaurant as { id: string; status: string }).id}@restrosewa.internal`
-
-  const supabase = await createSupabaseServerClient()
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password: pin })
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
-    return { success: false, error: 'Invalid Employee ID or PIN.', code: 'INVALID_CREDENTIALS' }
+    return { error: "Invalid email or password." };
   }
 
-  // Portal separation: super admin accounts must not log in through the staff portal
-  if (data.user?.app_metadata?.role === 'super_admin') {
-    await supabase.auth.signOut()
-    return { success: false, error: 'Invalid Employee ID or PIN.', code: 'INVALID_CREDENTIALS' }
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Authentication failed." };
+
+  const service = createServiceClient();
+
+  // Reject super admins — they must use /superadmin/login
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: sa } = await (service as any)
+    .from("super_admins")
+    .select("id")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  if (sa) {
+    await supabase.auth.signOut();
+    return { error: "Super Admin accounts must use the Super Admin login page." };
   }
 
-  redirect('/operations')
+  // Check restaurant user role
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: ru } = await (service as any)
+    .from("restaurant_users")
+    .select("role")
+    .eq("auth_user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (!ru) {
+    await supabase.auth.signOut();
+    return { error: "No account found. Please contact your administrator." };
+  }
+
+  revalidatePath("/", "layout");
+  if (ru.role === "restaurant_admin") {
+    return { redirectTo: "/admin/dashboard" };
+  }
+  return { redirectTo: "/employee/dashboard" };
 }
 
-export async function signInSuperAdmin(
-  email: string,
-  password: string
-): Promise<ActionResult<void>> {
-  const supabase = await createSupabaseServerClient()
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+export async function loginWithEmailSuperAdmin(
+  _prevState: AuthResult,
+  formData: FormData
+): Promise<AuthResult> {
+  const email = formData.get("email") as string;
+  const password = formData.get("password") as string;
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
-    return { success: false, error: 'Invalid credentials.', code: 'INVALID_CREDENTIALS' }
+    return { error: "Invalid email or password." };
   }
 
-  // Portal separation: only super admin accounts may use this portal
-  if (data.user?.app_metadata?.role !== 'super_admin') {
-    await supabase.auth.signOut()
-    return { success: false, error: 'Access denied.', code: 'UNAUTHORIZED' }
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Authentication failed." };
+
+  const service = createServiceClient();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: sa } = await (service as any)
+    .from("super_admins")
+    .select("id")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  if (!sa) {
+    await supabase.auth.signOut();
+    return { error: "This login is for Super Admins only." };
   }
 
-  redirect('/super-admin')
+  revalidatePath("/", "layout");
+  return { redirectTo: "/superadmin/dashboard" };
 }
 
-export async function signOut() {
-  const supabase = await createSupabaseServerClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  const isSuperAdmin = user?.app_metadata?.role === 'super_admin'
-  await supabase.auth.signOut()
-  redirect(isSuperAdmin ? '/super-admin/login' : '/login')
+export async function loginWithPin(
+  _prevState: AuthResult,
+  formData: FormData
+): Promise<AuthResult> {
+  const restaurantUserId = formData.get("restaurant_user_id") as string;
+  const pin = formData.get("pin") as string;
+
+  if (!restaurantUserId || !/^[0-9]{4}$/.test(pin)) {
+    return { error: "PIN must be exactly 4 digits." };
+  }
+
+  const syntheticEmail = `emp-${restaurantUserId}@restrosewa.internal`;
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signInWithPassword({
+    email: syntheticEmail,
+    password: pin,
+  });
+
+  if (error) {
+    return { error: "Incorrect PIN. Please try again." };
+  }
+
+  revalidatePath("/", "layout");
+  return { redirectTo: "/employee/dashboard" };
+}
+
+export async function logout() {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+  redirect("/login");
+}
+
+export async function logoutSuperAdmin() {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+  redirect("/superadmin/login");
+}
+
+export type StaffMember = {
+  id: string;
+  display_name: string;
+  title: string;
+  role: "restaurant_admin" | "restaurant_employee";
+};
+
+export async function getRestaurantStaff(
+  slug: string
+): Promise<StaffMember[] | null> {
+  const service = createServiceClient();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: restaurant } = await (service as any)
+    .from("restaurants")
+    .select("id")
+    .eq("slug", slug)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (!restaurant) return null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: staff } = await (service as any)
+    .from("restaurant_users")
+    .select("id, display_name, title, role")
+    .eq("restaurant_id", restaurant.id)
+    .eq("is_active", true)
+    .order("display_name");
+
+  return (staff as StaffMember[]) ?? null;
 }
