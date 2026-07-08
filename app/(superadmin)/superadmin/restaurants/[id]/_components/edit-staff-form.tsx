@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { X } from "lucide-react";
 import { PermissionPicker } from "./permission-picker";
+import { PresetPicker } from "./preset-picker";
+import { matchPreset } from "@/lib/permissions";
 
 const PIN_LENGTH = 4;
 const KEYPAD = ["1","2","3","4","5","6","7","8","9","","0","⌫"] as const;
@@ -167,9 +169,11 @@ export function EditStaffForm({
               Permissions <span className="normal-case ml-1" style={{ color: "var(--color-ink-mute)" }}>({permissions.length} selected)</span>
             </p>
             <div
-              className="rounded-lg border px-4 py-3"
+              className="rounded-lg border px-4 py-3 flex flex-col gap-4"
               style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
             >
+              <PresetPicker activeKey={matchPreset(permissions)} onApply={setPermissions} />
+              <div className="border-t" style={{ borderColor: "var(--color-hairline)" }} />
               <PermissionPicker selected={permissions} onChange={setPermissions} />
             </div>
           </div>

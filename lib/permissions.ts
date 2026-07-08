@@ -122,3 +122,111 @@ export function hasPermission(
   if (user.role === "restaurant_admin") return true;
   return user.permissions.includes(permission);
 }
+
+// ─── Staff Presets ────────────────────────────────────────────────────────────
+// Job-type templates that pre-fill the permission checkboxes with a sensible
+// set for common restaurant/hotel roles. Presets are a convenience only —
+// after applying one, the admin can still tick/untick any individual
+// permission. The chosen preset is NOT stored; only the resulting permission
+// list is persisted on the staff record.
+
+export type StaffPresetDef = {
+  key: string;
+  label: string;
+  description: string;
+  permissions: Permission[];
+};
+
+const P = PERMISSIONS;
+
+export const STAFF_PRESETS: StaffPresetDef[] = [
+  {
+    key: "waiter",
+    label: "Waiter",
+    description: "Takes and serves orders. View-only on menu, tables and rooms.",
+    permissions: [
+      P.VIEW_DASHBOARD,
+      P.CREATE_ORDERS,
+      P.EDIT_ORDERS,
+      P.VIEW_MENU,
+      P.VIEW_TABLES,
+      P.VIEW_ROOMS,
+    ],
+  },
+  {
+    key: "cashier",
+    label: "Cashier",
+    description: "Handles billing and payments. Can create orders and close bills.",
+    permissions: [
+      P.VIEW_DASHBOARD,
+      P.CREATE_ORDERS,
+      P.VIEW_MENU,
+      P.VIEW_TABLES,
+      P.CLOSE_BILLS,
+      P.PROCESS_PAYMENTS,
+      P.APPLY_DISCOUNTS,
+    ],
+  },
+  {
+    key: "chef",
+    label: "Chef / Kitchen",
+    description: "Works the kitchen queue. Views the dashboard and menu.",
+    permissions: [
+      P.VIEW_DASHBOARD,
+      P.VIEW_MENU,
+    ],
+  },
+  {
+    key: "manager",
+    label: "Manager",
+    description: "Broad operational access across orders, billing, menu, tables and reports.",
+    permissions: [
+      P.VIEW_DASHBOARD,
+      P.CREATE_ORDERS,
+      P.EDIT_ORDERS,
+      P.CANCEL_ORDERS,
+      P.CLOSE_BILLS,
+      P.VIEW_MENU,
+      P.MANAGE_MENU,
+      P.VIEW_TABLES,
+      P.MANAGE_TABLES,
+      P.VIEW_ROOMS,
+      P.MANAGE_ROOMS,
+      P.PROCESS_PAYMENTS,
+      P.APPLY_DISCOUNTS,
+      P.REFUND_BILLS,
+      P.VIEW_CUSTOMERS,
+      P.MANAGE_CUSTOMERS,
+      P.VIEW_REPORTS,
+      P.VIEW_STAFF,
+      P.VIEW_SETTINGS,
+      P.MANAGE_SETTINGS,
+    ],
+  },
+  {
+    key: "host",
+    label: "Host / Guest",
+    description: "View-only access to the dashboard, tables and menu.",
+    permissions: [
+      P.VIEW_DASHBOARD,
+      P.VIEW_TABLES,
+      P.VIEW_MENU,
+    ],
+  },
+];
+
+// Returns the preset key whose permission set exactly matches the given
+// selection, or null when the selection doesn't match any preset (i.e. the
+// admin has customised it manually).
+export function matchPreset(permissions: string[]): string | null {
+  const selected = new Set(permissions);
+  for (const preset of STAFF_PRESETS) {
+    if (
+      preset.permissions.length === selected.size &&
+      preset.permissions.every((p) => selected.has(p))
+    ) {
+      return preset.key;
+    }
+  }
+  return null;
+}
