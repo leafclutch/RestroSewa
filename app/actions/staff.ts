@@ -2,7 +2,6 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { PERMISSIONS } from "@/lib/permissions";
 import type { Permission } from "@/lib/permissions";
@@ -136,17 +135,21 @@ export async function deleteStaffMember(
   staffId: string,
   authUserId: string | null,
   restaurantId: string
-) {
+): Promise<ActionResult> {
   if (authUserId) {
     const admin = createAdminClient();
-    await admin.auth.admin.deleteUser(authUserId);
+    const { error: authError } = await admin.auth.admin.deleteUser(authUserId);
+    if (authError) return { error: `Failed to delete login account: ${authError.message}` };
   }
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (service as any).from("restaurant_users").delete().eq("id", staffId);
+  const { error } = await (service as any).from("restaurant_users").delete().eq("id", staffId);
 
-  redirect(`/superadmin/restaurants/${restaurantId}`);
+  if (error) return { error: "Failed to delete staff member." };
+
+  revalidatePath(`/superadmin/restaurants/${restaurantId}`);
+  return null;
 }
 
 export async function toggleStaffStatus(
