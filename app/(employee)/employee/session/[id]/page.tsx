@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getSessionDetail, getEffectiveWaiters } from "@/app/actions/pos";
+import { getSessionDetail } from "@/app/actions/pos";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
+import { buildVisibilityFilter } from "@/lib/assignments";
 import { SessionClient } from "./_components/session-client";
 import { ChevronLeft } from "lucide-react";
 
@@ -19,24 +20,22 @@ export default async function SessionPage({
 
   if (!session) notFound();
 
+  // Table-group isolation: a staff member may only open a session whose table
+  // group (or room) they are assigned to. Admins/managers and walk-ins pass.
+  const visibility = await buildVisibilityFilter(restaurantUser.restaurant_id, restaurantUser);
+  const canView =
+    visibility.seesAll ||
+    (visibility.canSeeTable(session.table_id) && visibility.canSeeRoom(session.room_id));
+  if (!canView) notFound();
+
   const canCreateOrders = hasPermission(restaurantUser, PERMISSIONS.CREATE_ORDERS);
   const canCloseBills   = hasPermission(restaurantUser, PERMISSIONS.CLOSE_BILLS);
   const canForceClose   =
     hasPermission(restaurantUser, PERMISSIONS.CLOSE_BILLS) ||
     hasPermission(restaurantUser, PERMISSIONS.MANAGE_TABLES);
 
-  // PIN visibility: admin and MANAGE_TABLES (workstation) always see it.
-  // For assigned sessions, only the effective waiter(s) can see the PIN.
-  // Walk-in sessions have no assignment concept, so anyone can see the PIN.
-  const isAdmin = restaurantUser.role === "restaurant_admin";
-  const isWorkstation = hasPermission(restaurantUser, PERMISSIONS.MANAGE_TABLES);
-  const isWalkIn = session.type === "walk_in";
-  let canSeePIN = isAdmin || isWorkstation || isWalkIn;
-  if (!canSeePIN) {
-    const effectiveWaiters = await getEffectiveWaiters(session.table_id, session.room_id);
-    const hasAssignment = effectiveWaiters.length > 0;
-    canSeePIN = !hasAssignment || effectiveWaiters.includes(restaurantUser.id);
-  }
+  // Everyone who can view the session can also see its ordering PIN.
+  const canSeePIN = canView;
 
   const label =
     session.type === "table" && session.table_number

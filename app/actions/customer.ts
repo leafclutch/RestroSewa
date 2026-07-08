@@ -82,7 +82,7 @@ export async function submitCustomerOrder(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: session } = await (service as any)
     .from("sessions")
-    .select("status, restaurant_id")
+    .select("status, restaurant_id, table_id, room_id")
     .eq("id", sessionId)
     .maybeSingle();
   if (!session || session.status !== "active") return { error: "Session is no longer active." };
@@ -114,7 +114,21 @@ export async function submitCustomerOrder(
     );
   if (itemsErr) return { error: "Failed to add items." };
 
+  // Alert the staff assigned to this table's group via the existing notification
+  // system. Routing to the right staff happens on read (table-group visibility),
+  // so we just record the event scoped to the table/room + session.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (service as any).from("notifications").insert({
+    restaurant_id: restaurantId,
+    table_id: session.table_id ?? null,
+    room_id: session.room_id ?? null,
+    session_id: sessionId,
+    type: "new_order",
+    status: "new",
+  });
+
   revalidatePath("/employee/queue");
+  revalidatePath("/employee/notifications");
   revalidatePath(`/employee/session/${sessionId}`);
   return {};
 }

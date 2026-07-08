@@ -8,7 +8,6 @@ import {
   toggleTableStatus,
   deleteTable,
   regenerateTableQr,
-  setTableWaiters,
   setTableGroupWaiters,
 } from "@/app/actions/tables-admin";
 import type { ActionResult, GroupWithTables, TableRow } from "@/app/actions/tables-admin";
@@ -135,34 +134,20 @@ function QrModal({
 function TablePill({
   table,
   groups,
-  employees,
-  assignedUserIds,
   onQrClick,
 }: {
   table: TableRow;
   groups: GroupWithTables[];
-  employees: EmployeeOption[];
-  assignedUserIds: string[];
   onQrClick: (table: TableRow) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [assignOpen, setAssignOpen] = useState(false);
-  const [localAssigned, setLocalAssigned] = useState<string[]>(assignedUserIds);
   const [, startToggle] = useTransition();
   const [, startDelete] = useTransition();
-  const [, startAssign] = useTransition();
   const [editState, editAction, editPending] = useActionState<ActionResult, FormData>(
     updateTable,
     null
   );
   const [editSubmitted, setEditSubmitted] = useState(false);
-
-  // Sync when server-side assignment set changes (compare by content, not reference)
-  const assignedKey = [...assignedUserIds].sort().join(",");
-  useEffect(() => {
-    setLocalAssigned(assignedUserIds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assignedKey]);
 
   useEffect(() => { if (editPending) setEditSubmitted(true); }, [editPending]);
   useEffect(() => {
@@ -191,23 +176,23 @@ function TablePill({
           className="w-16 h-7 text-xs px-2"
           placeholder="No."
         />
-        {groups.length > 0 && (
-          <select
-            name="group_id"
-            defaultValue={table.group_id ?? ""}
-            className="h-7 rounded border px-1.5 text-xs"
-            style={{
-              borderColor: "var(--color-hairline-input)",
-              color: "var(--color-ink)",
-              background: "var(--color-canvas)",
-            }}
-          >
-            <option value="">No group</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>{g.name}</option>
-            ))}
-          </select>
-        )}
+        {/* Every table must belong to a group — assignment is group-based */}
+        <select
+          name="group_id"
+          defaultValue={table.group_id ?? ""}
+          required
+          className="h-7 rounded border px-1.5 text-xs"
+          style={{
+            borderColor: "var(--color-hairline-input)",
+            color: "var(--color-ink)",
+            background: "var(--color-canvas)",
+          }}
+        >
+          <option value="" disabled>Group…</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>{g.name}</option>
+          ))}
+        </select>
         <button
           type="submit"
           disabled={editPending}
@@ -250,22 +235,6 @@ function TablePill({
         <button type="button" title="Edit table" style={{ color: "var(--color-ink-mute)" }} onClick={() => setEditing(true)}>
           <Pencil size={12} />
         </button>
-        {employees.length > 0 && (
-          <button
-            type="button"
-            title={
-              localAssigned.length > 0
-                ? `${localAssigned.length} waiter(s) assigned`
-                : "Assign waiter(s)"
-            }
-            style={{
-              color: localAssigned.length > 0 ? "var(--color-primary)" : "var(--color-ink-mute)",
-            }}
-            onClick={() => setAssignOpen((o) => !o)}
-          >
-            <UserRound size={12} />
-          </button>
-        )}
         <button
           type="button"
           className="text-xs"
@@ -287,46 +256,6 @@ function TablePill({
           <Trash2 size={12} />
         </button>
       </div>
-
-      {/* Waiter assignment — multi-select pills */}
-      {assignOpen && employees.length > 0 && (
-        <div
-          className="border-t px-3 pb-2 flex flex-col gap-1"
-          style={{ borderColor: "var(--color-hairline)" }}
-        >
-          <p className="text-xs pt-1.5" style={{ color: "var(--color-ink-mute)" }}>
-            Assign waiters (tap to toggle)
-          </p>
-          <div className="flex flex-wrap gap-1">
-            {employees.map((e) => {
-              const active = localAssigned.includes(e.id);
-              return (
-                <button
-                  key={e.id}
-                  type="button"
-                  className="text-xs px-2 py-0.5 rounded-full border"
-                  style={{
-                    background: active ? "rgba(99,102,241,0.08)" : "transparent",
-                    borderColor: active ? "var(--color-primary)" : "var(--color-hairline)",
-                    color: active ? "var(--color-primary)" : "var(--color-ink-mute)",
-                  }}
-                  onClick={() =>
-                    startAssign(async () => {
-                      const next = active
-                        ? localAssigned.filter((id) => id !== e.id)
-                        : [...localAssigned, e.id];
-                      setLocalAssigned(next);
-                      await setTableWaiters(table.id, next);
-                    })
-                  }
-                >
-                  {e.display_name}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -358,11 +287,17 @@ function TableGroupWaiterBar({
     <div className="flex items-center gap-1.5 flex-wrap">
       <button
         type="button"
-        title={localAssigned.length > 0 ? `Group: ${localAssigned.length} waiter(s) assigned` : "Assign group waiter(s)"}
-        style={{ color: localAssigned.length > 0 ? "var(--color-primary)" : "var(--color-ink-mute)" }}
+        title="Assign staff to this group — they will receive this group's orders and calls"
+        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border"
+        style={{
+          color: localAssigned.length > 0 ? "var(--color-primary)" : "var(--color-ink-mute)",
+          borderColor: localAssigned.length > 0 ? "var(--color-primary)" : "var(--color-hairline)",
+          background: localAssigned.length > 0 ? "rgba(99,102,241,0.08)" : "transparent",
+        }}
         onClick={() => setOpen((o) => !o)}
       >
         <UserRound size={12} />
+        {localAssigned.length > 0 ? `${localAssigned.length} staff` : "Assign staff"}
       </button>
       {open && (
         <div className="flex flex-wrap gap-1">
@@ -411,6 +346,15 @@ function AddTableForm({
 }) {
   const [state, action, pending] = useActionState<ActionResult, FormData>(createTable, null);
 
+  // Tables must belong to a group. If none exist yet, prompt the admin to make one.
+  if (groups.length === 0) {
+    return (
+      <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+        Create a table group below before adding tables.
+      </p>
+    );
+  }
+
   return (
     <form action={action} className="flex items-end gap-2 flex-wrap">
       <input type="hidden" name="restaurant_id" value={restaurantId} />
@@ -420,24 +364,23 @@ function AddTableForm({
         </label>
         <Input name="number" placeholder="1, A1, Bar-1…" className="w-36" required />
       </div>
-      {groups.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-            Group (optional)
-          </label>
-          <select
-            name="group_id"
-            defaultValue={defaultGroupId ?? ""}
-            className="h-9 rounded-sm border px-3 text-sm"
-            style={{ borderColor: "var(--color-hairline-input)", color: "var(--color-ink)", background: "var(--color-canvas)" }}
-          >
-            <option value="">No group</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>{g.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
+      <div className="flex flex-col gap-1">
+        <label className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+          Group
+        </label>
+        <select
+          name="group_id"
+          defaultValue={defaultGroupId ?? ""}
+          required
+          className="h-9 rounded-sm border px-3 text-sm"
+          style={{ borderColor: "var(--color-hairline-input)", color: "var(--color-ink)", background: "var(--color-canvas)" }}
+        >
+          <option value="" disabled>Select group…</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>{g.name}</option>
+          ))}
+        </select>
+      </div>
       <Button type="submit" variant="primary" disabled={pending}>
         {pending ? "Adding…" : "Add table"}
       </Button>
@@ -473,7 +416,6 @@ export function TablesClient({
   restaurantId,
   restaurantSlug,
   employees,
-  assignedByTable,
   assignedByTableGroup,
 }: {
   ungrouped: TableRow[];
@@ -481,7 +423,6 @@ export function TablesClient({
   restaurantId: string;
   restaurantSlug: string;
   employees: EmployeeOption[];
-  assignedByTable: Record<string, string[]>;
   assignedByTableGroup: Record<string, string[]>;
 }) {
   const [qrTarget, setQrTarget] = useState<QrTarget>(null);
@@ -529,7 +470,7 @@ export function TablesClient({
             </div>
             <div className="flex flex-wrap gap-2 mb-3">
               {g.tables.map((t) => (
-                <TablePill key={t.id} table={t} groups={groups} employees={employees} assignedUserIds={assignedByTable[t.id] ?? []} onQrClick={handleQrClick} />
+                <TablePill key={t.id} table={t} groups={groups} onQrClick={handleQrClick} />
               ))}
               {g.tables.length === 0 && (
                 <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>No tables in this group.</p>
@@ -539,31 +480,31 @@ export function TablesClient({
           </div>
         ))}
 
-        {/* Ungrouped */}
-        {(ungrouped.length > 0 || groups.length === 0) && (
+        {/* Ungrouped — legacy tables without a group. Edit them to assign a group;
+            until then only admins/managers can see their orders. */}
+        {ungrouped.length > 0 && (
           <div>
-            {groups.length > 0 && (
-              <p
-                className="text-xs uppercase tracking-wide mb-3 font-medium"
-                style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
-              >
-                Ungrouped
-              </p>
-            )}
+            <p
+              className="text-xs uppercase tracking-wide mb-1 font-medium"
+              style={{ color: "#b45309", letterSpacing: "0.06em" }}
+            >
+              Ungrouped — needs a group
+            </p>
+            <p className="text-xs mb-3" style={{ color: "var(--color-ink-mute)" }}>
+              These tables aren&apos;t in a group, so staff can&apos;t receive their orders. Edit each to assign a group.
+            </p>
             <div className="flex flex-wrap gap-2 mb-3">
               {ungrouped.map((t) => (
-                <TablePill key={t.id} table={t} groups={groups} employees={employees} assignedUserIds={assignedByTable[t.id] ?? []} onQrClick={handleQrClick} />
+                <TablePill key={t.id} table={t} groups={groups} onQrClick={handleQrClick} />
               ))}
-              {ungrouped.length === 0 && groups.length === 0 && (
-                <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
-                  No tables yet.
-                </p>
-              )}
             </div>
-            {groups.length === 0 && (
-              <AddTableForm restaurantId={restaurantId} groups={groups} />
-            )}
           </div>
+        )}
+
+        {groups.length === 0 && ungrouped.length === 0 && (
+          <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
+            No tables yet. Create a table group first, then add tables to it.
+          </p>
         )}
 
         {/* Add table to ungrouped (when groups exist) */}

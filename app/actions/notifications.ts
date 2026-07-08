@@ -2,10 +2,14 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
+import { buildVisibilityFilter } from "@/lib/assignments";
+import type { StaffViewer } from "@/lib/assignments";
+
+export type NotificationType = "call_waiter" | "request_bill" | "new_order";
 
 export type NotificationRow = {
   id: string;
-  type: "call_waiter" | "request_bill";
+  type: NotificationType;
   status: string;
   table_id: string | null;
   table_number: string | null;
@@ -16,8 +20,12 @@ export type NotificationRow = {
   acknowledged_at: string | null;
 };
 
+// Viewer context used to route table/room notifications by table group.
+export type NotificationViewer = StaffViewer;
+
 export async function getActiveNotifications(
-  restaurantId: string
+  restaurantId: string,
+  viewer: NotificationViewer
 ): Promise<NotificationRow[]> {
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -29,8 +37,16 @@ export async function getActiveNotifications(
     .order("created_at", { ascending: false });
 
   if (!data) return [];
+
+  const visibility = await buildVisibilityFilter(restaurantId, viewer);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (data as any[]).map((n) => ({
+  const rows = (data as any[]).filter(
+    (n) =>
+      visibility.seesAll ||
+      (visibility.canSeeTable(n.table_id) && visibility.canSeeRoom(n.room_id))
+  );
+
+  return rows.map((n) => ({
     id: n.id,
     type: n.type,
     status: n.status ?? "new",
@@ -44,15 +60,35 @@ export async function getActiveNotifications(
   }));
 }
 
-export async function getNotificationCount(restaurantId: string): Promise<number> {
+export async function getNotificationCount(
+  restaurantId: string,
+  viewer: NotificationViewer
+): Promise<number> {
   const service = createServiceClient();
+
+  const visibility = await buildVisibilityFilter(restaurantId, viewer);
+  if (visibility.seesAll) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { count } = await (service as any)
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("restaurant_id", restaurantId)
+      .eq("status", "new");
+    return count ?? 0;
+  }
+
+  // Non-managers: only count notifications routed to their table groups.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { count } = await (service as any)
+  const { data } = await (service as any)
     .from("notifications")
-    .select("id", { count: "exact", head: true })
+    .select("table_id, room_id")
     .eq("restaurant_id", restaurantId)
     .eq("status", "new");
-  return count ?? 0;
+
+  const rows = (data ?? []) as { table_id: string | null; room_id: string | null }[];
+  return rows.filter(
+    (n) => visibility.canSeeTable(n.table_id) && visibility.canSeeRoom(n.room_id)
+  ).length;
 }
 
 export async function acknowledgeNotification(id: string): Promise<void> {

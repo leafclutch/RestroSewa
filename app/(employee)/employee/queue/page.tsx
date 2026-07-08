@@ -91,7 +91,7 @@ function QueueCard({ item }: { item: QueueItem }) {
 
 export default async function OrdersPage() {
   const { restaurantUser } = await requireRestaurantStaff();
-  const items = await getMyOrders(restaurantUser.id, restaurantUser.restaurant_id);
+  const items = await getMyOrders(restaurantUser);
 
   const pending = items.filter((i) => i.item_status === "pending");
   const ready = items.filter((i) => i.item_status === "ready");

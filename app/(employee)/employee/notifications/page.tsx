@@ -5,11 +5,12 @@ import {
   completeNotification,
 } from "@/app/actions/notifications";
 import type { NotificationRow } from "@/app/actions/notifications";
-import { Bell, UtensilsCrossed, Check, CheckCheck } from "lucide-react";
+import { Bell, UtensilsCrossed, Check, CheckCheck, ClipboardList } from "lucide-react";
 
 const TYPE_CONFIG = {
   call_waiter:  { label: "Call Waiter",   Icon: Bell,            color: "#6366f1" },
   request_bill: { label: "Request Bill",  Icon: UtensilsCrossed, color: "#f97316" },
+  new_order:    { label: "New Order",     Icon: ClipboardList,   color: "#1a7a4a" },
 } as const;
 
 function timeSince(iso: string) {
@@ -102,7 +103,7 @@ function NotifCard({ n }: { n: NotificationRow }) {
 
 export default async function NotificationsPage() {
   const { restaurantUser } = await requireRestaurantStaff();
-  const notifications = await getActiveNotifications(restaurantUser.restaurant_id);
+  const notifications = await getActiveNotifications(restaurantUser.restaurant_id, restaurantUser);
 
   const newNotifs = notifications.filter((n) => n.status === "new");
   const ackNotifs = notifications.filter((n) => n.status === "acknowledged");

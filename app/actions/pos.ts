@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
+import { buildVisibilityFilter } from "@/lib/assignments";
+import type { StaffViewer } from "@/lib/assignments";
 
 export type ActionResult = { error: string } | null;
 
@@ -115,6 +117,12 @@ export async function openTableSession(tableId: string) {
   const ru = await getRestaurantUser();
   const service = createServiceClient();
 
+  // Table-group isolation: staff may only open tables in their assigned groups.
+  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  if (!visibility.seesAll && !visibility.canSeeTable(tableId)) {
+    redirect("/employee/dashboard");
+  }
+
   // Check for existing active session on this table
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: existing } = await (service as any)
@@ -150,6 +158,12 @@ export async function openTableSession(tableId: string) {
 export async function openRoomSession(roomId: string) {
   const ru = await getRestaurantUser();
   const service = createServiceClient();
+
+  // Isolation: staff may only open rooms in their assigned room types/rooms.
+  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  if (!visibility.seesAll && !visibility.canSeeRoom(roomId)) {
+    redirect("/employee/dashboard");
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: existing } = await (service as any)
@@ -500,72 +514,6 @@ export async function forceCloseSession(sessionId: string): Promise<ActionResult
   redirect("/employee/dashboard");
 }
 
-// ─── Effective Waiter Resolution ─────────────────────────────────────────────
-// Individual assignment overrides group/type. Returns [] if no restriction (anyone can see PIN).
-
-export async function getEffectiveWaiters(
-  tableId: string | null,
-  roomId: string | null
-): Promise<string[]> {
-  const service = createServiceClient();
-
-  if (tableId) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: individual } = await (service as any)
-      .from("restaurant_user_tables")
-      .select("restaurant_user_id")
-      .eq("restaurant_table_id", tableId);
-    if ((individual as { restaurant_user_id: string }[] | null)?.length) {
-      return (individual as { restaurant_user_id: string }[]).map((r) => r.restaurant_user_id);
-    }
-    // Fall back to group assignment
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: tbl } = await (service as any)
-      .from("restaurant_tables")
-      .select("group_id")
-      .eq("id", tableId)
-      .maybeSingle();
-    if (tbl?.group_id) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: grp } = await (service as any)
-        .from("restaurant_user_table_groups")
-        .select("restaurant_user_id")
-        .eq("table_group_id", tbl.group_id);
-      return ((grp as { restaurant_user_id: string }[] | null) ?? []).map((r) => r.restaurant_user_id);
-    }
-    return [];
-  }
-
-  if (roomId) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: individual } = await (service as any)
-      .from("restaurant_user_rooms")
-      .select("restaurant_user_id")
-      .eq("room_id", roomId);
-    if ((individual as { restaurant_user_id: string }[] | null)?.length) {
-      return (individual as { restaurant_user_id: string }[]).map((r) => r.restaurant_user_id);
-    }
-    // Fall back to room type assignment
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: rm } = await (service as any)
-      .from("rooms")
-      .select("room_type_id")
-      .eq("id", roomId)
-      .maybeSingle();
-    if (rm?.room_type_id) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: ta } = await (service as any)
-        .from("restaurant_user_room_types")
-        .select("restaurant_user_id")
-        .eq("room_type_id", rm.room_type_id);
-      return ((ta as { restaurant_user_id: string }[] | null) ?? []).map((r) => r.restaurant_user_id);
-    }
-    return [];
-  }
-
-  return [];
-}
-
 // ─── Workstation Queue ────────────────────────────────────────────────────────
 
 export async function getWorkstationQueue(
@@ -624,41 +572,28 @@ export async function getWorkstationQueue(
     });
 }
 
-// ─── My Orders (filtered by assigned workstations) ────────────────────────────
+// ─── My Orders (filtered by assigned table groups) ────────────────────────────
+// A staff member sees the pending/ready items only for tables in the table
+// groups they are assigned to. Admins and table managers see everything.
+// Walk-in (table-less) sessions have no group boundary and stay visible to all.
 
-export async function getMyOrders(
-  restaurantUserId: string,
-  restaurantId: string
-): Promise<QueueItem[]> {
+export async function getMyOrders(viewer: StaffViewer & { restaurant_id: string }): Promise<QueueItem[]> {
+  const restaurantId = viewer.restaurant_id;
   const service = createServiceClient();
 
-  // Find which workstations this employee is assigned to
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: assignments } = await (service as any)
-    .from("restaurant_user_workstations")
-    .select("workstation_id")
-    .eq("restaurant_user_id", restaurantUserId);
-
-  const assignedIds: string[] = (assignments ?? []).map(
-    (a: { workstation_id: string }) => a.workstation_id
-  );
+  const visibility = await buildVisibilityFilter(restaurantId, viewer);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let query = (service as any)
+  const { data: items } = await (service as any)
     .from("session_order_items")
-    .select("id, item_name, item_price, workstation_name, quantity, item_status, notes, created_at, order_id, workstation_id")
+    .select("id, item_name, item_price, workstation_name, quantity, item_status, notes, created_at, order_id")
     .eq("restaurant_id", restaurantId)
     .in("item_status", ["pending", "ready"])
     .order("created_at");
 
-  if (assignedIds.length > 0) {
-    query = query.in("workstation_id", assignedIds);
-  }
-
-  const { data: items } = await query;
   if (!items?.length) return [];
 
-  const orderIds = [...new Set((items as (OrderItemRow & { workstation_id: string })[]).map((i) => i.order_id))];
+  const orderIds = [...new Set((items as OrderItemRow[]).map((i) => i.order_id))];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: orders } = await (service as any)
     .from("session_orders")
@@ -680,7 +615,14 @@ export async function getMyOrders(
   return (items as OrderItemRow[])
     .filter((item) => {
       const sid = orderMap.get(item.order_id);
-      return sid && sessionMap.has(sid);
+      if (!sid || !sessionMap.has(sid)) return false;
+      if (visibility.seesAll) return true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const session = sessionMap.get(sid) as any;
+      return (
+        visibility.canSeeTable(session?.table_id ?? null) &&
+        visibility.canSeeRoom(session?.room_id ?? null)
+      );
     })
     .map((item) => {
       const sid = orderMap.get(item.order_id)!;

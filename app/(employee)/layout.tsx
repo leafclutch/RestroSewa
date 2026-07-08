@@ -15,7 +15,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
     .eq("id", restaurantUser.restaurant_id)
     .single();
 
-  const notificationCount = await getNotificationCount(restaurantUser.restaurant_id);
+  const notificationCount = await getNotificationCount(restaurantUser.restaurant_id, restaurantUser);
   const canManageMenu =
     restaurantUser.role === "restaurant_admin" ||
     hasPermission(restaurantUser, PERMISSIONS.MANAGE_MENU);

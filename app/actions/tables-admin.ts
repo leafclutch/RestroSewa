@@ -86,8 +86,20 @@ export async function createTable(
   const groupId = (formData.get("group_id") as string) || null;
 
   if (!number) return { error: "Table number/name is required." };
+  // Every table must belong to a table group — staff assignment is group-based.
+  if (!groupId) return { error: "Select a table group. Create one first if none exist." };
 
   const service = createServiceClient();
+
+  // Confirm the group belongs to this restaurant
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: group } = await (service as any)
+    .from("table_groups")
+    .select("id")
+    .eq("id", groupId)
+    .eq("restaurant_id", restaurantId)
+    .maybeSingle();
+  if (!group) return { error: "Invalid table group." };
 
   // Enforce max_tables resource limit
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -133,6 +145,8 @@ export async function updateTable(
   const groupId = (formData.get("group_id") as string) || null;
 
   if (!number) return { error: "Table number/name is required." };
+  // Every table must belong to a table group — staff assignment is group-based.
+  if (!groupId) return { error: "Select a table group." };
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -143,6 +157,16 @@ export async function updateTable(
     .maybeSingle();
   if (!existing || existing.restaurant_id !== ru.restaurant_id)
     return { error: "Permission denied." };
+
+  // Confirm the group belongs to this restaurant
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: group } = await (service as any)
+    .from("table_groups")
+    .select("id")
+    .eq("id", groupId)
+    .eq("restaurant_id", ru.restaurant_id)
+    .maybeSingle();
+  if (!group) return { error: "Invalid table group." };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any)
@@ -202,42 +226,6 @@ export async function regenerateTableQr(tableId: string): Promise<ActionResult> 
     .update({ qr_token: crypto.randomUUID() })
     .eq("id", tableId);
   if (error) return { error: error.message };
-  revalidatePath("/admin/tables");
-  return null;
-}
-
-export async function setTableWaiters(
-  tableId: string,
-  userIds: string[]
-): Promise<ActionResult> {
-  const ru = await getRestaurantUser();
-  if (!hasPermission(ru, PERMISSIONS.MANAGE_TABLES)) return { error: "Permission denied." };
-
-  const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: existing } = await (service as any)
-    .from("restaurant_tables")
-    .select("restaurant_id")
-    .eq("id", tableId)
-    .maybeSingle();
-  if (!existing || existing.restaurant_id !== ru.restaurant_id)
-    return { error: "Permission denied." };
-
-  // Replace all assignments: delete then insert
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (service as any)
-    .from("restaurant_user_tables")
-    .delete()
-    .eq("restaurant_table_id", tableId);
-
-  if (userIds.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (service as any)
-      .from("restaurant_user_tables")
-      .insert(userIds.map((uid) => ({ restaurant_user_id: uid, restaurant_table_id: tableId })));
-    if (error) return { error: "Failed to save assignments." };
-  }
-
   revalidatePath("/admin/tables");
   return null;
 }
