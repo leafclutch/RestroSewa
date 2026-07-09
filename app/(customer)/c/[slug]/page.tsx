@@ -3,12 +3,14 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getMenuCategories, getMenuItemsByCategory } from "@/app/actions/menu";
 import type { MenuItemRow } from "@/app/actions/menu";
 import { getCustomerNotifState } from "@/app/actions/customer";
-import type { CustomerNotifState } from "@/app/actions/customer";
 import { CustomerMenu } from "./_components/customer-menu";
 
-function isItemAvailableNow(item: MenuItemRow): boolean {
-  if (item.availability_status !== "available") return false;
+// Whether an item belongs on the menu *right now*. This intentionally keeps
+// `out_of_stock` items (they render as disabled "Sold out" cards) and only hides
+// deleted, admin-hidden, or out-of-schedule items.
+function isItemOnMenuNow(item: MenuItemRow): boolean {
   if (item.is_deleted) return false;
+  if (item.availability_status === "hidden") return false;
 
   const now = new Date();
   const dayOfWeek = now.getDay();
@@ -125,7 +127,7 @@ export default async function CustomerMenuPage({
   const itemsByCategory = await Promise.all(
     activeCategories.map((c) => getMenuItemsByCategory(restaurant.id, c.id))
   );
-  const allItems: MenuItemRow[] = itemsByCategory.flat().filter(isItemAvailableNow);
+  const allItems: MenuItemRow[] = itemsByCategory.flat().filter(isItemOnMenuNow);
   const categoriesWithItems = activeCategories.filter((c) =>
     allItems.some((i) => i.category_id === c.id)
   );
