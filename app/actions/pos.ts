@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { hasPermission, PERMISSIONS, NAV_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignments";
-import { emitNewOrderNotification, emitOrderReadyNotification } from "@/lib/notify";
+import { emitOrderReadyNotification } from "@/lib/notify";
 
 export type ActionResult = { error: string } | null;
 
@@ -276,17 +276,9 @@ export async function approveTableActivation(notificationId: string): Promise<Ac
       .eq("restaurant_id", ru.restaurant_id);
   }
 
-  // Now the table is active — send the held order to the kitchen/workstations
-  // through the normal new-order path.
-  if (notif.session_id && notif.order_id) {
-    await emitNewOrderNotification(service, {
-      restaurantId: ru.restaurant_id,
-      sessionId: notif.session_id,
-      orderId: notif.order_id,
-      tableId: notif.table_id ?? null,
-      roomId: notif.room_id ?? null,
-    });
-  }
+  // The table is now active, so the held order surfaces in the Orders queue for
+  // the kitchen/workstations. No `new_order` notification is created — the queue
+  // is the dedicated place for orders.
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (service as any)
@@ -461,24 +453,10 @@ export async function submitOrder(
 
   if (itemsErr) return { error: "Failed to add items." };
 
-  // Alert the kitchen/bar/bakery (and non-workstation staff) that an order was
-  // placed. Routing to the right workstation happens on read.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: sess } = await (service as any)
-    .from("sessions")
-    .select("table_id, room_id")
-    .eq("id", sessionId)
-    .maybeSingle();
-  await emitNewOrderNotification(service, {
-    restaurantId: ru.restaurant_id,
-    sessionId,
-    orderId: order.id,
-    tableId: sess?.table_id ?? null,
-    roomId: sess?.room_id ?? null,
-  });
-
+  // The order shows up in the Orders queue (driven by order rows) — no
+  // `new_order` notification is created, keeping the Notifications panel for
+  // actionable events only.
   revalidatePath("/employee/queue");
-  revalidatePath("/employee/notifications");
   redirect(`/employee/session/${sessionId}`);
 }
 

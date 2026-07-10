@@ -2,7 +2,7 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
-import { emitNewOrderNotification, emitTableActivationRequest } from "@/lib/notify";
+import { emitTableActivationRequest } from "@/lib/notify";
 
 export type CustomerOrderItem = {
   id: string;
@@ -236,13 +236,7 @@ export async function requestTableActivation(
   if (open && open.status === "active") {
     const orderId = await insertSessionOrder(service, open.id, restaurantId, items);
     if (!orderId) return { status: "error", sessionId: open.id, error: "Failed to create order." };
-    await emitNewOrderNotification(service, {
-      restaurantId,
-      sessionId: open.id,
-      orderId,
-      tableId: tableId ?? null,
-      roomId: roomId ?? null,
-    });
+    // The order shows up in the Orders queue directly — no notification row.
     revalidatePath("/employee/queue");
     return { status: "approved", sessionId: open.id };
   }
@@ -399,18 +393,10 @@ export async function submitCustomerOrder(
   const orderId = await insertSessionOrder(service, sessionId, restaurantId, items);
   if (!orderId) return { error: "Failed to create order." };
 
-  // Alert staff via the existing notification system. Routing (table-group +
-  // workstation) happens on read, so we just record the event with its order_id.
-  await emitNewOrderNotification(service, {
-    restaurantId,
-    sessionId,
-    orderId,
-    tableId: session.table_id ?? null,
-    roomId: session.room_id ?? null,
-  });
-
+  // The order appears in the staff Orders queue directly (driven by order rows) —
+  // we deliberately do NOT create a notification row for it, so the Notifications
+  // panel stays reserved for actionable events.
   revalidatePath("/employee/queue");
-  revalidatePath("/employee/notifications");
   revalidatePath(`/employee/session/${sessionId}`);
   return {};
 }

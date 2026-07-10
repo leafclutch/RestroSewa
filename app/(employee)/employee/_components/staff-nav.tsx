@@ -1,37 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { logout } from "@/app/actions/auth";
 import { getMyNotifications } from "@/app/actions/notifications";
 import type { NotificationRow } from "@/app/actions/notifications";
 import {
-  Banknote,
   Bell,
-  BookOpen,
-  ClipboardList,
   DoorOpen,
-  LayoutGrid,
-  ListOrdered,
   LogOut,
   UtensilsCrossed,
   X,
 } from "lucide-react";
-import type { StaffNavKey } from "@/lib/permissions";
-
-const ICONS: Record<StaffNavKey, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
-  tables: LayoutGrid,
-  orders: ListOrdered,
-  menu: BookOpen,
-  sales: Banknote,
-  notifications: Bell,
-};
-
-type NavItem = { key: StaffNavKey; label: string; href: string; exact: boolean };
 
 const ALERT_CONFIG = {
-  new_order: { label: "New order", Icon: ClipboardList, color: "#1a7a4a", href: "/employee/queue" },
   call_waiter: { label: "Waiter call", Icon: Bell, color: "#6366f1", href: "/employee/notifications" },
   request_bill: { label: "Bill requested", Icon: UtensilsCrossed, color: "#f97316", href: "/employee/notifications" },
   table_activation_request: { label: "Table activation request", Icon: DoorOpen, color: "#0891b2", href: "/employee/notifications" },
@@ -49,34 +32,27 @@ function alertText(n: NotificationRow): { label: string; color: string; href: st
   return { label: cfg.label + where, color: cfg.color, href: cfg.href, Icon: cfg.Icon };
 }
 
+// Minimal top bar: brand + the two things that must always be one tap away —
+// Notifications (with a live unread badge) and Logout. Every other section now
+// lives on the scrollable dashboard, gated by the same permissions. This still
+// polls notifications so the badge stays live and new alerts toast.
 export function StaffNav({
   restaurantName,
   displayName,
   notificationCount = 0,
-  orderCount = 0,
-  navItems,
 }: {
   restaurantName: string;
   displayName: string;
   notificationCount?: number;
-  orderCount?: number;
-  navItems: NavItem[];
 }) {
-  const pathname = usePathname();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  // Two independent unread counts, both from the same poll: service calls
-  // (waiter/bill) drive the Notifications badge, new orders drive the Orders badge.
-  const [serviceCount, setServiceCount] = useState(notificationCount);
-  const [orderBadge, setOrderBadge] = useState(orderCount);
+  // Service calls (waiter/bill/activation) + new orders drive the badge.
+  const [alertCount, setAlertCount] = useState(notificationCount);
   const [toasts, setToasts] = useState<{ id: string; label: string; color: string; href: string; Icon: React.ComponentType<{ size?: number }> }[]>([]);
   // Track which notification ids we've already seen so we only alert on new ones.
   const seenIds = useRef<Set<string> | null>(null);
-
-  // While viewing the queue, the staff member is actively seeing new orders, so
-  // the Orders badge reads 0 (the server marks them seen on the queue page).
-  const onOrdersPage = pathname.startsWith("/employee/queue");
 
   const dismiss = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -91,8 +67,7 @@ export function StaffNav({
         if (!active) return;
 
         const newRows = items.filter((n) => n.status === "new");
-        setServiceCount(newRows.filter((n) => n.type !== "new_order").length);
-        setOrderBadge(newRows.filter((n) => n.type === "new_order").length);
+        setAlertCount(newRows.length);
 
         if (seenIds.current === null) {
           // First poll: seed the baseline without alerting for pre-existing items.
@@ -104,7 +79,7 @@ export function StaffNav({
               ...fresh.map((n) => ({ id: n.id, ...alertText(n) })),
               ...prev,
             ].slice(0, 4));
-            // Refresh the current page so a new order shows up in the queue, etc.
+            // Refresh so embedded sections (orders, tables) reflect the change.
             router.refresh();
           }
           seenIds.current = new Set(newRows.map((n) => n.id));
@@ -137,62 +112,34 @@ export function StaffNav({
     <>
       <header
         className="flex items-center gap-2 px-3 sm:px-5 py-3 border-b"
-        style={{
-          background: "var(--color-brand-dark)",
-          borderColor: "rgba(255,255,255,0.08)",
-        }}
+        style={{ background: "var(--color-brand-dark)", borderColor: "rgba(255,255,255,0.08)" }}
       >
-        {/* Brand / user info */}
-        <div className="flex-1 min-w-0">
-          <span
-            className="text-sm font-medium truncate block"
-            style={{ color: "#fff", letterSpacing: "-0.2px" }}
-          >
+        {/* Brand / user info — tapping the name returns to the dashboard. */}
+        <Link href="/employee/dashboard" className="flex-1 min-w-0">
+          <span className="text-sm font-medium truncate block" style={{ color: "#fff", letterSpacing: "-0.2px" }}>
             <span className="hidden sm:inline">{restaurantName}</span>
-            <span className="sm:hidden" style={{ color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>
-              {displayName}
-            </span>
+            <span className="sm:hidden" style={{ color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>{displayName}</span>
           </span>
-          <span className="text-xs hidden sm:block" style={{ color: "rgba(255,255,255,0.4)" }}>
-            {displayName}
-          </span>
-        </div>
+          <span className="text-xs hidden sm:block" style={{ color: "rgba(255,255,255,0.4)" }}>{displayName}</span>
+        </Link>
 
-        {/* Nav */}
-        <nav className="flex items-center gap-0.5">
-          {navItems.map(({ key, label, href, exact }) => {
-            const Icon = ICONS[key];
-            const active = exact ? pathname === href : pathname.startsWith(href);
-            const badge =
-              key === "notifications"
-                ? serviceCount
-                : key === "orders"
-                ? (onOrdersPage ? 0 : orderBadge)
-                : 0;
-            return (
-              <Link
-                key={href}
-                href={href}
-                className="relative flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-sm transition-colors"
-                style={{
-                  color: active ? "#fff" : "rgba(255,255,255,0.5)",
-                  background: active ? "rgba(255,255,255,0.1)" : "transparent",
-                }}
-              >
-                <Icon size={15} strokeWidth={1.5} />
-                <span className="hidden xs:inline sm:inline">{label}</span>
-                {badge > 0 && (
-                  <span
-                    className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-medium flex items-center justify-center"
-                    style={{ background: "#ef4444", color: "#fff" }}
-                  >
-                    {badge > 9 ? "9+" : badge}
-                  </span>
-                )}
-              </Link>
-            );
-          })}
-        </nav>
+        {/* Notifications */}
+        <Link
+          href="/employee/notifications"
+          className="relative flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-sm transition-colors"
+          style={{ color: "rgba(255,255,255,0.85)", background: "rgba(255,255,255,0.08)" }}
+        >
+          <Bell size={15} strokeWidth={1.5} />
+          <span className="hidden xs:inline sm:inline">Notifications</span>
+          {alertCount > 0 && (
+            <span
+              className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-medium flex items-center justify-center"
+              style={{ background: "#ef4444", color: "#fff" }}
+            >
+              {alertCount > 9 ? "9+" : alertCount}
+            </span>
+          )}
+        </Link>
 
         {/* Logout */}
         <button
@@ -214,35 +161,18 @@ export function StaffNav({
             <button
               key={t.id}
               type="button"
-              onClick={() => {
-                dismiss(t.id);
-                router.push(t.href);
-              }}
+              onClick={() => { dismiss(t.id); router.push(t.href); }}
               className="flex items-center gap-3 px-4 py-3 rounded-xl border text-left shadow-lg"
-              style={{
-                background: "var(--color-canvas)",
-                borderColor: t.color + "55",
-                boxShadow: "0 8px 24px rgba(13,37,61,0.12)",
-              }}
+              style={{ background: "var(--color-canvas)", borderColor: t.color + "55", boxShadow: "0 8px 24px rgba(13,37,61,0.12)" }}
             >
-              <span
-                className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                style={{ background: t.color + "18", color: t.color }}
-              >
+              <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: t.color + "18", color: t.color }}>
                 <t.Icon size={16} />
               </span>
               <span className="flex-1 min-w-0">
-                <span className="block text-sm font-medium" style={{ color: "var(--color-ink)" }}>
-                  {t.label}
-                </span>
-                <span className="block text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                  Tap to open
-                </span>
+                <span className="block text-sm font-medium" style={{ color: "var(--color-ink)" }}>{t.label}</span>
+                <span className="block text-xs" style={{ color: "var(--color-ink-mute)" }}>Tap to open</span>
               </span>
-              <span
-                onClick={(e) => { e.stopPropagation(); dismiss(t.id); }}
-                style={{ color: "var(--color-ink-mute)" }}
-              >
+              <span onClick={(e) => { e.stopPropagation(); dismiss(t.id); }} style={{ color: "var(--color-ink-mute)" }}>
                 <X size={14} />
               </span>
             </button>

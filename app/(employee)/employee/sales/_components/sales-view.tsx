@@ -146,7 +146,7 @@ function TxnCard({ txn }: { txn: SalesTxn }) {
   );
 }
 
-export function SalesView({ initial }: { initial: SalesReport }) {
+export function SalesView({ initial, embedded = false }: { initial: SalesReport; embedded?: boolean }) {
   const [report, setReport] = useState<SalesReport>(initial);
   const [period, setPeriod] = useState<SalesPeriod>(initial.period);
   const [customFrom, setCustomFrom] = useState<string>(initial.from ?? "");
@@ -221,12 +221,14 @@ export function SalesView({ initial }: { initial: SalesReport }) {
   ].filter((b) => b.value > 0);
 
   return (
-    <div className="p-4 sm:p-5 max-w-2xl mx-auto">
+    <div className={embedded ? "" : "p-4 sm:p-5 max-w-2xl mx-auto"}>
       <div className="flex items-center justify-between gap-3 mb-1">
         <div className="flex items-baseline gap-3">
-          <h1 className="text-xl" style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}>
-            Sales
-          </h1>
+          {!embedded && (
+            <h1 className="text-xl" style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}>
+              Sales
+            </h1>
+          )}
           {loading && <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Updating…</span>}
         </div>
         <button
@@ -247,8 +249,13 @@ export function SalesView({ initial }: { initial: SalesReport }) {
           : `${report.orderCount} bill${report.orderCount !== 1 ? "s" : ""}`}
       </p>
 
-      {/* Period cards double as the filter — click one to scope everything below. */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
+      {/* Period cards double as the filter — click one to scope everything below.
+          Auto-fit so they reflow to the available width instead of cramming into
+          a fixed 5 columns. */}
+      <div
+        className="grid gap-3 mb-3"
+        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}
+      >
         {PERIOD_CARDS.map((c) => (
           <StatTile
             key={c.key}
@@ -304,7 +311,10 @@ export function SalesView({ initial }: { initial: SalesReport }) {
       </div>
 
       {/* Period stats */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div
+        className="grid gap-3 mb-6"
+        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}
+      >
         <StatTile label={`Sales · ${PERIOD_LABEL[report.period]}`} value={money(report.periodTotal)} />
         <StatTile label="Number of Orders" value={String(report.orderCount)} />
         <StatTile label="Avg. Order Value" value={money(report.avgOrderValue)} />

@@ -6,12 +6,11 @@ import {
 } from "@/app/actions/notifications";
 import { approveTableActivation, rejectTableActivation } from "@/app/actions/pos";
 import type { NotificationRow } from "@/app/actions/notifications";
-import { Bell, UtensilsCrossed, Check, CheckCheck, ClipboardList, DoorOpen, X } from "lucide-react";
+import { Bell, UtensilsCrossed, Check, CheckCheck, DoorOpen, X } from "lucide-react";
 
 const TYPE_CONFIG = {
   call_waiter:  { label: "Call Waiter",   Icon: Bell,            color: "#6366f1" },
   request_bill: { label: "Request Bill",  Icon: UtensilsCrossed, color: "#f97316" },
-  new_order:    { label: "New Order",     Icon: ClipboardList,   color: "#1a7a4a" },
   table_activation_request: { label: "Table Activation Request", Icon: DoorOpen, color: "#0891b2" },
 } as const;
 
