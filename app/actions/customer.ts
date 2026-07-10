@@ -2,7 +2,7 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
-import { emitNewOrderNotification } from "@/lib/notify";
+import { emitNewOrderNotification, emitTableActivationRequest } from "@/lib/notify";
 
 export type CustomerOrderItem = {
   id: string;
@@ -144,6 +144,226 @@ export async function ensureCustomerSession(
   return { sessionId: created.id as string };
 }
 
+// Inserts an order + its items against a session. Returns the new order id, or
+// null on failure. Shared by the direct (submitCustomerOrder) and the
+// activation-request (requestTableActivation) paths.
+async function insertSessionOrder(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  service: any,
+  sessionId: string,
+  restaurantId: string,
+  items: CustomerCartItem[]
+): Promise<string | null> {
+  const { data: order, error: orderErr } = await service
+    .from("session_orders")
+    .insert({ session_id: sessionId, restaurant_id: restaurantId, created_by: null })
+    .select("id")
+    .single();
+  if (orderErr || !order) return null;
+
+  const { error: itemsErr } = await service.from("session_order_items").insert(
+    items.map((item) => ({
+      order_id: order.id,
+      menu_item_id: item.menu_item_id,
+      variant_id: null,
+      workstation_id: item.workstation_id,
+      item_name: item.item_name,
+      item_price: item.item_price,
+      workstation_name: item.workstation_name,
+      quantity: item.quantity,
+      notes: null,
+    }))
+  );
+  if (itemsErr) return null;
+  return order.id as string;
+}
+
+export type ActivationStatus = "none" | "pending" | "approved" | "rejected";
+
+export type ActivationRequestResult = {
+  status: "pending" | "approved" | "error";
+  sessionId: string | null;
+  error?: string;
+};
+
+// No-PIN ordering: the customer's order does NOT activate the table. Instead we
+// open a `pending_activation` session (invisible to the kitchen queue + table
+// overview), persist the order against it, and raise a `table_activation_request`
+// for front-of-house staff to Accept/Reject. Once a staff member approves (the
+// session becomes active) subsequent orders go straight through the normal path
+// — so this only gates the FIRST order until the table is closed.
+export async function requestTableActivation(
+  restaurantId: string,
+  tableId: string | null,
+  roomId: string | null,
+  items: CustomerCartItem[]
+): Promise<ActivationRequestResult> {
+  if (!items.length) return { status: "error", sessionId: null, error: "No items in cart." };
+
+  const service = createServiceClient();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: restaurant } = await (service as any)
+    .from("restaurants")
+    .select("qr_mode, customer_ordering_enabled, is_active")
+    .eq("id", restaurantId)
+    .maybeSingle();
+
+  if (
+    !restaurant ||
+    restaurant.is_active === false ||
+    restaurant.customer_ordering_enabled === false ||
+    restaurant.qr_mode !== "ordering_no_pin"
+  ) {
+    return { status: "error", sessionId: null, error: "Ordering is not available." };
+  }
+  if (!tableId && !roomId) return { status: "error", sessionId: null, error: "No table or room context." };
+
+  // Any already-open session for this table/room — active (approved) or still
+  // awaiting activation.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let openQ = (service as any)
+    .from("sessions")
+    .select("id, status")
+    .eq("restaurant_id", restaurantId)
+    .in("status", ["active", "pending_activation"]);
+  if (tableId) openQ = openQ.eq("table_id", tableId);
+  else openQ = openQ.eq("room_id", roomId);
+  const { data: open } = await openQ.order("opened_at", { ascending: false }).limit(1).maybeSingle();
+
+  // Table already activated by staff → order flows straight to the kitchen, no
+  // re-verification.
+  if (open && open.status === "active") {
+    const orderId = await insertSessionOrder(service, open.id, restaurantId, items);
+    if (!orderId) return { status: "error", sessionId: open.id, error: "Failed to create order." };
+    await emitNewOrderNotification(service, {
+      restaurantId,
+      sessionId: open.id,
+      orderId,
+      tableId: tableId ?? null,
+      roomId: roomId ?? null,
+    });
+    revalidatePath("/employee/queue");
+    return { status: "approved", sessionId: open.id };
+  }
+
+  // Reuse a still-pending session, else open a new one.
+  let sessionId = open?.id as string | undefined;
+  if (!sessionId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: created, error } = await (service as any)
+      .from("sessions")
+      .insert({
+        restaurant_id: restaurantId,
+        type: tableId ? "table" : "room_service",
+        table_id: tableId ?? null,
+        room_id: roomId ?? null,
+        customer_pin: null,
+        status: "pending_activation",
+      })
+      .select("id")
+      .single();
+    if (error || !created) return { status: "error", sessionId: null, error: "Could not start ordering session." };
+    sessionId = created.id as string;
+  }
+
+  const orderId = await insertSessionOrder(service, sessionId, restaurantId, items);
+  if (!orderId) return { status: "error", sessionId, error: "Failed to create order." };
+
+  // Only one live activation request per session (a second order placed while
+  // still pending shouldn't spam staff — it'll surface with the session once
+  // approved).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: existingReq } = await (service as any)
+    .from("notifications")
+    .select("id")
+    .eq("restaurant_id", restaurantId)
+    .eq("session_id", sessionId)
+    .eq("type", "table_activation_request")
+    .in("status", ["new", "acknowledged"])
+    .maybeSingle();
+
+  if (!existingReq) {
+    await emitTableActivationRequest(service, {
+      restaurantId,
+      sessionId,
+      orderId,
+      tableId: tableId ?? null,
+      roomId: roomId ?? null,
+    });
+  }
+
+  revalidatePath("/employee/notifications");
+  return { status: "pending", sessionId };
+}
+
+// Tells the no-PIN customer page where its table stands: awaiting approval,
+// approved (order sent), or declined. Scoped to the session (the activation
+// notification survives a rejection's session close, so we can still show
+// "declined"). A fresh scan with no session returns "none".
+export async function getCustomerActivationState(
+  restaurantId: string,
+  tableId: string | null,
+  roomId: string | null,
+  sessionId?: string | null
+): Promise<{ status: ActivationStatus; sessionId: string | null }> {
+  const service = createServiceClient();
+
+  let resolvedSessionId: string | null = null;
+  let sessionStatus: string | null = null;
+
+  if (sessionId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: s } = await (service as any)
+      .from("sessions")
+      .select("id, status")
+      .eq("id", sessionId)
+      .maybeSingle();
+    if (s) {
+      resolvedSessionId = s.id;
+      sessionStatus = s.status;
+    }
+  }
+
+  if (!resolvedSessionId && (tableId || roomId)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let q = (service as any)
+      .from("sessions")
+      .select("id, status")
+      .eq("restaurant_id", restaurantId)
+      .in("status", ["active", "pending_activation"]);
+    if (tableId) q = q.eq("table_id", tableId);
+    else q = q.eq("room_id", roomId);
+    const { data: s } = await q.order("opened_at", { ascending: false }).limit(1).maybeSingle();
+    if (s) {
+      resolvedSessionId = s.id;
+      sessionStatus = s.status;
+    }
+  }
+
+  if (!resolvedSessionId) return { status: "none", sessionId: null };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: notif } = await (service as any)
+    .from("notifications")
+    .select("status")
+    .eq("session_id", resolvedSessionId)
+    .eq("type", "table_activation_request")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (notif) {
+    if (notif.status === "completed") return { status: "approved", sessionId: resolvedSessionId };
+    if (notif.status === "resolved") return { status: "rejected", sessionId: resolvedSessionId };
+    return { status: "pending", sessionId: resolvedSessionId };
+  }
+
+  if (sessionStatus === "pending_activation") return { status: "pending", sessionId: resolvedSessionId };
+  if (sessionStatus === "active") return { status: "approved", sessionId: resolvedSessionId };
+  return { status: "none", sessionId: resolvedSessionId };
+}
+
 export async function checkSessionActive(
   sessionId: string
 ): Promise<{ active: boolean }> {
@@ -176,38 +396,15 @@ export async function submitCustomerOrder(
   if (!session || session.status !== "active") return { error: "Session is no longer active." };
   if (session.restaurant_id !== restaurantId) return { error: "Invalid session." };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: order, error: orderErr } = await (service as any)
-    .from("session_orders")
-    .insert({ session_id: sessionId, restaurant_id: restaurantId, created_by: null })
-    .select("id")
-    .single();
-  if (orderErr) return { error: "Failed to create order." };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: itemsErr } = await (service as any)
-    .from("session_order_items")
-    .insert(
-      items.map((item) => ({
-        order_id: order.id,
-        menu_item_id: item.menu_item_id,
-        variant_id: null,
-        workstation_id: item.workstation_id,
-        item_name: item.item_name,
-        item_price: item.item_price,
-        workstation_name: item.workstation_name,
-        quantity: item.quantity,
-        notes: null,
-      }))
-    );
-  if (itemsErr) return { error: "Failed to add items." };
+  const orderId = await insertSessionOrder(service, sessionId, restaurantId, items);
+  if (!orderId) return { error: "Failed to create order." };
 
   // Alert staff via the existing notification system. Routing (table-group +
   // workstation) happens on read, so we just record the event with its order_id.
   await emitNewOrderNotification(service, {
     restaurantId,
     sessionId,
-    orderId: order.id,
+    orderId,
     tableId: session.table_id ?? null,
     roomId: session.room_id ?? null,
   });

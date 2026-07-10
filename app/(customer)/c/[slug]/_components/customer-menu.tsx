@@ -13,8 +13,9 @@ import {
   sendNotification,
   verifyCustomerPin,
   checkSessionActive,
-  ensureCustomerSession,
   submitCustomerOrder,
+  requestTableActivation,
+  getCustomerActivationState,
   getCustomerOrderFeed,
   getCustomerNotifState,
   acknowledgeCustomerReady,
@@ -25,6 +26,7 @@ import type {
   NotificationStatus,
   CustomerOrder,
   CustomerOrderStatus,
+  ActivationStatus,
 } from "@/app/actions/customer";
 import { createPortal } from "react-dom";
 import {
@@ -67,6 +69,8 @@ import {
   Loader2,
   ChevronRight,
   MapPin,
+  Hourglass,
+  XCircle,
 } from "lucide-react";
 
 // ─── Config ─────────────────────────────────────────────────────────────────────
@@ -1103,6 +1107,62 @@ function BottomNav({
   );
 }
 
+// ─── Table activation (no-PIN) status sheet ──────────────────────────────────────
+
+function ActivationSheet({
+  open,
+  status,
+  locationLabel,
+  isRoom,
+  onClose,
+}: {
+  open: boolean;
+  status: ActivationStatus;
+  locationLabel: string | null;
+  isRoom: boolean;
+  onClose: () => void;
+}) {
+  const pending = status === "pending";
+  return (
+    <Sheet open={open} onClose={onClose} maxWidth={400} label="Table activation">
+      <div className="px-6 pt-3 pb-7 flex flex-col items-center text-center gap-4">
+        <div
+          className="w-16 h-16 rounded-2xl flex items-center justify-center rs-float"
+          style={{
+            background: pending ? "rgba(8,145,178,0.12)" : "#fef2f2",
+            color: pending ? "var(--color-primary)" : "#dc2626",
+          }}
+        >
+          {pending ? <Hourglass size={30} /> : <XCircle size={30} />}
+        </div>
+        <div>
+          <p className="text-lg" style={{ color: "var(--color-ink)", fontWeight: 500 }}>
+            {pending ? "Waiting for approval" : "Request declined"}
+          </p>
+          <p className="text-sm mt-1" style={{ color: "var(--color-ink-mute)" }}>
+            {pending
+              ? `Your order for ${locationLabel ?? (isRoom ? "your room" : "your table")} has been sent to the staff. They'll activate your table in a moment — this page updates automatically.`
+              : `Your table activation request was declined. Please contact ${isRoom ? "the front desk" : "a staff member"} for assistance.`}
+          </p>
+        </div>
+        {pending && (
+          <p className="text-sm flex items-center gap-1.5" style={{ color: "var(--color-primary)" }}>
+            <Loader2 size={14} className="animate-spin" /> Awaiting staff…
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full h-12 rounded-2xl text-sm font-medium rs-press"
+          style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink)" }}
+        >
+          {pending ? "Continue browsing" : "OK"}
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
 // ─── Main export ─────────────────────────────────────────────────────────────────
 
 export function CustomerMenu({
@@ -1118,6 +1178,7 @@ export function CustomerMenu({
   categories,
   items,
   initialNotifState,
+  initialActivationStatus,
 }: {
   restaurantId: string;
   restaurantName: string;
@@ -1131,6 +1192,7 @@ export function CustomerMenu({
   categories: CategoryRow[];
   items: MenuItemRow[];
   initialNotifState: CustomerNotifState;
+  initialActivationStatus: ActivationStatus;
 }) {
   const isRoom = !!roomId;
   const contextId = tableId ?? roomId ?? null;
@@ -1139,6 +1201,23 @@ export function CustomerMenu({
 
   const [activeSessionId, setActiveSessionId] = useState<string | null>(initialSessionId);
   const orderingAvailable = orderingEnabled && (qrMode === "ordering_enabled" || noPin) && !!contextId;
+
+  // No-PIN table activation: 'none' (not requested yet), 'pending' (awaiting
+  // staff), 'approved' (activated → order flows normally), 'rejected' (declined).
+  const [activationStatus, setActivationStatus] = useState<ActivationStatus>(initialActivationStatus);
+  const activationRef = useRef<ActivationStatus>(initialActivationStatus);
+  const [showActivationSheet, setShowActivationSheet] = useState(
+    noPin && (initialActivationStatus === "pending" || initialActivationStatus === "rejected")
+  );
+  const setActivation = useCallback((s: ActivationStatus) => {
+    activationRef.current = s;
+    setActivationStatus(s);
+  }, []);
+
+  // In no-PIN mode, ordering interactions pause while a table activation request
+  // is pending (order already sent) or after it's been rejected (needs staff).
+  const activationBlocks = noPin && (activationStatus === "pending" || activationStatus === "rejected");
+  const canOrderNow = orderingAvailable && !activationBlocks;
 
   const [activeCategoryId, setActiveCategoryId] = useState<string>(categories[0]?.id ?? "");
   const [pinVerified, setPinVerified] = useState(noPin);
@@ -1220,7 +1299,29 @@ export function CustomerMenu({
 
     async function poll() {
       try {
-        if (activeSessionId) {
+        // ── No-PIN activation state ── detect approve/reject transitions.
+        if (noPin && contextId) {
+          const st = await getCustomerActivationState(restaurantId, tableId, roomId, activeSessionId);
+          if (!active) return;
+          if (st.sessionId && st.sessionId !== activeSessionId) setActiveSessionId(st.sessionId);
+          const prevAct = activationRef.current;
+          if (st.status !== prevAct) {
+            activationRef.current = st.status;
+            setActivationStatus(st.status);
+            if (prevAct === "pending" && st.status === "approved") {
+              setShowActivationSheet(false);
+              pushToast({ tone: "success", title: "Table activated", body: "Your order is on its way to the kitchen", Icon: CheckCircle2 });
+            }
+            if (st.status === "rejected") {
+              setShowActivationSheet(true);
+            }
+          }
+        }
+
+        // The held (pending) order must NOT surface as "in the kitchen" — only
+        // pull the live order feed once the table is actually active.
+        const feedVisible = !noPin || activationRef.current === "approved";
+        if (activeSessionId && feedVisible) {
           const feed = await getCustomerOrderFeed(activeSessionId);
           if (!active) return;
           setOrders(feed.orders);
@@ -1233,6 +1334,8 @@ export function CustomerMenu({
             fresh.forEach((r) => seenReadyRef.current.add(r.id));
             acknowledgeCustomerReady(activeSessionId, fresh.map((r) => r.id)).catch(() => {});
           }
+        } else if (noPin && activationRef.current !== "approved") {
+          setOrders([]);
         }
 
         if (contextId) {
@@ -1268,7 +1371,7 @@ export function CustomerMenu({
   // ── Cart ──
   const handleAdd = useCallback(
     (item: MenuItemRow) => {
-      if (!orderingAvailable) return;
+      if (!canOrderNow) return;
       if (item.availability_status !== "available" || !item.is_available) return;
       if (!pinVerified) {
         setPendingAddItemId(item.id);
@@ -1281,7 +1384,7 @@ export function CustomerMenu({
         return next;
       });
     },
-    [orderingAvailable, pinVerified]
+    [canOrderNow, pinVerified]
   );
 
   const addById = useCallback((id: string) => {
@@ -1322,25 +1425,8 @@ export function CustomerMenu({
   }, 0);
   const cartCount = cartEntries.reduce((sum, [, qty]) => sum + qty, 0);
 
-  async function placeOrder() {
-    if (cartCount === 0) return;
-    setPlacing(true);
-
-    let sid = activeSessionId;
-    if (!sid && noPin) {
-      const resolved = await ensureCustomerSession(restaurantId, tableId, roomId);
-      if (resolved.sessionId) {
-        sid = resolved.sessionId;
-        setActiveSessionId(resolved.sessionId);
-      }
-    }
-    if (!sid) {
-      setPlacing(false);
-      pushToast({ tone: "info", title: "Couldn't start your order", body: "Please refresh and try again", Icon: Info });
-      return;
-    }
-
-    const orderItems: CustomerCartItem[] = cartEntries.flatMap(([id, qty]) => {
+  function buildOrderItems(): CustomerCartItem[] {
+    return cartEntries.flatMap(([id, qty]) => {
       const item = items.find((i) => i.id === id);
       if (!item) return [];
       return [{
@@ -1352,6 +1438,51 @@ export function CustomerMenu({
         quantity: qty,
       }];
     });
+  }
+
+  async function placeOrder() {
+    if (cartCount === 0) return;
+    if (noPin && activationStatus === "rejected") return; // ordering blocked until staff help
+    setPlacing(true);
+
+    const orderItems = buildOrderItems();
+
+    // ── No-PIN: route through the staff activation gate ──
+    // requestTableActivation handles both cases: if the table is already active
+    // (staff approved / opened it) the order flows straight to the kitchen;
+    // otherwise it opens a pending session and raises an activation request.
+    if (noPin) {
+      const res = await requestTableActivation(restaurantId, tableId, roomId, orderItems);
+      setPlacing(false);
+      if (res.status === "error") {
+        pushToast({ tone: "info", title: "Couldn't send your order", body: res.error ?? "Please try again", Icon: Info });
+        return;
+      }
+      if (res.sessionId) setActiveSessionId(res.sessionId);
+      setCart(new Map());
+      setShowCart(false);
+
+      if (res.status === "approved") {
+        setActivation("approved");
+        setOrderSuccess(true);
+        pushToast({ tone: "success", title: "Order placed", body: "The kitchen has your order — track it live in Orders", Icon: CheckCircle2, desktopOnly: true });
+        if (res.sessionId) getCustomerOrderFeed(res.sessionId).then((f) => setOrders(f.orders)).catch(() => {});
+        setTimeout(() => setOrderSuccess(false), 4000);
+      } else {
+        // pending — waiting for a staff member to activate the table
+        setActivation("pending");
+        setShowActivationSheet(true);
+      }
+      return;
+    }
+
+    // ── With-PIN: order goes straight through the verified session ──
+    const sid = activeSessionId;
+    if (!sid) {
+      setPlacing(false);
+      pushToast({ tone: "info", title: "Couldn't start your order", body: "Please refresh and try again", Icon: Info });
+      return;
+    }
 
     const result = await submitCustomerOrder(sid, restaurantId, orderItems);
     if (result.error) {
@@ -1463,7 +1594,7 @@ export function CustomerMenu({
     setQuery("");
   }
 
-  const showCartBar = orderingAvailable && cartCount > 0;
+  const showCartBar = canOrderNow && cartCount > 0;
   const heroInitials = initialsOf(restaurantName);
 
   return (
@@ -1498,6 +1629,17 @@ export function CustomerMenu({
           isRoom={isRoom}
           onSuccess={handlePinSuccess}
           onClose={() => { setShowPinEntry(false); setPendingAddItemId(null); }}
+        />
+      )}
+
+      {/* No-PIN table activation status */}
+      {noPin && (
+        <ActivationSheet
+          open={showActivationSheet && (activationStatus === "pending" || activationStatus === "rejected")}
+          status={activationStatus}
+          locationLabel={locationLabel}
+          isRoom={isRoom}
+          onClose={() => setShowActivationSheet(false)}
         />
       )}
 
@@ -1578,6 +1720,40 @@ export function CustomerMenu({
       </header>
 
       <main className="mx-auto max-w-6xl px-4" style={{ paddingBottom: showCartBar ? 168 : 96 }}>
+        {/* No-PIN activation banner — tap to reopen the status sheet */}
+        {noPin && (activationStatus === "pending" || activationStatus === "rejected") && (
+          <button
+            type="button"
+            onClick={() => setShowActivationSheet(true)}
+            className="mt-4 w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-left rs-press rs-fade"
+            style={
+              activationStatus === "pending"
+                ? { background: "rgba(8,145,178,0.08)", border: "1px solid rgba(8,145,178,0.3)" }
+                : { background: "#fef2f2", border: "1px solid #dc262633" }
+            }
+          >
+            <span
+              className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+              style={
+                activationStatus === "pending"
+                  ? { background: "rgba(8,145,178,0.14)", color: "var(--color-primary)" }
+                  : { background: "#fee2e2", color: "#dc2626" }
+              }
+            >
+              {activationStatus === "pending" ? <Hourglass size={17} /> : <XCircle size={17} />}
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm font-medium" style={{ color: "var(--color-ink)" }}>
+                {activationStatus === "pending" ? "Waiting for staff to activate your table" : "Table activation declined"}
+              </span>
+              <span className="block text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                {activationStatus === "pending" ? "Your order has been sent — hang tight" : `Please contact ${isRoom ? "the front desk" : "a staff member"}`}
+              </span>
+            </span>
+            <ChevronRight size={16} style={{ color: "var(--color-ink-mute)" }} />
+          </button>
+        )}
+
         {/* Hero — branding, no imagery */}
         {!searchActive && (
           <section className="mt-4">
@@ -1689,7 +1865,7 @@ export function CustomerMenu({
                 item={item}
                 categoryName={searchActive ? (categoryNameMap.get(item.category_id) ?? null) : null}
                 cartQty={cart.get(item.id) ?? 0}
-                canOrder={orderingAvailable}
+                canOrder={canOrderNow}
                 onAdd={() => handleAdd(item)}
                 onRemove={() => removeById(item.id)}
               />

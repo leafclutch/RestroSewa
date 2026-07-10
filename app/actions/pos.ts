@@ -131,8 +131,9 @@ export async function openTableSession(tableId: string) {
     redirect(`/employee/session/${existing.id}`);
   }
 
-  // Create new session with a customer ordering PIN
-  const customer_pin = String(Math.floor(1000 + Math.random() * 9000));
+  // Only "Menu + Ordering (With PIN)" restaurants use a customer ordering PIN.
+  // No-PIN and view-only restaurants get a plain session (no PIN gate / UI).
+  const customer_pin = await pinForNewSession(service, ru.restaurant_id);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: session, error } = await (service as any)
     .from("sessions")
@@ -147,6 +148,25 @@ export async function openTableSession(tableId: string) {
 
   if (error) return { error: error.message };
   redirect(`/employee/session/${session.id}`);
+}
+
+// A customer ordering PIN is only meaningful in "With PIN" mode. For no-PIN and
+// view-only restaurants we open sessions without one so the staff session screen
+// never surfaces a PIN and the customer never sees a PIN gate.
+async function pinForNewSession(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  service: any,
+  restaurantId: string
+): Promise<string | null> {
+  const { data: restaurant } = await service
+    .from("restaurants")
+    .select("qr_mode")
+    .eq("id", restaurantId)
+    .maybeSingle();
+  const qrMode = restaurant?.qr_mode ?? "ordering_enabled";
+  return qrMode === "ordering_enabled"
+    ? String(Math.floor(1000 + Math.random() * 9000))
+    : null;
 }
 
 export async function openRoomSession(roomId: string) {
@@ -172,7 +192,7 @@ export async function openRoomSession(roomId: string) {
     redirect(`/employee/session/${existing.id}`);
   }
 
-  const customer_pin = String(Math.floor(1000 + Math.random() * 9000));
+  const customer_pin = await pinForNewSession(service, ru.restaurant_id);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: session, error } = await (service as any)
     .from("sessions")
@@ -207,6 +227,118 @@ export async function openWalkInSession() {
 
   if (error) redirect("/employee/dashboard");
   redirect(`/employee/session/${session.id}`);
+}
+
+// ─── Table Activation Requests (Menu + Ordering without PIN) ───────────────────
+// A no-PIN customer's first order opens a `pending_activation` session (kept out
+// of the kitchen queue + table overview) and raises a `table_activation_request`
+// notification. Front-of-house staff Accept or Reject it here.
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function loadActivationRequest(service: any, ru: { restaurant_id: string }, notificationId: string) {
+  const { data: notif } = await service
+    .from("notifications")
+    .select("id, restaurant_id, session_id, order_id, table_id, room_id, type, status")
+    .eq("id", notificationId)
+    .maybeSingle();
+
+  if (!notif || notif.restaurant_id !== ru.restaurant_id || notif.type !== "table_activation_request") {
+    return null;
+  }
+  return notif;
+}
+
+export async function approveTableActivation(notificationId: string): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  const service = createServiceClient();
+
+  const notif = await loadActivationRequest(service, ru, notificationId);
+  if (!notif) return { error: "Request not found." };
+
+  // Table-group isolation: staff may only act on tables/rooms they can see.
+  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  if (!visibility.seesAll && !(visibility.canSeeTable(notif.table_id) && visibility.canSeeRoom(notif.room_id))) {
+    return { error: "Not allowed." };
+  }
+
+  // Idempotent: a second Accept (e.g. double-tap) is a no-op.
+  if (notif.status === "completed") {
+    revalidatePath("/employee/notifications");
+    return null;
+  }
+
+  if (notif.session_id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (service as any)
+      .from("sessions")
+      .update({ status: "active", closed_at: null })
+      .eq("id", notif.session_id)
+      .eq("restaurant_id", ru.restaurant_id);
+  }
+
+  // Now the table is active — send the held order to the kitchen/workstations
+  // through the normal new-order path.
+  if (notif.session_id && notif.order_id) {
+    await emitNewOrderNotification(service, {
+      restaurantId: ru.restaurant_id,
+      sessionId: notif.session_id,
+      orderId: notif.order_id,
+      tableId: notif.table_id ?? null,
+      roomId: notif.room_id ?? null,
+    });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (service as any)
+    .from("notifications")
+    .update({ status: "completed", acknowledged_at: new Date().toISOString() })
+    .eq("id", notif.id);
+
+  revalidatePath("/employee/notifications");
+  revalidatePath("/employee/queue");
+  revalidatePath("/employee/dashboard");
+  return null;
+}
+
+export async function rejectTableActivation(notificationId: string): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  const service = createServiceClient();
+
+  const notif = await loadActivationRequest(service, ru, notificationId);
+  if (!notif) return { error: "Request not found." };
+
+  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  if (!visibility.seesAll && !(visibility.canSeeTable(notif.table_id) && visibility.canSeeRoom(notif.room_id))) {
+    return { error: "Not allowed." };
+  }
+
+  if (notif.status === "resolved") {
+    revalidatePath("/employee/notifications");
+    return null;
+  }
+
+  // Close the pending session — the held order never reaches the kitchen (the
+  // queue only reads active sessions) and the table stays free.
+  if (notif.session_id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (service as any)
+      .from("sessions")
+      .update({ status: "closed", closed_at: new Date().toISOString() })
+      .eq("id", notif.session_id)
+      .eq("restaurant_id", ru.restaurant_id)
+      .eq("status", "pending_activation"); // never close an already-active table
+  }
+
+  // Keep the notification as the record of the decision — the customer page
+  // polls it to show the "request declined" state.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (service as any)
+    .from("notifications")
+    .update({ status: "resolved", acknowledged_at: new Date().toISOString() })
+    .eq("id", notif.id);
+
+  revalidatePath("/employee/notifications");
+  return null;
 }
 
 // ─── Session Detail ───────────────────────────────────────────────────────────

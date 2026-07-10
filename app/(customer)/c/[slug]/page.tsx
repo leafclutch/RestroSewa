@@ -2,7 +2,8 @@ import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getMenuCategories, getMenuItemsByCategory } from "@/app/actions/menu";
 import type { MenuItemRow } from "@/app/actions/menu";
-import { getCustomerNotifState } from "@/app/actions/customer";
+import { getCustomerNotifState, getCustomerActivationState } from "@/app/actions/customer";
+import type { ActivationStatus } from "@/app/actions/customer";
 import { CustomerMenu } from "./_components/customer-menu";
 
 // Whether an item belongs on the menu *right now*. This intentionally keeps
@@ -81,10 +82,15 @@ export default async function CustomerMenuPage({
         .from("sessions")
         .select("id")
         .eq("restaurant_id", restaurant.id)
-        .eq("table_id", tableId)
-        .eq("status", "active");
-      if (!noPin) tableSessionQ = tableSessionQ.not("customer_pin", "is", null);
-      const { data: activeSession } = await tableSessionQ.maybeSingle();
+        .eq("table_id", tableId);
+      // No-PIN also picks up a session that's still awaiting staff activation, so
+      // a reload during that wait resumes the "pending approval" state.
+      if (noPin) tableSessionQ = tableSessionQ.in("status", ["active", "pending_activation"]);
+      else tableSessionQ = tableSessionQ.eq("status", "active").not("customer_pin", "is", null);
+      const { data: activeSession } = await tableSessionQ
+        .order("opened_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
       sessionId = activeSession?.id ?? null;
     }
   }
@@ -110,10 +116,13 @@ export default async function CustomerMenuPage({
         .from("sessions")
         .select("id")
         .eq("restaurant_id", restaurant.id)
-        .eq("room_id", roomId)
-        .eq("status", "active");
-      if (!noPin) roomSessionQ = roomSessionQ.not("customer_pin", "is", null);
-      const { data: activeRoomSession } = await roomSessionQ.maybeSingle();
+        .eq("room_id", roomId);
+      if (noPin) roomSessionQ = roomSessionQ.in("status", ["active", "pending_activation"]);
+      else roomSessionQ = roomSessionQ.eq("status", "active").not("customer_pin", "is", null);
+      const { data: activeRoomSession } = await roomSessionQ
+        .order("opened_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
       sessionId = activeRoomSession?.id ?? null;
     }
   }
@@ -122,6 +131,15 @@ export default async function CustomerMenuPage({
     getMenuCategories(restaurant.id),
     getCustomerNotifState(restaurant.id, tableId, roomId, sessionId),
   ]);
+
+  // No-PIN table activation: where does this table stand (waiting / approved /
+  // declined)? Resolved server-side so a fresh load / reload shows the right state.
+  let initialActivationStatus: ActivationStatus = "none";
+  if (noPin && (tableId || roomId)) {
+    const st = await getCustomerActivationState(restaurant.id, tableId, roomId, sessionId);
+    initialActivationStatus = st.status;
+    sessionId = st.sessionId ?? sessionId;
+  }
 
   const activeCategories = categories.filter((c) => c.is_active);
   const itemsByCategory = await Promise.all(
@@ -146,6 +164,7 @@ export default async function CustomerMenuPage({
       categories={categoriesWithItems}
       items={allItems}
       initialNotifState={initialNotifState}
+      initialActivationStatus={initialActivationStatus}
     />
   );
 }

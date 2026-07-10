@@ -11,6 +11,7 @@ import {
   Bell,
   BookOpen,
   ClipboardList,
+  DoorOpen,
   LayoutGrid,
   ListOrdered,
   LogOut,
@@ -30,21 +31,22 @@ const ICONS: Record<StaffNavKey, React.ComponentType<{ size?: number; strokeWidt
 type NavItem = { key: StaffNavKey; label: string; href: string; exact: boolean };
 
 const ALERT_CONFIG = {
-  new_order: { label: "New order", Icon: ClipboardList, color: "#1a7a4a" },
-  call_waiter: { label: "Waiter call", Icon: Bell, color: "#6366f1" },
-  request_bill: { label: "Bill requested", Icon: UtensilsCrossed, color: "#f97316" },
+  new_order: { label: "New order", Icon: ClipboardList, color: "#1a7a4a", href: "/employee/queue" },
+  call_waiter: { label: "Waiter call", Icon: Bell, color: "#6366f1", href: "/employee/notifications" },
+  request_bill: { label: "Bill requested", Icon: UtensilsCrossed, color: "#f97316", href: "/employee/notifications" },
+  table_activation_request: { label: "Table activation request", Icon: DoorOpen, color: "#0891b2", href: "/employee/notifications" },
 } as const;
 
 const POLL_MS = 8000;
 
-function alertText(n: NotificationRow): { label: string; color: string; Icon: React.ComponentType<{ size?: number }> } {
+function alertText(n: NotificationRow): { label: string; color: string; href: string; Icon: React.ComponentType<{ size?: number }> } {
   const cfg = ALERT_CONFIG[n.type as keyof typeof ALERT_CONFIG] ?? ALERT_CONFIG.call_waiter;
   const where = n.table_number
     ? ` · Table ${n.table_number}`
     : n.room_number
     ? ` · Room ${n.room_number}`
     : "";
-  return { label: cfg.label + where, color: cfg.color, Icon: cfg.Icon };
+  return { label: cfg.label + where, color: cfg.color, href: cfg.href, Icon: cfg.Icon };
 }
 
 export function StaffNav({
@@ -68,7 +70,7 @@ export function StaffNav({
   // (waiter/bill) drive the Notifications badge, new orders drive the Orders badge.
   const [serviceCount, setServiceCount] = useState(notificationCount);
   const [orderBadge, setOrderBadge] = useState(orderCount);
-  const [toasts, setToasts] = useState<{ id: string; label: string; color: string; Icon: React.ComponentType<{ size?: number }> }[]>([]);
+  const [toasts, setToasts] = useState<{ id: string; label: string; color: string; href: string; Icon: React.ComponentType<{ size?: number }> }[]>([]);
   // Track which notification ids we've already seen so we only alert on new ones.
   const seenIds = useRef<Set<string> | null>(null);
 
@@ -214,7 +216,7 @@ export function StaffNav({
               type="button"
               onClick={() => {
                 dismiss(t.id);
-                router.push("/employee/queue");
+                router.push(t.href);
               }}
               className="flex items-center gap-3 px-4 py-3 rounded-xl border text-left shadow-lg"
               style={{
@@ -234,7 +236,7 @@ export function StaffNav({
                   {t.label}
                 </span>
                 <span className="block text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                  Tap to open the queue
+                  Tap to open
                 </span>
               </span>
               <span
