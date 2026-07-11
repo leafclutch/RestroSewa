@@ -24,6 +24,10 @@ export const PERMISSIONS = {
   // Customers
   VIEW_CUSTOMERS:   "view_customers",
   MANAGE_CUSTOMERS: "manage_customers",
+  // Stock & Finance
+  VIEW_STOCK:       "view_stock",
+  MANAGE_STOCK:     "manage_stock",
+  VIEW_FINANCE:     "view_finance",
   // Reports
   VIEW_REPORTS:     "view_reports",
   // Staff
@@ -93,6 +97,16 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
     items: [
       { key: "view_customers",   label: "View Customers" },
       { key: "manage_customers", label: "Manage Customers" },
+    ],
+  },
+  {
+    label: "Stock & Finance",
+    items: [
+      { key: "view_stock",   label: "View Stock & Vendors" },
+      { key: "manage_stock", label: "Manage Stock, Vendors & Purchases" },
+      // Kept separate from stock: the daily report exposes takings, margins and
+      // every outstanding debt, which a storekeeper has no business seeing.
+      { key: "view_finance", label: "View Daily Finance Report" },
     ],
   },
   {
@@ -238,6 +252,26 @@ export const NAV_ACCESS = {
   // stricter than Sales: a reports-only viewer must NOT reach customer debt.
   canManageCredits: (u: { role: string; permissions: string[] }) =>
     hasAllPermissions(u, [P_.PROCESS_PAYMENTS, P_.CLOSE_BILLS]),
+};
+
+// ─── Stock & Finance (Admin Dashboard module) ─────────────────────────────────
+// Read vs write are split so a storekeeper can be given stock entry without the
+// finance report, and the finance report can be granted without stock entry.
+// `restaurant_admin` passes all three via hasPermission/hasAnyPermission.
+
+export const STOCK_ACCESS = {
+  /** Sees Vendors / Stock / Purchases (read-only is enough). */
+  canViewStock: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK]),
+  /** Creates vendors, records purchases and pays vendors. */
+  canManageStock: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.MANAGE_STOCK),
+  /** Sees the Daily Finance Report (takings, margins, all outstanding debt). */
+  canViewFinance: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.VIEW_FINANCE),
+  /** Shows the Stock & Finance group in the admin sidebar at all. */
+  canSeeModule: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.VIEW_FINANCE]),
 };
 
 // ─── Staff Presets ────────────────────────────────────────────────────────────
