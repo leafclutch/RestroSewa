@@ -103,8 +103,15 @@ export function StaffDashboard({
       {/* Quick-nav — sticky under the top bar; only shows when >1 section. */}
       {sections.length > 1 && (
         <div
-          className="sticky top-0 z-30 px-4 sm:px-5 py-2.5 border-b"
-          style={{ background: "rgba(255,255,255,0.9)", backdropFilter: "blur(12px)", borderColor: "var(--color-hairline)" }}
+          // Parks directly under the sticky top bar (56px) rather than sliding
+          // beneath it. z-30 keeps it below the bar and its notification panel.
+          className="sticky z-30 px-4 sm:px-5 py-2.5 border-b"
+          style={{
+            top: 56,
+            background: "rgba(255,255,255,0.9)",
+            backdropFilter: "blur(12px)",
+            borderColor: "var(--color-hairline)",
+          }}
         >
           <div className="max-w-6xl mx-auto flex gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
             {sections.map((s) => {
