@@ -5,7 +5,7 @@ import { ExternalLink, ShieldCheck, Pencil, Trash2, PowerOff, Power } from "luci
 import type { StaffRow } from "@/app/actions/restaurants";
 import { EditPermissionsForm } from "./edit-permissions-form";
 import { EditStaffForm } from "./edit-staff-form";
-import { toggleStaffStatus, softDeleteStaffMember } from "@/app/actions/staff";
+import { toggleStaffStatus, deleteStaffMember } from "@/app/actions/staff";
 
 function Badge({
   children,
@@ -132,19 +132,23 @@ function StaffCard({
         {s.is_active ? <PowerOff size={13} /> : <Power size={13} />}
       </button>
 
-      {/* Soft delete */}
+      {/* Delete */}
       <button
         type="button"
-        title="Delete staff (soft)"
-        onClick={() =>
-          startDelete(async () => {
-            if (confirm(`Remove ${s.display_name} from this restaurant? They will lose access immediately.`)) {
-              const r = await softDeleteStaffMember(s.id, s.auth_user_id, restaurantId);
-              if (r && 'error' in r) alert(r.error);
-            }
-          })
-        }
-        style={{ color: "var(--color-ink-mute)" }}
+        title="Delete staff"
+        onClick={() => {
+          if (
+            confirm(
+              `Delete ${s.display_name} permanently?\n\nThis removes their account and login for good. This action cannot be undone.`
+            )
+          ) {
+            startDelete(async () => {
+              const r = await deleteStaffMember(s.id, s.auth_user_id, restaurantId);
+              if (r && "error" in r) alert(r.error);
+            });
+          }
+        }}
+        style={{ color: "#dc2626" }}
       >
         <Trash2 size={13} />
       </button>

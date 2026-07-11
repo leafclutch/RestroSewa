@@ -2,6 +2,8 @@ export const PERMISSIONS = {
   // Dashboard
   VIEW_DASHBOARD:   "view_dashboard",
   // Orders
+  VIEW_ORDERS:      "view_orders",
+  MANAGE_ORDERS:    "manage_orders",
   CREATE_ORDERS:    "create_orders",
   EDIT_ORDERS:      "edit_orders",
   CANCEL_ORDERS:    "cancel_orders",
@@ -22,6 +24,10 @@ export const PERMISSIONS = {
   // Customers
   VIEW_CUSTOMERS:   "view_customers",
   MANAGE_CUSTOMERS: "manage_customers",
+  // Stock & Finance
+  VIEW_STOCK:       "view_stock",
+  MANAGE_STOCK:     "manage_stock",
+  VIEW_FINANCE:     "view_finance",
   // Reports
   VIEW_REPORTS:     "view_reports",
   // Staff
@@ -49,6 +55,8 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
   {
     label: "Orders",
     items: [
+      { key: "view_orders",    label: "View Orders" },
+      { key: "manage_orders",  label: "Manage Orders" },
       { key: "create_orders",  label: "Create Orders" },
       { key: "edit_orders",    label: "Edit Orders" },
       { key: "cancel_orders",  label: "Cancel Orders" },
@@ -92,6 +100,16 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
     ],
   },
   {
+    label: "Stock & Finance",
+    items: [
+      { key: "view_stock",   label: "View Stock & Vendors" },
+      { key: "manage_stock", label: "Manage Stock, Vendors & Purchases" },
+      // Kept separate from stock: the daily report exposes takings, margins and
+      // every outstanding debt, which a storekeeper has no business seeing.
+      { key: "view_finance", label: "View Daily Finance Report" },
+    ],
+  },
+  {
     label: "Reports",
     items: [{ key: "view_reports", label: "View Reports" }],
   },
@@ -121,4 +139,253 @@ export function hasPermission(
 ): boolean {
   if (user.role === "restaurant_admin") return true;
   return user.permissions.includes(permission);
+}
+
+// True when the admin, or when the user holds ANY of the given permissions.
+export function hasAnyPermission(
+  user: { role: string; permissions: string[] },
+  permissions: Permission[]
+): boolean {
+  if (user.role === "restaurant_admin") return true;
+  return permissions.some((p) => user.permissions.includes(p));
+}
+
+// True when the admin, or when the user holds EVERY one of the given permissions.
+export function hasAllPermissions(
+  user: { role: string; permissions: string[] },
+  permissions: Permission[]
+): boolean {
+  if (user.role === "restaurant_admin") return true;
+  return permissions.every((p) => user.permissions.includes(p));
+}
+
+// ─── Staff Navigation (single source of truth) ────────────────────────────────
+// The employee sidebar/nav is derived entirely from permissions so the visible
+// items always match what the backend route guards allow. Each entry declares
+// the permission(s) that unlock it; the layout renders only the allowed items
+// and each page re-checks the same permission server-side.
+
+const P_ = PERMISSIONS;
+
+export type StaffNavKey = "tables" | "orders" | "menu" | "sales" | "credits" | "notifications";
+
+export type StaffNavItem = {
+  key: StaffNavKey;
+  label: string;
+  href: string;
+  exact: boolean;
+  /** Any of these permissions grants access. */
+  anyOf: Permission[];
+  /**
+   * When set, EVERY one of these is also required. Used by Credits, which is
+   * restricted to staff who both take payments and close bills (Cashier /
+   * Receptionist) — holding just one of the two is not enough.
+   */
+  allOf?: Permission[];
+};
+
+export const STAFF_NAV: StaffNavItem[] = [
+  {
+    key: "tables",
+    label: "Tables",
+    href: "/employee/dashboard",
+    exact: true,
+    anyOf: [P_.VIEW_DASHBOARD, P_.VIEW_TABLES, P_.VIEW_ROOMS],
+  },
+  {
+    key: "orders",
+    label: "Orders",
+    href: "/employee/queue",
+    exact: false,
+    anyOf: [P_.VIEW_ORDERS, P_.MANAGE_ORDERS, P_.CREATE_ORDERS, P_.EDIT_ORDERS],
+  },
+  {
+    key: "menu",
+    label: "Menu",
+    href: "/employee/menu",
+    exact: false,
+    anyOf: [P_.MANAGE_MENU],
+  },
+  {
+    key: "sales",
+    label: "Sales",
+    href: "/employee/sales",
+    exact: false,
+    anyOf: [P_.PROCESS_PAYMENTS, P_.CLOSE_BILLS, P_.VIEW_REPORTS],
+  },
+  {
+    key: "credits",
+    label: "Credits",
+    href: "/employee/credits",
+    exact: false,
+    // Billing + Close Bills, both required — see `allOf` above.
+    anyOf: [P_.PROCESS_PAYMENTS],
+    allOf: [P_.PROCESS_PAYMENTS, P_.CLOSE_BILLS],
+  },
+  {
+    key: "notifications",
+    label: "Notifications",
+    href: "/employee/notifications",
+    exact: false,
+    anyOf: [P_.VIEW_DASHBOARD, P_.VIEW_ORDERS, P_.MANAGE_ORDERS, P_.VIEW_TABLES, P_.CREATE_ORDERS, P_.EDIT_ORDERS],
+  },
+];
+
+// Returns the nav items a given staff user is permitted to see.
+export function getStaffNav(user: { role: string; permissions: string[] }): StaffNavItem[] {
+  return STAFF_NAV.filter(
+    (item) =>
+      hasAnyPermission(user, item.anyOf) &&
+      (!item.allOf || hasAllPermissions(user, item.allOf))
+  );
+}
+
+// Convenience booleans used by page guards so nav ↔ route protection stay in sync.
+export const NAV_ACCESS = {
+  canSeeOrders: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.VIEW_ORDERS, P_.MANAGE_ORDERS, P_.CREATE_ORDERS, P_.EDIT_ORDERS]),
+  canManageOrders: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.MANAGE_ORDERS, P_.EDIT_ORDERS]),
+  canSeeSales: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.PROCESS_PAYMENTS, P_.CLOSE_BILLS, P_.VIEW_REPORTS]),
+  // Customer credits — create, view, take repayments, settle. Deliberately
+  // stricter than Sales: a reports-only viewer must NOT reach customer debt.
+  canManageCredits: (u: { role: string; permissions: string[] }) =>
+    hasAllPermissions(u, [P_.PROCESS_PAYMENTS, P_.CLOSE_BILLS]),
+};
+
+// ─── Stock & Finance (Admin Dashboard module) ─────────────────────────────────
+// Read vs write are split so a storekeeper can be given stock entry without the
+// finance report, and the finance report can be granted without stock entry.
+// `restaurant_admin` passes all three via hasPermission/hasAnyPermission.
+
+export const STOCK_ACCESS = {
+  /** Sees Vendors / Stock / Purchases (read-only is enough). */
+  canViewStock: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK]),
+  /** Creates vendors, records purchases and pays vendors. */
+  canManageStock: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.MANAGE_STOCK),
+  /** Sees the Daily Finance Report (takings, margins, all outstanding debt). */
+  canViewFinance: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.VIEW_FINANCE),
+  /** Shows the Stock & Finance group in the admin sidebar at all. */
+  canSeeModule: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.VIEW_FINANCE]),
+};
+
+// ─── Staff Presets ────────────────────────────────────────────────────────────
+// Job-type templates that pre-fill the permission checkboxes with a sensible
+// set for common restaurant/hotel roles. Presets are a convenience only —
+// after applying one, the admin can still tick/untick any individual
+// permission. The chosen preset is NOT stored; only the resulting permission
+// list is persisted on the staff record.
+
+export type StaffPresetDef = {
+  key: string;
+  label: string;
+  description: string;
+  permissions: Permission[];
+};
+
+const P = PERMISSIONS;
+
+export const STAFF_PRESETS: StaffPresetDef[] = [
+  {
+    key: "waiter",
+    label: "Waiter",
+    description: "Takes and serves orders. View-only on menu, tables and rooms.",
+    permissions: [
+      P.VIEW_DASHBOARD,
+      P.VIEW_ORDERS,
+      P.MANAGE_ORDERS,
+      P.CREATE_ORDERS,
+      P.EDIT_ORDERS,
+      P.VIEW_MENU,
+      P.VIEW_TABLES,
+      P.VIEW_ROOMS,
+    ],
+  },
+  {
+    key: "cashier",
+    label: "Cashier",
+    description: "Handles billing and payments. Can create orders and close bills.",
+    permissions: [
+      P.VIEW_DASHBOARD,
+      P.VIEW_ORDERS,
+      P.CREATE_ORDERS,
+      P.VIEW_MENU,
+      P.VIEW_TABLES,
+      P.CLOSE_BILLS,
+      P.PROCESS_PAYMENTS,
+      P.APPLY_DISCOUNTS,
+    ],
+  },
+  {
+    key: "chef",
+    label: "Chef / Kitchen",
+    description: "Works the kitchen queue. Sees orders and toggles menu availability.",
+    permissions: [
+      P.VIEW_DASHBOARD,
+      P.VIEW_ORDERS,
+      P.MANAGE_ORDERS,
+      P.VIEW_MENU,
+      P.MANAGE_MENU,
+    ],
+  },
+  {
+    key: "manager",
+    label: "Manager",
+    description: "Broad operational access across orders, billing, menu, tables and reports.",
+    permissions: [
+      P.VIEW_DASHBOARD,
+      P.VIEW_ORDERS,
+      P.MANAGE_ORDERS,
+      P.CREATE_ORDERS,
+      P.EDIT_ORDERS,
+      P.CANCEL_ORDERS,
+      P.CLOSE_BILLS,
+      P.VIEW_MENU,
+      P.MANAGE_MENU,
+      P.VIEW_TABLES,
+      P.MANAGE_TABLES,
+      P.VIEW_ROOMS,
+      P.MANAGE_ROOMS,
+      P.PROCESS_PAYMENTS,
+      P.APPLY_DISCOUNTS,
+      P.REFUND_BILLS,
+      P.VIEW_CUSTOMERS,
+      P.MANAGE_CUSTOMERS,
+      P.VIEW_REPORTS,
+      P.VIEW_STAFF,
+      P.VIEW_SETTINGS,
+      P.MANAGE_SETTINGS,
+    ],
+  },
+  {
+    key: "host",
+    label: "Host / Guest",
+    description: "View-only access to the dashboard, tables and menu.",
+    permissions: [
+      P.VIEW_DASHBOARD,
+      P.VIEW_TABLES,
+      P.VIEW_MENU,
+    ],
+  },
+];
+
+// Returns the preset key whose permission set exactly matches the given
+// selection, or null when the selection doesn't match any preset (i.e. the
+// admin has customised it manually).
+export function matchPreset(permissions: string[]): string | null {
+  const selected = new Set(permissions);
+  for (const preset of STAFF_PRESETS) {
+    if (
+      preset.permissions.length === selected.size &&
+      preset.permissions.every((p) => selected.has(p))
+    ) {
+      return preset.key;
+    }
+  }
+  return null;
 }

@@ -6,6 +6,8 @@ import type { ActionResult } from "@/app/actions/staff";
 import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
 import { PermissionPicker } from "./permission-picker";
+import { PresetPicker } from "./preset-picker";
+import { matchPreset } from "@/lib/permissions";
 
 export function EditPermissionsForm({
   staffId,
@@ -79,9 +81,11 @@ export function EditPermissionsForm({
 
         {/* Picker */}
         <div
-          className="rounded-lg border px-4 py-4"
+          className="rounded-lg border px-4 py-4 flex flex-col gap-4"
           style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}
         >
+          <PresetPicker activeKey={matchPreset(permissions)} onApply={setPermissions} />
+          <div className="border-t" style={{ borderColor: "var(--color-hairline)" }} />
           <PermissionPicker selected={permissions} onChange={setPermissions} />
         </div>
 

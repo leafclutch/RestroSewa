@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useTransition, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { logout } from "@/app/actions/auth";
 import {
   LayoutDashboard,
@@ -11,12 +11,25 @@ import {
   DoorOpen,
   Zap,
   Users,
+  Truck,
+  Package,
+  ShoppingCart,
+  Wallet,
   LogOut,
   Menu,
   X,
 } from "lucide-react";
 
-const NAV = [
+type NavItem = {
+  label: string;
+  href: string;
+  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
+  exact: boolean;
+  /** Finance-only: needs `view_finance`, which stock permissions do NOT grant. */
+  financeOnly?: boolean;
+};
+
+const NAV: NavItem[] = [
   { label: "Dashboard",    href: "/admin/dashboard",     icon: LayoutDashboard, exact: true },
   { label: "Menu",         href: "/admin/menu",           icon: BookOpen,        exact: false },
   { label: "Tables",       href: "/admin/tables",         icon: LayoutGrid,      exact: false },
@@ -25,42 +38,107 @@ const NAV = [
   { label: "Staff",        href: "/admin/staff",          icon: Users,           exact: false },
 ];
 
-function NavLinks({
+// Stock & Finance. Shown only to staff permitted to see the module — and Finance
+// is gated separately again, so a storekeeper never sees a link that would just
+// bounce them (nav and route guard must agree).
+const STOCK_NAV: NavItem[] = [
+  { label: "Stock",     href: "/admin/stock",     icon: Package,      exact: false },
+  { label: "Purchases", href: "/admin/purchases", icon: ShoppingCart, exact: false },
+  { label: "Vendors",   href: "/admin/vendors",   icon: Truck,        exact: false },
+  { label: "Finance",   href: "/admin/finance",   icon: Wallet,       exact: false, financeOnly: true },
+];
+
+const stockNavFor = (canSeeStock: boolean, canSeeFinance: boolean) =>
+  STOCK_NAV.filter((i) =>
+    i.financeOnly ? canSeeFinance : canSeeStock
+  );
+
+const isActive = (pathname: string, item: NavItem) =>
+  item.exact ? pathname === item.href : pathname.startsWith(item.href);
+
+function NavLink({
+  item,
   pathname,
   onNavigate,
 }: {
+  item: NavItem;
   pathname: string;
   onNavigate?: () => void;
 }) {
+  const active = isActive(pathname, item);
+  const Icon = item.icon;
+  return (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors"
+      style={{
+        color: active ? "#fff" : "rgba(255,255,255,0.5)",
+        background: active ? "rgba(255,255,255,0.1)" : "transparent",
+        fontWeight: active ? 400 : 300,
+      }}
+    >
+      <Icon size={15} strokeWidth={1.5} />
+      {item.label}
+    </Link>
+  );
+}
+
+function NavLinks({
+  pathname,
+  showStock,
+  showFinance,
+  onNavigate,
+}: {
+  pathname: string;
+  showStock: boolean;
+  showFinance: boolean;
+  onNavigate?: () => void;
+}) {
+  const stockItems = stockNavFor(showStock, showFinance);
   return (
     <>
-      {NAV.map(({ label, href, icon: Icon, exact }) => {
-        const active = exact ? pathname === href : pathname.startsWith(href);
-        return (
-          <Link
-            key={href}
-            href={href}
-            onClick={onNavigate}
-            className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors"
-            style={{
-              color: active ? "#fff" : "rgba(255,255,255,0.5)",
-              background: active ? "rgba(255,255,255,0.1)" : "transparent",
-              fontWeight: active ? 400 : 300,
-            }}
+      {NAV.map((item) => (
+        <NavLink key={item.href} item={item} pathname={pathname} onNavigate={onNavigate} />
+      ))}
+
+      {stockItems.length > 0 && (
+        <>
+          <p
+            className="px-3 pt-4 pb-1 text-[10px] uppercase tracking-wide"
+            style={{ color: "rgba(255,255,255,0.3)", letterSpacing: "0.08em" }}
           >
-            <Icon size={15} strokeWidth={1.5} />
-            {label}
-          </Link>
-        );
-      })}
+            Stock &amp; Finance
+          </p>
+          {stockItems.map((item) => (
+            <NavLink key={item.href} item={item} pathname={pathname} onNavigate={onNavigate} />
+          ))}
+        </>
+      )}
     </>
   );
 }
 
-export function AdminSidebar({ restaurantName }: { restaurantName: string }) {
+export function AdminSidebar({
+  restaurantName,
+  showStock = false,
+  showFinance = false,
+}: {
+  restaurantName: string;
+  showStock?: boolean;
+  showFinance?: boolean;
+}) {
   const pathname = usePathname();
   const [logoutPending, startLogout] = useTransition();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // With the drawer open, the page behind it must not scroll away underneath.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [mobileOpen]);
 
   function handleLogout() {
     startLogout(async () => { await logout(); });
@@ -68,12 +146,15 @@ export function AdminSidebar({ restaurantName }: { restaurantName: string }) {
 
   return (
     <>
-      {/* ── Desktop sidebar (md+) ─────────────────────────────────── */}
+      {/* ── Desktop sidebar (md+) ─────────────────────────────────────────────
+          `sticky top-0 h-screen` pins it to the viewport while the page scrolls
+          past. It stays in the flex row (unlike `fixed`), so the content column
+          keeps its width automatically and no layout shifts. */}
       <aside
-        className="w-52 shrink-0 hidden md:flex flex-col min-h-screen"
+        className="w-52 shrink-0 hidden md:flex flex-col sticky top-0 h-screen"
         style={{ background: "var(--color-brand-dark)" }}
       >
-        <div className="px-5 py-5 border-b" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+        <div className="px-5 py-5 border-b shrink-0" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
           <Link href="/admin/dashboard" className="block">
             <span
               className="text-base tracking-tight"
@@ -87,11 +168,13 @@ export function AdminSidebar({ restaurantName }: { restaurantName: string }) {
           </p>
         </div>
 
-        <nav className="flex-1 px-3 py-4 flex flex-col gap-0.5">
-          <NavLinks pathname={pathname} />
+        {/* The nav itself scrolls if it ever outgrows the viewport, so Sign out
+            can never be pushed off-screen. */}
+        <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-4 flex flex-col gap-0.5">
+          <NavLinks pathname={pathname} showStock={showStock} showFinance={showFinance} />
         </nav>
 
-        <div className="px-3 py-4 border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+        <div className="px-3 py-4 border-t shrink-0" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
           <button
             type="button"
             disabled={logoutPending}
@@ -133,12 +216,14 @@ export function AdminSidebar({ restaurantName }: { restaurantName: string }) {
 
         {/* Icon-only nav for quick access */}
         <nav className="flex items-center gap-0.5">
-          {NAV.map(({ href, icon: Icon, exact }) => {
-            const active = exact ? pathname === href : pathname.startsWith(href);
+          {[...NAV, ...stockNavFor(showStock, showFinance)].map((item) => {
+            const active = isActive(pathname, item);
+            const Icon = item.icon;
             return (
               <Link
-                key={href}
-                href={href}
+                key={item.href}
+                href={item.href}
+                aria-label={item.label}
                 className="w-9 h-9 flex items-center justify-center rounded-lg transition-colors"
                 style={{
                   background: active ? "rgba(255,255,255,0.12)" : "transparent",
@@ -155,13 +240,14 @@ export function AdminSidebar({ restaurantName }: { restaurantName: string }) {
       {/* ── Mobile drawer overlay ──────────────────────────────────── */}
       {mobileOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex">
-          {/* Drawer panel */}
+          {/* Drawer panel — h-full (not min-h-screen) so it never grows past the
+              viewport; the nav inside scrolls instead. */}
           <div
-            className="w-64 flex flex-col min-h-screen"
+            className="w-64 flex flex-col h-full"
             style={{ background: "var(--color-brand-dark)" }}
           >
             <div
-              className="flex items-center justify-between px-5 py-4 border-b"
+              className="flex items-center justify-between px-5 py-4 border-b shrink-0"
               style={{ borderColor: "rgba(255,255,255,0.08)" }}
             >
               <span className="text-sm" style={{ color: "#fff", fontWeight: 300 }}>
@@ -180,11 +266,16 @@ export function AdminSidebar({ restaurantName }: { restaurantName: string }) {
               {restaurantName}
             </p>
 
-            <nav className="flex-1 px-3 py-3 flex flex-col gap-0.5">
-              <NavLinks pathname={pathname} onNavigate={() => setMobileOpen(false)} />
+            <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-3 flex flex-col gap-0.5">
+              <NavLinks
+                pathname={pathname}
+                showStock={showStock}
+                showFinance={showFinance}
+                onNavigate={() => setMobileOpen(false)}
+              />
             </nav>
 
-            <div className="px-3 py-4 border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+            <div className="px-3 py-4 border-t shrink-0" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
               <button
                 type="button"
                 disabled={logoutPending}

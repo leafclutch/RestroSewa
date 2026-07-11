@@ -1,5 +1,7 @@
 ﻿import { requireRestaurantAdmin } from "@/lib/auth/guards";
 import { createServiceClient } from "@/lib/supabase/service";
+import { getDashboardAnalytics } from "@/app/actions/analytics";
+import { StockFinanceOverview } from "./_components/stock-finance-overview";
 import Link from "next/link";
 import { BookOpen, LayoutGrid, Zap, Users } from "lucide-react";
 
@@ -46,6 +48,8 @@ export default async function AdminDashboardPage() {
   const { restaurant_id } = restaurantUser;
 
   const service = createServiceClient();
+
+  const analytics = await getDashboardAnalytics();
 
   const [menuItemsRes, categoriesRes, tablesRes, workstationsRes, staffRes] =
     await Promise.all([
@@ -123,7 +127,7 @@ export default async function AdminDashboardPage() {
         Overview
       </h1>
       <p className="text-sm mb-8" style={{ color: "var(--color-ink-mute)" }}>
-        {restaurantUser.display_name} Â· Restaurant Admin
+        {restaurantUser.display_name} · Restaurant Admin
       </p>
 
       <div className="grid grid-cols-2 gap-3 max-w-xl">
@@ -131,6 +135,10 @@ export default async function AdminDashboardPage() {
           <StatCard key={s.label} {...s} />
         ))}
       </div>
+
+      {/* Stock & Finance analytics — every figure derived from the POS, purchases
+          and credit ledgers; nothing is stored twice. */}
+      <StockFinanceOverview data={analytics} />
 
       {/* Quick links */}
       <div className="mt-10 max-w-xl">
@@ -156,7 +164,7 @@ export default async function AdminDashboardPage() {
                 background: "var(--color-canvas)",
               }}
             >
-              <span style={{ color: "var(--color-primary)" }}>â†’</span>
+              <span style={{ color: "var(--color-primary)" }}>→</span>
               {label}
             </Link>
           ))}

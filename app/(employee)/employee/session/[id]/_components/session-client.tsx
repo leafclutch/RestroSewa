@@ -7,6 +7,8 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Check, ChevronRight, Plus } from "lucide-react";
+import { SessionPrintButtons } from "./print-tickets";
+import type { RestaurantInfo } from "./print-tickets";
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "Pending",
@@ -92,15 +94,30 @@ function OrderItem({ item, sessionId }: { item: OrderItemRow; sessionId: string 
   );
 }
 
-type PaymentMethod = "cash" | "online" | "mixed";
+type PaymentMethod = "cash" | "online" | "card" | "mixed" | "credit";
+type DownTender = "cash" | "online" | "card";
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "cash",   label: "Cash"   },
   { value: "online", label: "Online" },
+  { value: "card",   label: "Card"   },
   { value: "mixed",  label: "Mixed"  },
+  { value: "credit", label: "Credit" },
 ];
 
-function PaymentForm({ session }: { session: SessionDetail }) {
+const DOWN_TENDERS: { value: DownTender; label: string }[] = [
+  { value: "cash",   label: "Cash"   },
+  { value: "online", label: "Online" },
+  { value: "card",   label: "Card"   },
+];
+
+function PaymentForm({
+  session,
+  canUseCredit,
+}: {
+  session: SessionDetail;
+  canUseCredit: boolean;
+}) {
   const [state, action, pending] = useActionState<ActionResult, FormData>(
     closeSessionWithPayment,
     null
@@ -109,7 +126,18 @@ function PaymentForm({ session }: { session: SessionDetail }) {
   const [cashAmt, setCashAmt]     = useState("");
   const [onlineAmt, setOnlineAmt] = useState("");
 
+  // Credit — who owes it, and what (if anything) they're paying right now.
+  const [custName, setCustName]       = useState("");
+  const [custPhone, setCustPhone]     = useState("");
+  const [paidNow, setPaidNow]         = useState("");
+  const [downTender, setDownTender]   = useState<DownTender>("cash");
+  const [creditNotes, setCreditNotes] = useState("");
+
   const total = session.total;
+
+  const methods = canUseCredit
+    ? PAYMENT_METHODS
+    : PAYMENT_METHODS.filter((m) => m.value !== "credit");
 
   function handleCashChange(val: string) {
     setCashAmt(val);
@@ -123,12 +151,32 @@ function PaymentForm({ session }: { session: SessionDetail }) {
     setCashAmt(!isNaN(online) && online >= 0 ? Math.max(0, total - online).toFixed(2) : "");
   }
 
-  const bothFilled  = cashAmt !== "" && onlineAmt !== "";
-  const mixedSum    = (parseFloat(cashAmt) || 0) + (parseFloat(onlineAmt) || 0);
-  const mixedValid  = method !== "mixed" || (bothFilled && Math.abs(mixedSum - total) < 0.01);
-  const canSubmit   = !pending && mixedValid && (method !== "mixed" || bothFilled);
+  const bothFilled = cashAmt !== "" && onlineAmt !== "";
+  const mixedSum   = (parseFloat(cashAmt) || 0) + (parseFloat(onlineAmt) || 0);
+  const mixedValid = method !== "mixed" || (bothFilled && Math.abs(mixedSum - total) < 0.01);
+
+  // Credit: blank "paid now" means the whole bill goes on credit.
+  const paidNowNum   = parseFloat(paidNow) || 0;
+  const creditAmount = Math.max(0, total - paidNowNum);
+  const paidNowValid = paidNowNum >= 0 && paidNowNum < total;
+  const creditValid =
+    method !== "credit" || (custName.trim().length > 0 && paidNowValid);
+
+  const canSubmit =
+    !pending &&
+    mixedValid &&
+    creditValid &&
+    (method !== "mixed" || bothFilled);
 
   const errorMsg = state?.error;
+
+  // What the server records as tendered. On a credit bill this is the down
+  // payment only — the rest is the credit.
+  const tender = {
+    cash:   method === "cash"  ? total : method === "credit" && downTender === "cash"   ? paidNowNum : 0,
+    online: method === "online" ? total : method === "credit" && downTender === "online" ? paidNowNum : 0,
+    card:   method === "card"  ? total : method === "credit" && downTender === "card"   ? paidNowNum : 0,
+  };
 
   return (
     <form
@@ -136,20 +184,16 @@ function PaymentForm({ session }: { session: SessionDetail }) {
       className="rounded-xl border px-5 py-5 flex flex-col gap-4"
       style={{ background: "var(--color-canvas)", borderColor: "var(--color-primary)", borderWidth: 1.5 }}
     >
-      <input type="hidden" name="session_id"    value={session.id} />
-      <input type="hidden" name="total_amount"  value={total.toFixed(2)} />
+      <input type="hidden" name="session_id"   value={session.id} />
+      <input type="hidden" name="total_amount" value={total.toFixed(2)} />
 
-      {/* Pre-computed amounts for cash / online */}
-      {method === "cash" && (
+      {/* Tender split. Mixed drives cash/online from its own inputs, so it opts
+          out of these pre-computed values. */}
+      {method !== "mixed" && (
         <>
-          <input type="hidden" name="cash_amount"   value={total.toFixed(2)} />
-          <input type="hidden" name="online_amount" value="0" />
-        </>
-      )}
-      {method === "online" && (
-        <>
-          <input type="hidden" name="cash_amount"   value="0" />
-          <input type="hidden" name="online_amount" value={total.toFixed(2)} />
+          <input type="hidden" name="cash_amount"   value={tender.cash.toFixed(2)} />
+          <input type="hidden" name="online_amount" value={tender.online.toFixed(2)} />
+          <input type="hidden" name="card_amount"   value={tender.card.toFixed(2)} />
         </>
       )}
 
@@ -162,16 +206,21 @@ function PaymentForm({ session }: { session: SessionDetail }) {
         <p className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
           Payment method
         </p>
-        <div className="flex gap-1">
-          {PAYMENT_METHODS.map((m) => {
+        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${methods.length}, 1fr)` }}>
+          {methods.map((m) => {
             const active = method === m.value;
+            const isCredit = m.value === "credit";
             return (
               <label
                 key={m.value}
-                className="flex items-center gap-2 cursor-pointer flex-1 justify-center py-2 rounded-lg border text-sm transition-colors"
+                className="flex items-center gap-2 cursor-pointer justify-center py-2 rounded-lg border text-sm transition-colors"
                 style={{
-                  borderColor: active ? "var(--color-primary)" : "var(--color-hairline-input)",
-                  background:  active ? "rgba(99,102,241,0.06)" : "var(--color-canvas-soft)",
+                  borderColor: active
+                    ? isCredit ? "#f97316" : "var(--color-primary)"
+                    : "var(--color-hairline-input)",
+                  background: active
+                    ? isCredit ? "rgba(249,115,22,0.08)" : "rgba(99,102,241,0.06)"
+                    : "var(--color-canvas-soft)",
                   color: "var(--color-ink)",
                 }}
               >
@@ -190,8 +239,8 @@ function PaymentForm({ session }: { session: SessionDetail }) {
         </div>
       </div>
 
-      {/* Cash or Online: show total as read-only */}
-      {method !== "mixed" && (
+      {/* Paid in full (cash / online / card): the amount is simply the total. */}
+      {(method === "cash" || method === "online" || method === "card") && (
         <div
           className="flex items-center justify-between px-4 py-3 rounded-lg"
           style={{ background: "var(--color-canvas-soft)", border: "1px solid var(--color-hairline)" }}
@@ -277,6 +326,157 @@ function PaymentForm({ session }: { session: SessionDetail }) {
         </div>
       )}
 
+      {/* Credit: close the bill with all or part of it still owed. */}
+      {method === "credit" && (
+        <div className="flex flex-col gap-3">
+          <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+            The bill is closed in full, and the unpaid balance is recorded against the
+            customer so it can be collected later.
+          </p>
+
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="credit_customer_name"
+              className="text-xs uppercase tracking-wide"
+              style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+            >
+              Customer name <span style={{ color: "var(--color-ruby)" }}>*</span>
+            </label>
+            <Input
+              id="credit_customer_name"
+              name="credit_customer_name"
+              type="text"
+              required
+              autoComplete="off"
+              placeholder="Who owes this?"
+              value={custName}
+              onChange={(e) => setCustName(e.target.value)}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="credit_customer_phone"
+              className="text-xs uppercase tracking-wide"
+              style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+            >
+              Phone number
+            </label>
+            <Input
+              id="credit_customer_phone"
+              name="credit_customer_phone"
+              type="tel"
+              autoComplete="off"
+              placeholder="Recommended — used to trace the credit"
+              value={custPhone}
+              onChange={(e) => setCustPhone(e.target.value)}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="paid_now"
+              className="text-xs uppercase tracking-wide"
+              style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+            >
+              Paying now (₹) — leave blank for full credit
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>₹</span>
+              <Input
+                id="paid_now"
+                type="number"
+                min="0"
+                max={total}
+                step="0.01"
+                placeholder="0.00"
+                value={paidNow}
+                onChange={(e) => setPaidNow(e.target.value)}
+                className="pl-7"
+              />
+            </div>
+          </div>
+
+          {/* Which tender the down payment came in as — only matters if they paid. */}
+          {paidNowNum > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <p className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+                Paid by
+              </p>
+              <div className="grid grid-cols-3 gap-1">
+                {DOWN_TENDERS.map((t) => {
+                  const active = downTender === t.value;
+                  return (
+                    <button
+                      key={t.value}
+                      type="button"
+                      onClick={() => setDownTender(t.value)}
+                      className="py-1.5 rounded-lg border text-sm transition-colors"
+                      style={{
+                        borderColor: active ? "var(--color-primary)" : "var(--color-hairline-input)",
+                        background: active ? "rgba(99,102,241,0.06)" : "var(--color-canvas-soft)",
+                        color: "var(--color-ink)",
+                      }}
+                    >
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="credit_notes"
+              className="text-xs uppercase tracking-wide"
+              style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+            >
+              Note
+            </label>
+            <Input
+              id="credit_notes"
+              name="credit_notes"
+              type="text"
+              autoComplete="off"
+              placeholder="Optional — e.g. regular guest, will settle Friday"
+              value={creditNotes}
+              onChange={(e) => setCreditNotes(e.target.value)}
+            />
+          </div>
+
+          {/* The maths, spelled out, so the cashier can check it against the cash
+              in their hand before committing. */}
+          <div
+            className="rounded-lg border px-4 py-3 flex flex-col gap-1.5"
+            style={{ background: "#fff7ed", borderColor: "#f9731644" }}
+          >
+            <div className="flex items-center justify-between text-sm">
+              <span style={{ color: "#9a3412" }}>Bill total</span>
+              <span className="tabular" style={{ color: "#9a3412" }}>₹{total.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span style={{ color: "#9a3412" }}>Paying now</span>
+              <span className="tabular" style={{ color: "#9a3412" }}>− ₹{paidNowNum.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between pt-1.5 border-t" style={{ borderColor: "#f9731633" }}>
+              <span className="text-sm font-medium" style={{ color: "#9a3412" }}>Goes on credit</span>
+              <span className="text-lg font-medium tabular" style={{ color: "#9a3412" }}>
+                ₹{creditAmount.toFixed(2)}
+              </span>
+            </div>
+          </div>
+
+          {paidNow !== "" && !paidNowValid && (
+            <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
+              {paidNowNum >= total
+                ? `That settles the whole bill — use Cash, Online or Card instead.`
+                : `Enter an amount between ₹0 and ₹${total.toFixed(2)}.`}
+            </p>
+          )}
+        </div>
+      )}
+
       {errorMsg && (
         <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
           {errorMsg}
@@ -284,7 +484,11 @@ function PaymentForm({ session }: { session: SessionDetail }) {
       )}
 
       <Button type="submit" variant="primary" disabled={!canSubmit}>
-        {pending ? "Closing…" : "Complete & close session"}
+        {pending
+          ? "Closing…"
+          : method === "credit"
+          ? `Close & record ₹${creditAmount.toFixed(0)} credit`
+          : "Complete & close session"}
       </Button>
     </form>
   );
@@ -292,18 +496,26 @@ function PaymentForm({ session }: { session: SessionDetail }) {
 
 export function SessionClient({
   session,
+  restaurant,
+  staffName = "",
   canCreateOrders = false,
   canCloseBills = false,
   canForceClose = false,
   canSeePIN = true,
+  canUseCredit = false,
 }: {
   session: SessionDetail;
+  restaurant: RestaurantInfo;
+  staffName?: string;
   canCreateOrders?: boolean;
   canCloseBills?: boolean;
   canForceClose?: boolean;
   canSeePIN?: boolean;
+  canUseCredit?: boolean;
 }) {
-  const [, startForceClose] = useTransition();
+  const [forceClosing, startForceClose] = useTransition();
+  const [forceError, setForceError] = useState<string | null>(null);
+  const hasOrders = session.items.length > 0;
   const pendingItems = session.items.filter((i) => i.item_status !== "served");
   const servedItems  = session.items.filter((i) => i.item_status === "served");
   const isClosed     = session.status === "closed";
@@ -393,7 +605,19 @@ export function SessionClient({
             </Link>
           )}
 
-          {canCloseBills && <PaymentForm session={session} />}
+          {/* KOT / Bill printing — for staff with order/billing permissions,
+              once the table has at least one order. */}
+          {hasOrders && (
+            <SessionPrintButtons
+              session={session}
+              restaurant={restaurant}
+              staffName={staffName}
+              canPrintKot={canCreateOrders}
+              canPrintBill={canCloseBills}
+            />
+          )}
+
+          {canCloseBills && <PaymentForm session={session} canUseCredit={canUseCredit} />}
 
           {!canCreateOrders && !canCloseBills && (
             <p className="text-sm text-center py-2" style={{ color: "var(--color-ink-mute)" }}>
@@ -401,26 +625,46 @@ export function SessionClient({
             </p>
           )}
 
-          {canForceClose && (
-            <button
-              type="button"
-              className="w-full rounded-xl border py-3 text-sm font-medium transition-colors"
-              style={{ borderColor: "#ef444444", color: "#dc2626", background: "#fff0f0" }}
-              onClick={() => {
-                if (
-                  confirm(
-                    "Force close this session? Pending notifications will be cleared and the table/room will become available immediately."
-                  )
-                ) {
-                  startForceClose(async () => {
-                    await forceCloseSession(session.id);
-                  });
-                }
-              }}
+          {/* Force close / deactivate.
+              · Cashier/manager (canForceClose): may close any session.
+              · Any assigned staff: may deactivate an EMPTY table (opened by
+                mistake). A table with orders is blocked with a clear message. */}
+          {hasOrders && !canForceClose ? (
+            <div
+              className="rounded-xl border px-4 py-3 text-sm"
+              style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)", color: "var(--color-ink-mute)" }}
             >
-              Force close session
-            </button>
-          )}
+              This table contains active orders and can only be closed by the Cashier.
+            </div>
+          ) : (canForceClose || !hasOrders) ? (
+            <>
+              <button
+                type="button"
+                disabled={forceClosing}
+                className="w-full rounded-xl border py-3 text-sm font-medium transition-colors disabled:opacity-60"
+                style={{ borderColor: "#ef444444", color: "#dc2626", background: "#fff0f0" }}
+                onClick={() => {
+                  const msg = !hasOrders
+                    ? "Deactivate this table? It has no orders and will return to Available immediately."
+                    : "Force close this session? Pending notifications will be cleared and the table/room will become available immediately.";
+                  if (confirm(msg)) {
+                    setForceError(null);
+                    startForceClose(async () => {
+                      const res = await forceCloseSession(session.id);
+                      if (res?.error) setForceError(res.error);
+                    });
+                  }
+                }}
+              >
+                {forceClosing ? "Closing…" : !hasOrders ? "Deactivate table" : "Force close session"}
+              </button>
+              {forceError && (
+                <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+                  {forceError}
+                </p>
+              )}
+            </>
+          ) : null}
         </>
       )}
 

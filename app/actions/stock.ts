@@ -1,0 +1,702 @@
+"use server";
+
+import { createServiceClient } from "@/lib/supabase/service";
+import { revalidatePath } from "next/cache";
+import { STOCK_ACCESS } from "@/lib/permissions";
+import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
+import { dayBounds, stockStatus, CAN_ADD_STOCK } from "@/lib/stock";
+import type { StockMovement, StockStatus } from "@/lib/stock";
+
+export type ActionResult = { error: string } | null;
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type StockRow = {
+  id: string;
+  product_code: string;
+  name: string;
+  unit: string;
+  low_stock_threshold: number;
+  last_unit_cost: number;
+  is_active: boolean;
+  /** Stock at the start of the selected day (= previous day's final stock). */
+  opening: number;
+  purchased: number;
+  /** Sold through the POS. */
+  used_pos: number;
+  /** Taken out by hand: kitchen usage, waste, damage, staff meals. */
+  used_manual: number;
+  /** Everything consumed today = POS + manual. */
+  used: number;
+  /** Put BACK by a correction. Kept apart from `used` so a +5 correction can't
+   *  cancel a −5 wastage and report "nothing used today". */
+  added: number;
+  /** Final stock = opening + purchased − used + added. */
+  closing: number;
+  status: StockStatus;
+  /** How many menu items sell this product. 0 ⇒ nothing will ever deduct it. */
+  link_count: number;
+};
+
+export type StockSummary = {
+  productCount: number;
+  lowCount: number;
+  outCount: number;
+  /** Closing stock valued at each product's last purchase price. */
+  inventoryValue: number;
+  /** Menu items with no product link — their sales deduct nothing. */
+  unlinkedMenuItems: number;
+};
+
+export type StockFilter = "all" | "low" | "out" | "inactive";
+
+export type ProductLink = {
+  link_id: string;
+  menu_item_id: string;
+  menu_item_name: string;
+  qty_per_unit: number;
+};
+
+export type ProductDetail = StockRow & {
+  created_at: string;
+  /** Every menu item that consumes this product. */
+  links: ProductLink[];
+};
+
+/**
+ * A menu item and everything it consumes. `products` is a list because a menu
+ * item may now have a recipe — one entry today is simply a recipe of one.
+ */
+export type MenuItemLink = {
+  menu_item_id: string;
+  menu_item_name: string;
+  products: {
+    link_id: string;
+    product_id: string;
+    product_name: string;
+    unit: string;
+    qty_per_unit: number;
+  }[];
+};
+
+function sanitizeSearch(raw: string): string {
+  return raw.replace(/[,()*%\\]/g, " ").trim().slice(0, 60);
+}
+
+const RPC_ERRORS: Record<string, string> = {
+  PRODUCT_EXISTS: "A product with this name already exists. Use that one instead of creating a second.",
+  NAME_REQUIRED: "Enter the product name.",
+  UNIT_REQUIRED: "Enter a unit (bottle, kg, litre…).",
+  INVALID_OPENING_STOCK: "Opening stock cannot be negative.",
+  INVALID_LOW_STOCK: "The low-stock level cannot be negative.",
+};
+
+function rpcError(message: string, fallback: string): string {
+  for (const [code, text] of Object.entries(RPC_ERRORS)) {
+    if (message.includes(code)) return text;
+  }
+  return fallback;
+}
+
+// ─── Stock list for a given day ───────────────────────────────────────────────
+// Every figure comes from `stock_report`, which derives them from the POS, the
+// purchase ledger and adjustments — so "Used Today" needs no manual deduction and
+// "Yesterday's Stock" needs no nightly rollover job.
+
+export async function getStock(params?: {
+  search?: string | null;
+  filter?: StockFilter;
+  /** Calendar day (YYYY-MM-DD). Defaults to today. */
+  day?: string | null;
+}): Promise<StockRow[]> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canViewStock(ru)) return [];
+
+  const service = createServiceClient();
+  const { from, to } = dayBounds(params?.day ?? null);
+
+  const [productsRes, reportRes, linksRes] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("products")
+      .select("id, product_code, name, unit, low_stock_threshold, last_unit_cost, is_active")
+      .eq("restaurant_id", ru.restaurant_id),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any).rpc("stock_report", {
+      p_restaurant_id: ru.restaurant_id,
+      p_from: from.toISOString(),
+      p_to: to.toISOString(),
+    }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("menu_item_products")
+      .select("product_id")
+      .eq("restaurant_id", ru.restaurant_id),
+  ]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const report = new Map<string, any>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ((reportRes.data ?? []) as any[]).map((r) => [r.product_id, r])
+  );
+
+  const linkCount = new Map<string, number>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const l of (linksRes.data ?? []) as any[]) {
+    linkCount.set(l.product_id, (linkCount.get(l.product_id) ?? 0) + 1);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let rows: StockRow[] = ((productsRes.data ?? []) as any[]).map((p) => {
+    const r = report.get(p.id);
+    const closing = Number(r?.closing ?? 0);
+    const threshold = Number(p.low_stock_threshold);
+    return {
+      id: p.id,
+      product_code: p.product_code,
+      name: p.name,
+      unit: p.unit,
+      low_stock_threshold: threshold,
+      last_unit_cost: Number(p.last_unit_cost),
+      is_active: p.is_active,
+      opening: Number(r?.opening ?? 0),
+      purchased: Number(r?.purchased ?? 0),
+      used_pos: Number(r?.used_pos ?? 0),
+      used_manual: Number(r?.used_manual ?? 0),
+      used: Number(r?.used ?? 0),
+      added: Number(r?.added ?? 0),
+      closing,
+      status: stockStatus(closing, threshold),
+      link_count: linkCount.get(p.id) ?? 0,
+    };
+  });
+
+  const filter = params?.filter ?? "all";
+  if (filter === "inactive") rows = rows.filter((p) => !p.is_active);
+  else {
+    rows = rows.filter((p) => p.is_active);
+    if (filter === "low") rows = rows.filter((p) => p.status === "low");
+    else if (filter === "out") rows = rows.filter((p) => p.status === "out");
+  }
+
+  const search = sanitizeSearch(params?.search ?? "");
+  if (search) {
+    const q = search.toLowerCase();
+    rows = rows.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.product_code.toLowerCase().includes(q) ||
+        p.unit.toLowerCase().includes(q)
+    );
+  }
+
+  // Anything needing attention first (out, then low), then alphabetical.
+  const rank: Record<StockStatus, number> = { out: 0, low: 1, ok: 2 };
+  return rows.sort(
+    (a, b) => rank[a.status] - rank[b.status] || a.name.localeCompare(b.name)
+  );
+}
+
+export async function getStockSummary(day?: string | null): Promise<StockSummary> {
+  const ru = await getRestaurantUser();
+  const empty: StockSummary = {
+    productCount: 0,
+    lowCount: 0,
+    outCount: 0,
+    inventoryValue: 0,
+    unlinkedMenuItems: 0,
+  };
+  if (!STOCK_ACCESS.canViewStock(ru)) return empty;
+
+  const rows = await getStock({ day: day ?? null, filter: "all" });
+
+  const service = createServiceClient();
+  const [menuRes, linkRes] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("menu_items")
+      .select("id")
+      .eq("restaurant_id", ru.restaurant_id)
+      .not("is_deleted", "is", true),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("menu_item_products")
+      .select("menu_item_id")
+      .eq("restaurant_id", ru.restaurant_id),
+  ]);
+
+  const linked = new Set(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ((linkRes.data ?? []) as any[]).map((l) => l.menu_item_id)
+  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const menuItems = (menuRes.data ?? []) as any[];
+
+  const summary: StockSummary = {
+    productCount: rows.length,
+    lowCount: rows.filter((r) => r.status === "low").length,
+    outCount: rows.filter((r) => r.status === "out").length,
+    // Value what's actually on the shelf, at what it last cost to buy.
+    inventoryValue: rows.reduce(
+      (sum, r) => sum + Math.max(0, r.closing) * r.last_unit_cost,
+      0
+    ),
+    unlinkedMenuItems: menuItems.filter((m) => !linked.has(m.id)).length,
+  };
+  return summary;
+}
+
+// ─── Product detail ───────────────────────────────────────────────────────────
+
+export async function getProductDetail(
+  productId: string,
+  day?: string | null
+): Promise<ProductDetail | { error: string }> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canViewStock(ru)) {
+    return { error: "You don't have permission to view stock." };
+  }
+
+  const rows = await getStock({ day: day ?? null, filter: "all" });
+  let row = rows.find((r) => r.id === productId);
+  if (!row) {
+    // Inactive products are filtered out of "all" — fetch it explicitly.
+    const inactive = await getStock({ day: day ?? null, filter: "inactive" });
+    row = inactive.find((r) => r.id === productId);
+  }
+  if (!row) return { error: "Product not found." };
+
+  const service = createServiceClient();
+  const [prodRes, linkRes] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("products")
+      .select("created_at")
+      .eq("id", productId)
+      .eq("restaurant_id", ru.restaurant_id)
+      .maybeSingle(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("menu_item_products")
+      .select("id, menu_item_id, qty_per_unit, menu_items ( name )")
+      .eq("product_id", productId)
+      .eq("restaurant_id", ru.restaurant_id),
+  ]);
+
+  return {
+    ...row,
+    created_at: prodRes.data?.created_at ?? new Date().toISOString(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    links: ((linkRes.data ?? []) as any[])
+      .map((l) => ({
+        link_id: l.id,
+        menu_item_id: l.menu_item_id,
+        menu_item_name: l.menu_items?.name ?? "—",
+        qty_per_unit: Number(l.qty_per_unit),
+      }))
+      .sort((a, b) => a.menu_item_name.localeCompare(b.menu_item_name)),
+  };
+}
+
+// ─── Product history ──────────────────────────────────────────────────────────
+// Every movement of one product — opening count, purchases, POS sales and manual
+// deductions — with a running balance. Assembled by `product_history` from where
+// that data already lives, so the final balance always equals the stock level.
+
+export async function getProductHistory(
+  productId: string
+): Promise<StockMovement[]> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canViewStock(ru)) return [];
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any).rpc("product_history", {
+    p_restaurant_id: ru.restaurant_id, // tenant scope enforced inside the function
+    p_product_id: productId,
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = (data ?? []) as any[];
+  if (rows.length === 0) return [];
+
+  const staffIds = [...new Set(rows.map((m) => m.staff_id).filter(Boolean))] as string[];
+  const names = new Map<string, string>();
+  if (staffIds.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: users } = await (service as any)
+      .from("restaurant_users")
+      .select("id, display_name")
+      .in("id", staffIds);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const u of (users ?? []) as any[]) names.set(u.id, u.display_name);
+  }
+
+  // The function returns oldest-first so the running balance accumulates
+  // correctly; the screen reads newest-first.
+  return rows
+    .map((m) => ({
+      at: m.at,
+      kind: m.kind,
+      qty: Number(m.qty),
+      reason: m.reason ?? null,
+      ref: m.ref ?? null,
+      // Present only on purchases — who it came from, what it cost, how it was paid.
+      vendor_name: m.vendor_name ?? null,
+      vendor_code: m.vendor_code ?? null,
+      amount: m.amount == null ? null : Number(m.amount),
+      method: m.method ?? null,
+      staff_name: m.staff_id ? names.get(m.staff_id) ?? null : null,
+      balance: Number(m.balance),
+    }))
+    .reverse();
+}
+
+// ─── Create / update / (de)activate ───────────────────────────────────────────
+
+export async function createProduct(
+  _prevState: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canManageStock(ru)) {
+    return { error: "You don't have permission to manage stock." };
+  }
+
+  const name = ((formData.get("name") as string) || "").trim();
+  const unit = ((formData.get("unit") as string) || "").trim();
+  const openingRaw = (formData.get("opening_stock") as string) || "";
+  const lowRaw = (formData.get("low_stock_threshold") as string) || "";
+  const opening = openingRaw === "" ? 0 : parseFloat(openingRaw);
+  const low = lowRaw === "" ? 0 : parseFloat(lowRaw);
+
+  if (!name) return { error: "Enter the product name." };
+  if (!unit) return { error: "Enter a unit (bottle, kg, litre…)." };
+  if (isNaN(opening) || opening < 0) return { error: "Opening stock must be zero or more." };
+  if (isNaN(low) || low < 0) return { error: "The low-stock level must be zero or more." };
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).rpc("create_product", {
+    p_restaurant_id: ru.restaurant_id,
+    p_name: name,
+    p_unit: unit,
+    p_opening_stock: opening,
+    p_low_stock: low,
+    p_created_by: ru.id,
+  });
+
+  if (error) {
+    return { error: rpcError(error.message ?? "", "Could not create the product. Please try again.") };
+  }
+
+  revalidatePath("/admin/stock");
+  return null;
+}
+
+export async function updateProduct(
+  _prevState: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canManageStock(ru)) {
+    return { error: "You don't have permission to manage stock." };
+  }
+
+  const id = formData.get("id") as string;
+  const name = ((formData.get("name") as string) || "").trim();
+  const unit = ((formData.get("unit") as string) || "").trim();
+  const lowRaw = (formData.get("low_stock_threshold") as string) || "";
+  const low = lowRaw === "" ? 0 : parseFloat(lowRaw);
+
+  if (!id) return { error: "Product not found." };
+  if (!name) return { error: "Enter the product name." };
+  if (!unit) return { error: "Enter a unit." };
+  if (isNaN(low) || low < 0) return { error: "The low-stock level must be zero or more." };
+
+  const service = createServiceClient();
+  // Opening stock is deliberately NOT editable — changing it would silently
+  // rewrite every historical stock figure. Corrections go through an adjustment,
+  // which leaves an audit trail.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("products")
+    .update({ name, unit, low_stock_threshold: low })
+    .eq("id", id)
+    .eq("restaurant_id", ru.restaurant_id);
+
+  if (error) {
+    if (error.code === "23505") return { error: "Another product already uses this name." };
+    return { error: "Could not update the product. Please try again." };
+  }
+
+  revalidatePath("/admin/stock");
+  return null;
+}
+
+export async function setProductActive(
+  productId: string,
+  isActive: boolean
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canManageStock(ru)) {
+    return { error: "You don't have permission to manage stock." };
+  }
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("products")
+    .update({ is_active: isActive })
+    .eq("id", productId)
+    .eq("restaurant_id", ru.restaurant_id);
+
+  if (error) return { error: "Could not update the product. Please try again." };
+
+  revalidatePath("/admin/stock");
+  return null;
+}
+
+// ─── Adjust stock (correction / wastage) ──────────────────────────────────────
+
+const REASONS = new Set([
+  "kitchen_usage",
+  "waste",
+  "damage",
+  "staff_consumption",
+  "adjustment",
+  "other",
+]);
+
+export async function adjustStock(
+  _prevState: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canManageStock(ru)) {
+    return { error: "You don't have permission to adjust stock." };
+  }
+
+  const productId = formData.get("product_id") as string;
+  const kind = ((formData.get("kind") as string) || "kitchen_usage").toLowerCase();
+  const direction = (formData.get("direction") as string) || "remove";
+  const magnitude = parseFloat(formData.get("qty") as string);
+  const notes = ((formData.get("notes") as string) || "").trim();
+
+  if (!productId) return { error: "Product not found." };
+  if (!REASONS.has(kind)) return { error: "Choose a reason." };
+  if (isNaN(magnitude) || magnitude <= 0) {
+    return { error: "Enter a quantity greater than zero." };
+  }
+
+  // Every reason consumes stock. Only a correction may put stock back, and only
+  // when the admin explicitly asks for it — so a mis-picked reason can never
+  // silently ADD stock.
+  const qty =
+    CAN_ADD_STOCK(kind) && direction === "add" ? magnitude : -magnitude;
+
+  const service = createServiceClient();
+  // Ownership check — stock_adjustments takes a product_id, so confirm the
+  // product is ours before writing against it.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: prod } = await (service as any)
+    .from("products")
+    .select("id")
+    .eq("id", productId)
+    .eq("restaurant_id", ru.restaurant_id)
+    .maybeSingle();
+  if (!prod) return { error: "Product not found." };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).from("stock_adjustments").insert({
+    restaurant_id: ru.restaurant_id,
+    product_id: productId,
+    kind,
+    qty,
+    notes: notes || null,
+    created_by: ru.id,
+  });
+
+  if (error) return { error: "Could not record the adjustment. Please try again." };
+
+  revalidatePath("/admin/stock");
+  return null;
+}
+
+// ─── Menu item ↔ product links ────────────────────────────────────────────────
+// This link is what makes a POS sale deduct stock. One product per menu item.
+
+export async function getMenuItemLinks(): Promise<MenuItemLink[]> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canViewStock(ru)) return [];
+
+  const service = createServiceClient();
+  const [menuRes, linkRes] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("menu_items")
+      .select("id, name")
+      .eq("restaurant_id", ru.restaurant_id)
+      .not("is_deleted", "is", true)
+      .order("name"),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("menu_item_products")
+      .select("id, menu_item_id, product_id, qty_per_unit, products ( name, unit )")
+      .eq("restaurant_id", ru.restaurant_id),
+  ]);
+
+  // A menu item may have SEVERAL products now, so links are grouped, not mapped.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const byItem = new Map<string, any[]>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const l of (linkRes.data ?? []) as any[]) {
+    if (!byItem.has(l.menu_item_id)) byItem.set(l.menu_item_id, []);
+    byItem.get(l.menu_item_id)!.push(l);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((menuRes.data ?? []) as any[]).map((m) => ({
+    menu_item_id: m.id,
+    menu_item_name: m.name,
+    products: (byItem.get(m.id) ?? [])
+      .map((l) => ({
+        link_id: l.id,
+        product_id: l.product_id,
+        product_name: l.products?.name ?? "—",
+        unit: l.products?.unit ?? "",
+        qty_per_unit: Number(l.qty_per_unit),
+      }))
+      .sort((a, b) => a.product_name.localeCompare(b.product_name)),
+  }));
+}
+
+/**
+ * Attach a product to a menu item, or change how much of it that item consumes.
+ * Many-to-many: a product may feed many menu items, and a menu item may consume
+ * several products. Re-linking the same pair updates the quantity rather than
+ * creating a duplicate.
+ */
+export async function linkMenuItem(
+  _prevState: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canManageStock(ru)) {
+    return { error: "You don't have permission to manage stock." };
+  }
+
+  const menuItemId = formData.get("menu_item_id") as string;
+  const productId = formData.get("product_id") as string;
+  const qtyRaw = (formData.get("qty_per_unit") as string) || "1";
+  const qty = parseFloat(qtyRaw);
+
+  if (!menuItemId) return { error: "Choose a menu item." };
+  if (!productId) return { error: "Choose a product." };
+  if (isNaN(qty) || qty <= 0) return { error: "Quantity per sale must be greater than zero." };
+
+  const service = createServiceClient();
+
+  // Both sides must belong to this restaurant.
+  const [menuRes, prodRes] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("menu_items")
+      .select("id")
+      .eq("id", menuItemId)
+      .eq("restaurant_id", ru.restaurant_id)
+      .maybeSingle(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("products")
+      .select("id")
+      .eq("id", productId)
+      .eq("restaurant_id", ru.restaurant_id)
+      .maybeSingle(),
+  ]);
+  if (!menuRes.data) return { error: "Menu item not found." };
+  if (!prodRes.data) return { error: "Product not found." };
+
+  // Conflict is now on the PAIR: the same product can't be attached twice to the
+  // same menu item, but other products on that item are left alone.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("menu_item_products")
+    .upsert(
+      {
+        restaurant_id: ru.restaurant_id,
+        menu_item_id: menuItemId,
+        product_id: productId,
+        qty_per_unit: qty,
+      },
+      { onConflict: "menu_item_id,product_id" }
+    );
+
+  if (error) return { error: "Could not link the menu item. Please try again." };
+
+  revalidatePath("/admin/stock");
+  return null;
+}
+
+/** Detach ONE product from ONE menu item, leaving any others intact. */
+export async function unlinkMenuItem(
+  menuItemId: string,
+  productId: string
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canManageStock(ru)) {
+    return { error: "You don't have permission to manage stock." };
+  }
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("menu_item_products")
+    .delete()
+    .eq("menu_item_id", menuItemId)
+    .eq("product_id", productId)
+    .eq("restaurant_id", ru.restaurant_id);
+
+  if (error) return { error: "Could not unlink the menu item. Please try again." };
+
+  revalidatePath("/admin/stock");
+  return null;
+}
+
+/** Menu items, for the product-centric link picker. */
+export async function getMenuItemOptions(): Promise<{ id: string; name: string }[]> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canViewStock(ru)) return [];
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("menu_items")
+    .select("id, name")
+    .eq("restaurant_id", ru.restaurant_id)
+    .not("is_deleted", "is", true)
+    .order("name");
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((data ?? []) as any[]).map((m) => ({ id: m.id, name: m.name }));
+}
+
+/** Active products, for the link + purchase pickers. */
+export async function getProductOptions(): Promise<
+  { id: string; name: string; unit: string }[]
+> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canViewStock(ru)) return [];
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("products")
+    .select("id, name, unit")
+    .eq("restaurant_id", ru.restaurant_id)
+    .eq("is_active", true)
+    .order("name");
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((data ?? []) as any[]).map((p) => ({ id: p.id, name: p.name, unit: p.unit }));
+}
