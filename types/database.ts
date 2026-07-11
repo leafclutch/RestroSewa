@@ -613,6 +613,12 @@ export type Database = {
           session_id: string | null;
           room_stay_id: string | null;
           amount: number;
+          // What the customer actually handed over, by tender. On a `credit`
+          // bill these sum to LESS than total_amount — the gap is the credit.
+          cash_amount: number;
+          online_amount: number;
+          card_amount: number;
+          total_amount: number | null;
           payment_method: Database["public"]["Enums"]["payment_method"];
           notes: string | null;
           created_by: string | null;
@@ -624,6 +630,10 @@ export type Database = {
           session_id?: string | null;
           room_stay_id?: string | null;
           amount: number;
+          cash_amount?: number;
+          online_amount?: number;
+          card_amount?: number;
+          total_amount?: number | null;
           payment_method?: Database["public"]["Enums"]["payment_method"];
           notes?: string | null;
           created_by?: string | null;
@@ -635,10 +645,93 @@ export type Database = {
           session_id?: string | null;
           room_stay_id?: string | null;
           amount?: number;
+          cash_amount?: number;
+          online_amount?: number;
+          card_amount?: number;
+          total_amount?: number | null;
           payment_method?: Database["public"]["Enums"]["payment_method"];
           notes?: string | null;
           created_by?: string | null;
           created_at?: string;
+        };
+      };
+
+      // A bill closed with an unpaid balance. Linked to the session + payment it
+      // came from — a credit is never a second bill.
+      credits: {
+        Row: {
+          id: string;
+          restaurant_id: string;
+          seq_no: number;
+          credit_number: string; // generated: CR-00001
+          session_id: string | null;
+          payment_id: string | null;
+          customer_name: string;
+          customer_phone: string | null;
+          bill_amount: number;
+          down_payment: number;
+          paid_amount: number;
+          balance: number; // generated: bill_amount - paid_amount
+          status: Database["public"]["Enums"]["credit_status"];
+          notes: string | null;
+          created_by: string | null;
+          created_at: string;
+          settled_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          restaurant_id: string;
+          seq_no: number;
+          session_id?: string | null;
+          payment_id?: string | null;
+          customer_name: string;
+          customer_phone?: string | null;
+          bill_amount: number;
+          down_payment?: number;
+          paid_amount?: number;
+          status?: Database["public"]["Enums"]["credit_status"];
+          notes?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          settled_at?: string | null;
+        };
+        Update: {
+          customer_name?: string;
+          customer_phone?: string | null;
+          paid_amount?: number;
+          status?: Database["public"]["Enums"]["credit_status"];
+          notes?: string | null;
+          settled_at?: string | null;
+        };
+      };
+
+      // Repayments collected AFTER the bill closed. The down payment taken at
+      // billing is on the `payments` row, not here, so it is never counted twice.
+      credit_payments: {
+        Row: {
+          id: string;
+          credit_id: string;
+          restaurant_id: string;
+          amount: number;
+          method: Database["public"]["Enums"]["payment_method"];
+          notes: string | null;
+          received_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          credit_id: string;
+          restaurant_id: string;
+          amount: number;
+          method?: Database["public"]["Enums"]["payment_method"];
+          notes?: string | null;
+          received_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          amount?: number;
+          method?: Database["public"]["Enums"]["payment_method"];
+          notes?: string | null;
         };
       };
 
@@ -694,6 +787,33 @@ export type Database = {
         Args: { event: Json };
         Returns: Json;
       };
+      // Money-moving RPCs — one transaction each. Service role only.
+      close_bill_with_credit: {
+        Args: {
+          p_restaurant_id: string;
+          p_session_id: string;
+          p_total: number;
+          p_cash: number;
+          p_online: number;
+          p_card: number;
+          p_customer_name: string;
+          p_customer_phone: string | null;
+          p_notes: string | null;
+          p_created_by: string | null;
+        };
+        Returns: Database["public"]["Tables"]["credits"]["Row"];
+      };
+      record_credit_payment: {
+        Args: {
+          p_restaurant_id: string;
+          p_credit_id: string;
+          p_amount: number;
+          p_method: string;
+          p_notes: string | null;
+          p_received_by: string | null;
+        };
+        Returns: Database["public"]["Tables"]["credits"]["Row"];
+      };
     };
 
     Enums: {
@@ -704,11 +824,12 @@ export type Database = {
       room_stay_status:    "active" | "checked_out";
       room_charge_type:    "room_rate" | "laundry" | "mini_bar" | "extra_bed" | "other";
       session_type:        "table" | "walk_in" | "credit" | "room_service";
-      session_status:      "active" | "closed";
+      session_status:      "active" | "closed" | "pending_activation";
       order_status:        "pending" | "accepted" | "preparing" | "ready" | "served" | "cancelled";
       item_status:         "pending" | "ready" | "served";
-      payment_method:      "cash" | "card" | "upi" | "other";
-      notification_type:   "call_waiter" | "request_bill" | "call_reception" | "call_housekeeping" | "call_restaurant" | "request_maintenance";
+      payment_method:      "cash" | "card" | "upi" | "other" | "online" | "mixed" | "credit";
+      credit_status:       "pending" | "partially_paid" | "fully_paid";
+      notification_type:   "call_waiter" | "request_bill" | "call_reception" | "call_housekeeping" | "call_restaurant" | "request_maintenance" | "new_order" | "order_ready" | "table_activation_request";
       notification_status: "pending" | "resolved";
     };
   };

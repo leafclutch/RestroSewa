@@ -7,6 +7,8 @@ import { hasPermission, PERMISSIONS, NAV_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignments";
 import { emitOrderReadyNotification } from "@/lib/notify";
+import { computeCreditStats, settlementOf } from "@/lib/credits";
+import type { BillSettlement, CreditStats } from "@/lib/credits";
 
 export type ActionResult = { error: string } | null;
 
@@ -583,16 +585,19 @@ export async function closeSessionWithPayment(
 
   const service = createServiceClient();
 
-  const sessionId   = formData.get("session_id") as string;
-  const method      = (formData.get("payment_method") as string) || "cash";
-  const cashAmount  = parseFloat(formData.get("cash_amount")   as string) || 0;
+  const sessionId    = formData.get("session_id") as string;
+  const method       = ((formData.get("payment_method") as string) || "cash").toLowerCase();
+  const cashAmount   = parseFloat(formData.get("cash_amount")   as string) || 0;
   const onlineAmount = parseFloat(formData.get("online_amount") as string) || 0;
+  const cardAmount   = parseFloat(formData.get("card_amount")   as string) || 0;
   const totalAmount  = parseFloat(formData.get("total_amount")  as string);
 
-  const validMethods = ["cash", "online", "mixed"];
+  const validMethods = ["cash", "online", "card", "mixed", "credit"];
   if (!validMethods.includes(method)) return { error: "Invalid payment method." };
   if (isNaN(totalAmount) || totalAmount < 0) return { error: "Invalid total amount." };
-  if (cashAmount < 0 || onlineAmount < 0) return { error: "Amounts cannot be negative." };
+  if (cashAmount < 0 || onlineAmount < 0 || cardAmount < 0) {
+    return { error: "Amounts cannot be negative." };
+  }
 
   if (method === "mixed") {
     if (Math.abs(cashAmount + onlineAmount - totalAmount) > 0.01) {
@@ -600,13 +605,82 @@ export async function closeSessionWithPayment(
     }
   }
 
+  // ── Credit: close the bill with part (or all) of it still owed ──────────────
+  // The payment row, the credit and the session close are written together by
+  // `close_bill_with_credit` so a bill can never be closed without its credit
+  // (or vice-versa). No second bill is created — the payments row still carries
+  // the FULL bill value, and only the tendered split is recorded against it.
+  if (method === "credit") {
+    if (!NAV_ACCESS.canManageCredits(ru)) {
+      return { error: "You don't have permission to put a bill on credit." };
+    }
+
+    const customerName  = ((formData.get("credit_customer_name")  as string) || "").trim();
+    const customerPhone = ((formData.get("credit_customer_phone") as string) || "").trim();
+    const creditNotes   = ((formData.get("credit_notes")          as string) || "").trim();
+
+    if (!customerName) {
+      return { error: "Enter the customer's name — a credit must be traceable to someone." };
+    }
+    if (totalAmount <= 0) return { error: "Invalid total amount." };
+
+    const paidNow = cashAmount + onlineAmount + cardAmount;
+    if (paidNow >= totalAmount) {
+      return {
+        error: "Nothing would be left on credit. Use Cash, Online or Card to settle the bill in full.",
+      };
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: credit, error } = await (service as any).rpc("close_bill_with_credit", {
+      p_restaurant_id:  ru.restaurant_id,
+      p_session_id:     sessionId,
+      p_total:          totalAmount,
+      p_cash:           cashAmount,
+      p_online:         onlineAmount,
+      p_card:           cardAmount,
+      p_customer_name:  customerName,
+      p_customer_phone: customerPhone || null,
+      p_notes:          creditNotes || null,
+      p_created_by:     ru.id,
+    });
+
+    if (error) {
+      const msg = error.message ?? "";
+      if (msg.includes("SESSION_NOT_OPEN")) {
+        return { error: "This session has already been closed." };
+      }
+      if (msg.includes("INVALID_DOWN_PAYMENT")) {
+        return { error: "The amount paid now must be less than the bill total." };
+      }
+      if (msg.includes("CUSTOMER_NAME_REQUIRED")) {
+        return { error: "Enter the customer's name." };
+      }
+      return { error: "Could not put this bill on credit. Please try again." };
+    }
+
+    revalidatePath("/employee/dashboard");
+    revalidatePath("/employee/credits");
+    revalidatePath("/employee/sales");
+    revalidatePath(`/employee/session/${sessionId}`);
+    // Land on the new credit record so the cashier can hand over its receipt.
+    redirect(`/employee/credits?open=${credit?.id ?? ""}`);
+  }
+
+  // ── Paid in full ────────────────────────────────────────────────────────────
+  // cash/online/mixed carry their split; card records the whole value under
+  // card_amount. In every case the split adds up to the total.
+  const split =
+    method === "card"
+      ? { cash_amount: 0, online_amount: 0, card_amount: totalAmount }
+      : { cash_amount: cashAmount, online_amount: onlineAmount, card_amount: 0 };
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (service as any).from("payments").insert({
     restaurant_id:  ru.restaurant_id,
     session_id:     sessionId,
     amount:         totalAmount,
-    cash_amount:    cashAmount,
-    online_amount:  onlineAmount,
+    ...split,
     total_amount:   totalAmount,
     payment_method: method,
     created_by:     ru.id,
@@ -944,15 +1018,24 @@ export async function getMyOrderQueue(): Promise<QueueOrder[]> {
 
 export type SalesTxn = {
   id: string;
+  /** The FULL value of the bill — including anything that went on credit. */
   amount: number;
   method: string;
   cash_amount: number;
   online_amount: number;
+  card_amount: number;
   created_at: string;
   table_number: string | null;
   room_number: string | null;
   session_type: string | null;
   customer_name: string | null;
+  /** Paid in full / partially on credit / fully on credit. */
+  settlement: BillSettlement;
+  /** Present only when the bill was closed with a balance owing. */
+  credit_id: string | null;
+  credit_number: string | null;
+  /** The amount that went on credit when this bill was closed. */
+  credit_unpaid: number;
 };
 
 // The period a viewer can filter the Sales screen by. "all" = all-time,
@@ -969,7 +1052,14 @@ export type SalesReport = {
   periodTotal: number;
   orderCount: number;
   avgOrderValue: number;
-  breakdown: { cash: number; online: number; card: number; other: number };
+  /**
+   * How the period's billed value was tendered. `credit` is the part that was
+   * NOT paid — so cash + online + card + credit + other = periodTotal, and the
+   * breakdown always explains the whole of Sales.
+   */
+  breakdown: { cash: number; online: number; card: number; credit: number; other: number };
+  /** Outstanding / collected / created, plus status counts. */
+  credit: CreditStats;
   transactions: SalesTxn[];
 };
 
@@ -1019,6 +1109,16 @@ export async function getSalesReport(params?: {
   to?: string | null;
 }): Promise<SalesReport> {
   const ru = await getRestaurantUser();
+  const emptyCredit: CreditStats = {
+    outstanding: 0,
+    collected: 0,
+    created: 0,
+    pendingCount: 0,
+    partiallyPaidCount: 0,
+    fullyPaidCount: 0,
+    openCount: 0,
+  };
+
   if (!NAV_ACCESS.canSeeSales(ru)) {
     return {
       period: params?.period ?? "today",
@@ -1028,7 +1128,8 @@ export async function getSalesReport(params?: {
       periodTotal: 0,
       orderCount: 0,
       avgOrderValue: 0,
-      breakdown: { cash: 0, online: 0, card: 0, other: 0 },
+      breakdown: { cash: 0, online: 0, card: 0, credit: 0, other: 0 },
+      credit: emptyCredit,
       transactions: [],
     };
   }
@@ -1036,15 +1137,38 @@ export async function getSalesReport(params?: {
   const period = params?.period ?? "today";
   const service = createServiceClient();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any)
-    .from("payments")
-    .select("id, amount, total_amount, cash_amount, online_amount, payment_method, created_at, sessions ( type, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) )")
-    .eq("restaurant_id", ru.restaurant_id)
-    .order("created_at", { ascending: false });
+  // `credits` is embedded off `payments` via credits.payment_id — a bill that
+  // went on credit carries its credit record with it, so no second query per row.
+  // Credit figures are only fetched for staff allowed to see customer debt.
+  const canSeeCredits = NAV_ACCESS.canManageCredits(ru);
+
+  const [paymentsRes, creditsRes, repaymentsRes] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("payments")
+      .select(
+        "id, amount, total_amount, cash_amount, online_amount, card_amount, payment_method, created_at, sessions ( type, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), credits ( id, credit_number, customer_name, down_payment )"
+      )
+      .eq("restaurant_id", ru.restaurant_id)
+      .order("created_at", { ascending: false }),
+    canSeeCredits
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (service as any)
+          .from("credits")
+          .select("bill_amount, down_payment, paid_amount, status, created_at")
+          .eq("restaurant_id", ru.restaurant_id)
+      : Promise.resolve({ data: [] }),
+    canSeeCredits
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (service as any)
+          .from("credit_payments")
+          .select("amount, created_at")
+          .eq("restaurant_id", ru.restaurant_id)
+      : Promise.resolve({ data: [] }),
+  ]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = (data ?? []) as any[];
+  const rows = (paymentsRes.data ?? []) as any[];
 
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -1055,13 +1179,15 @@ export async function getSalesReport(params?: {
   const { fromMs, toMs } = resolveSalesRange(period, params?.from, params?.to);
 
   const overview = { today: 0, week: 0, month: 0, year: 0, total: 0 };
-  const breakdown = { cash: 0, online: 0, card: 0, other: 0 };
+  const breakdown = { cash: 0, online: 0, card: 0, credit: 0, other: 0 };
   let periodTotal = 0;
   let orderCount = 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const inRange: any[] = [];
 
   for (const p of rows) {
+    // A credit bill still records its FULL value here — accrual: the sale
+    // happened when it was billed, whether or not the money has arrived.
     const value = Number(p.total_amount ?? p.amount ?? 0);
     const ts = new Date(p.created_at).getTime();
 
@@ -1076,32 +1202,68 @@ export async function getSalesReport(params?: {
     if (ts >= fromMs && ts <= toMs) {
       const cash = Number(p.cash_amount ?? 0);
       const online = Number(p.online_amount ?? 0);
+      const card = Number(p.card_amount ?? 0);
       periodTotal += value;
       orderCount += 1;
-      // cash/online/mixed rows carry the split in cash_amount/online_amount.
-      // card/upi/other legacy rows carry the whole value under amount.
+
+      // Every row carries its tendered split; the breakdown is what was actually
+      // taken, by tender.
       breakdown.cash += cash;
       breakdown.online += online;
-      if (p.payment_method === "card") breakdown.card += value;
-      else if (p.payment_method === "upi" || p.payment_method === "other") breakdown.other += value;
+      breakdown.card += card;
+
+      if (p.payment_method === "credit") {
+        // The gap between the bill and what was tendered went on credit.
+        breakdown.credit += Math.max(0, value - (cash + online + card));
+      } else if (p.payment_method === "card" && card === 0) {
+        // Legacy card rows, written before card_amount existed, carry the whole
+        // value under amount only.
+        breakdown.card += value;
+      } else if (p.payment_method === "upi" || p.payment_method === "other") {
+        breakdown.other += value;
+      }
       inRange.push(p);
     }
   }
 
   const avgOrderValue = orderCount > 0 ? periodTotal / orderCount : 0;
 
-  const transactions: SalesTxn[] = inRange.slice(0, 200).map((p) => ({
-    id: p.id,
-    amount: Number(p.total_amount ?? p.amount ?? 0),
-    method: p.payment_method,
-    cash_amount: Number(p.cash_amount ?? 0),
-    online_amount: Number(p.online_amount ?? 0),
-    created_at: p.created_at,
-    table_number: p.sessions?.restaurant_tables?.number ?? null,
-    room_number: p.sessions?.rooms?.number ?? null,
-    session_type: p.sessions?.type ?? null,
-    customer_name: p.sessions?.credit_customers?.name ?? null,
-  }));
+  const transactions: SalesTxn[] = inRange.slice(0, 200).map((p) => {
+    const value = Number(p.total_amount ?? p.amount ?? 0);
+    const cash = Number(p.cash_amount ?? 0);
+    const online = Number(p.online_amount ?? 0);
+    const card = Number(p.card_amount ?? 0);
+    // Reverse embed — 0 or 1 credit per payment.
+    const credit = Array.isArray(p.credits) ? p.credits[0] ?? null : p.credits ?? null;
+    const settlement = settlementOf({
+      payment_method: p.payment_method,
+      total_amount: value,
+      cash_amount: cash,
+      online_amount: online,
+      card_amount: card,
+    });
+
+    return {
+      id: p.id,
+      amount: value,
+      method: p.payment_method,
+      cash_amount: cash,
+      online_amount: online,
+      card_amount: card,
+      created_at: p.created_at,
+      table_number: p.sessions?.restaurant_tables?.number ?? null,
+      room_number: p.sessions?.rooms?.number ?? null,
+      session_type: p.sessions?.type ?? null,
+      // The credit record names the customer who owes; fall back to any legacy
+      // customer attached to the session.
+      customer_name: credit?.customer_name ?? p.sessions?.credit_customers?.name ?? null,
+      settlement,
+      credit_id: credit?.id ?? null,
+      credit_number: credit?.credit_number ?? null,
+      credit_unpaid:
+        settlement === "paid" ? 0 : Math.max(0, value - (cash + online + card)),
+    };
+  });
 
   return {
     period,
@@ -1112,6 +1274,14 @@ export async function getSalesReport(params?: {
     orderCount,
     avgOrderValue,
     breakdown,
+    credit: computeCreditStats(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (creditsRes.data ?? []) as any[],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (repaymentsRes.data ?? []) as any[],
+      fromMs,
+      toMs
+    ),
     transactions,
   };
 }
@@ -1127,8 +1297,15 @@ const SALES_METHOD_LABEL: Record<string, string> = {
   online: "Online",
   mixed: "Cash + Online",
   card: "Card",
+  credit: "Credit",
   upi: "UPI",
   other: "Other",
+};
+
+const SALES_STATUS_LABEL: Record<BillSettlement, string> = {
+  paid: "Paid in Full",
+  partial_credit: "Partially Paid (Credit)",
+  full_credit: "Fully on Credit",
 };
 
 function csvCell(v: unknown): string {
@@ -1153,7 +1330,7 @@ export async function exportSalesCsv(params?: {
   const { data } = await (service as any)
     .from("payments")
     .select(
-      "id, amount, total_amount, payment_method, created_at, created_by, sessions ( type, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) )"
+      "id, amount, total_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, sessions ( type, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), credits ( credit_number, customer_name )"
     )
     .eq("restaurant_id", ru.restaurant_id)
     .order("created_at", { ascending: false });
@@ -1187,6 +1364,9 @@ export async function exportSalesCsv(params?: {
     "Payment Method",
     "Payment Status",
     "Total Amount",
+    "Amount Paid",
+    "On Credit",
+    "Credit ID",
     "Cashier",
     "Transaction Status",
   ];
@@ -1201,12 +1381,48 @@ export async function exportSalesCsv(params?: {
       : p.sessions?.type === "walk_in"
       ? "Walk-in"
       : "";
-    const customer = p.sessions?.credit_customers?.name ?? "";
+
+    const value = Number(p.total_amount ?? p.amount ?? 0);
+    const cash = Number(p.cash_amount ?? 0);
+    const online = Number(p.online_amount ?? 0);
+    const card = Number(p.card_amount ?? 0);
+    const credit = Array.isArray(p.credits) ? p.credits[0] ?? null : p.credits ?? null;
+
+    const settlement = settlementOf({
+      payment_method: p.payment_method,
+      total_amount: value,
+      cash_amount: cash,
+      online_amount: online,
+      card_amount: card,
+    });
+
+    // A credit bill is billed in full but only part-tendered — spell out both the
+    // money taken and the money still owed, so the sheet reconciles.
+    const tendered = settlement === "paid" ? value : cash + online + card;
+    const onCredit = Math.max(0, value - tendered);
+
+    const customer = credit?.customer_name ?? p.sessions?.credit_customers?.name ?? "";
     const method = SALES_METHOD_LABEL[p.payment_method] ?? p.payment_method ?? "";
-    const total = Number(p.total_amount ?? p.amount ?? 0).toFixed(2);
     const cashier = cashierNames.get(p.created_by) ?? "";
-    // A `payments` row always represents a completed, paid transaction.
-    lines.push([dt, p.id, table, customer, method, "Paid", total, cashier, "Completed"].map(csvCell).join(","));
+
+    lines.push(
+      [
+        dt,
+        p.id,
+        table,
+        customer,
+        method,
+        SALES_STATUS_LABEL[settlement],
+        value.toFixed(2),
+        tendered.toFixed(2),
+        onCredit.toFixed(2),
+        credit?.credit_number ?? "",
+        cashier,
+        "Completed",
+      ]
+        .map(csvCell)
+        .join(",")
+    );
   }
 
   // Leading BOM so Excel opens UTF-8 correctly; CRLF line endings for Windows.
@@ -1228,6 +1444,7 @@ export type PaidBill = {
   method: string;
   cash_amount: number;
   online_amount: number;
+  card_amount: number;
   total: number;
   cashier_name: string | null;
   order_ids: string[];
@@ -1241,6 +1458,16 @@ export type PaidBill = {
     service_charge_percent?: number;
   };
   items: PaidBillItem[];
+  /** Paid in full, or closed with a balance owing. */
+  settlement: BillSettlement;
+  /** Present only for a bill that went on credit — the state of that debt NOW. */
+  credit: {
+    credit_number: string;
+    customer_name: string;
+    customer_phone: string | null;
+    paid_amount: number;
+    balance: number;
+  } | null;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1265,7 +1492,7 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
   const { data: p } = await (service as any)
     .from("payments")
     .select(
-      "id, amount, total_amount, cash_amount, online_amount, payment_method, created_at, created_by, session_id, restaurant_id, sessions ( type, restaurant_tables ( number ), rooms ( number ) )"
+      "id, amount, total_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, session_id, restaurant_id, sessions ( type, restaurant_tables ( number ), rooms ( number ) ), credits ( credit_number, customer_name, customer_phone, paid_amount, balance )"
     )
     .eq("id", paymentId)
     .maybeSingle();
@@ -1326,13 +1553,20 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
     ? "Walk-in"
     : "—";
 
+  const total = Number(p.total_amount ?? p.amount ?? 0);
+  const cash = Number(p.cash_amount ?? 0);
+  const online = Number(p.online_amount ?? 0);
+  const card = Number(p.card_amount ?? 0);
+  const credit = Array.isArray(p.credits) ? p.credits[0] ?? null : p.credits ?? null;
+
   return {
     payment_id: p.id,
     created_at: p.created_at,
     method: p.payment_method,
-    cash_amount: Number(p.cash_amount ?? 0),
-    online_amount: Number(p.online_amount ?? 0),
-    total: Number(p.total_amount ?? p.amount ?? 0),
+    cash_amount: cash,
+    online_amount: online,
+    card_amount: card,
+    total,
     cashier_name,
     order_ids,
     location,
@@ -1345,5 +1579,21 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
       service_charge_percent: settingsNumber(rest?.settings, "service_charge_percent", "service_charge"),
     },
     items,
+    settlement: settlementOf({
+      payment_method: p.payment_method,
+      total_amount: total,
+      cash_amount: cash,
+      online_amount: online,
+      card_amount: card,
+    }),
+    credit: credit
+      ? {
+          credit_number: credit.credit_number,
+          customer_name: credit.customer_name,
+          customer_phone: credit.customer_phone ?? null,
+          paid_amount: Number(credit.paid_amount),
+          balance: Number(credit.balance),
+        }
+      : null,
   };
 }

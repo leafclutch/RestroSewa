@@ -11,12 +11,14 @@ const METHOD_LABEL: Record<string, string> = {
   online: "Online",
   mixed: "Cash + Online",
   card: "Card",
+  credit: "Credit",
   upi: "UPI",
   other: "Other",
 };
 
-// Reprints a PAID bill for one transaction. Fetches the receipt on demand from
-// the existing payment record — never creates or changes a bill.
+// Reprints a closed bill for one transaction. Fetches the receipt on demand from
+// the existing payment record — never creates or changes a bill. A bill that went
+// on credit reprints with its CURRENT balance, not as "paid".
 export function PaidBillButton({ paymentId }: { paymentId: string }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -66,7 +68,19 @@ export function PaidBillButton({ paymentId }: { paymentId: string }) {
               cashier: bill.cashier_name,
               cash: bill.cash_amount,
               online: bill.online_amount,
+              card: bill.card_amount,
             }}
+            credit={
+              bill.credit
+                ? {
+                    credit_number: bill.credit.credit_number,
+                    customer_name: bill.credit.customer_name,
+                    customer_phone: bill.credit.customer_phone,
+                    tendered: bill.cash_amount + bill.online_amount + bill.card_amount,
+                    balance: bill.credit.balance,
+                  }
+                : null
+            }
           />
         </PrintModal>
       )}

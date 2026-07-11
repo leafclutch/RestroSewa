@@ -18,12 +18,25 @@ export type RestaurantInfo = {
 
 export type BillItem = { id: string; item_name: string; item_price: number; quantity: number };
 
-// Present only for a bill that has been paid — drives the "PAID" block.
+// Present only for a bill that has been closed — drives the PAID / ON CREDIT block.
 export type BillPayment = {
   method: string; // display label, e.g. "Cash", "Cash + Online"
   cashier?: string | null;
   cash?: number; // split, for a mixed payment
   online?: number;
+  card?: number;
+};
+
+// Present only for a bill closed with money still owed. A credit bill is billed
+// in full — this is what's left of it.
+export type BillCredit = {
+  credit_number: string;
+  customer_name: string;
+  customer_phone?: string | null;
+  /** Handed over at billing time. */
+  tendered: number;
+  /** Still owed right now (after any later repayments). */
+  balance: number;
 };
 
 export const shortId = (id: string) => id.slice(0, 8).toUpperCase();
@@ -136,6 +149,7 @@ export function BillTicket({
   at,
   items,
   payment,
+  credit,
 }: {
   restaurant: RestaurantInfo;
   billNo: string;
@@ -144,6 +158,7 @@ export function BillTicket({
   at: Date;
   items: BillItem[];
   payment?: BillPayment;
+  credit?: BillCredit | null;
 }) {
   const subtotal = items.reduce((s, i) => s + Number(i.item_price) * i.quantity, 0);
   const taxPct = restaurant.tax_percent ?? 0;
@@ -151,10 +166,17 @@ export function BillTicket({
   const tax = subtotal * (taxPct / 100);
   const service = subtotal * (svcPct / 100);
   const grandTotal = subtotal + tax + service;
-  const mixedSplit =
-    payment && (payment.cash ?? 0) > 0 && (payment.online ?? 0) > 0
-      ? `Cash ${rupee(payment.cash!)} · Online ${rupee(payment.online!)}`
-      : null;
+
+  // Show the tender split whenever the bill was settled with more than one.
+  const parts = payment
+    ? [
+        { label: "Cash", v: payment.cash ?? 0 },
+        { label: "Online", v: payment.online ?? 0 },
+        { label: "Card", v: payment.card ?? 0 },
+      ].filter((p) => p.v > 0)
+    : [];
+  const tenderSplit =
+    parts.length > 1 ? parts.map((p) => `${p.label} ${rupee(p.v)}`).join(" · ") : null;
 
   return (
     <>
@@ -171,6 +193,8 @@ export function BillTicket({
       <Line label="Table" value={location} />
       <Line label="Date" value={at.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} />
       {payment?.cashier && <Line label="Cashier" value={payment.cashier} />}
+      {credit && <Line label="Credit ID" value={credit.credit_number} />}
+      {credit && <Line label="Customer" value={credit.customer_name} />}
       <Divider />
 
       {/* Items */}
@@ -202,16 +226,141 @@ export function BillTicket({
       <Line label="GRAND TOTAL" value={rupee(grandTotal)} bold />
       <Divider />
 
-      {payment ? (
+      {credit ? (
+        // Closed with money still owed — the receipt has to say so, and say how
+        // much, or it reads as a paid bill.
+        <>
+          <Line
+            label="Status"
+            value={credit.tendered > 0 ? "PARTIALLY PAID" : "ON CREDIT"}
+            bold
+          />
+          {credit.tendered > 0 && <Line label="Paid at billing" value={rupee(credit.tendered)} />}
+          {tenderSplit && <div style={{ fontSize: 11, textAlign: "right" }}>{tenderSplit}</div>}
+          <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
+          <Line label="BALANCE DUE" value={rupee(credit.balance)} bold />
+          {credit.customer_phone && (
+            <div style={{ fontSize: 11, marginTop: 4 }}>Ph: {credit.customer_phone}</div>
+          )}
+          <div style={{ textAlign: "center", fontSize: 11, marginTop: 6 }}>
+            Please retain this receipt until the balance is settled.
+          </div>
+        </>
+      ) : payment ? (
         <>
           <Line label="Status" value="PAID" bold />
           <Line label="Payment" value={payment.method} />
-          {mixedSplit && <div style={{ fontSize: 11, textAlign: "right" }}>{mixedSplit}</div>}
+          {tenderSplit && <div style={{ fontSize: 11, textAlign: "right" }}>{tenderSplit}</div>}
         </>
       ) : (
         <div style={{ textAlign: "center", fontSize: 11 }}>Status: UNPAID</div>
       )}
-      <div style={{ textAlign: "center", fontSize: 11, marginTop: 6 }}>Thank you! Please visit again.</div>
+      {!credit && (
+        <div style={{ textAlign: "center", fontSize: 11, marginTop: 6 }}>Thank you! Please visit again.</div>
+      )}
+    </>
+  );
+}
+
+// ── Credit receipt — the record of a customer's debt and everything paid against
+//    it. Reprintable at any time; reflects the balance as of NOW. ──────────────
+
+export type CreditReceiptEntry = {
+  id: string;
+  amount: number;
+  method: string;
+  staff_name: string | null;
+  created_at: string;
+  at_billing: boolean;
+};
+
+export function CreditReceiptTicket({
+  restaurant,
+  creditNumber,
+  customerName,
+  customerPhone,
+  openedAt,
+  location,
+  billAmount,
+  paidAmount,
+  balance,
+  history,
+  notes,
+}: {
+  restaurant: RestaurantInfo;
+  creditNumber: string;
+  customerName: string;
+  customerPhone: string | null;
+  openedAt: Date;
+  location: string;
+  billAmount: number;
+  paidAmount: number;
+  balance: number;
+  history: CreditReceiptEntry[];
+  notes: string | null;
+}) {
+  const settled = balance <= 0;
+
+  return (
+    <>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>{restaurant.name}</div>
+        {restaurant.address && <div style={{ fontSize: 11 }}>{restaurant.address}</div>}
+        {restaurant.contact_phone && <div style={{ fontSize: 11 }}>Ph: {restaurant.contact_phone}</div>}
+        {restaurant.pan_vat_number && <div style={{ fontSize: 11 }}>PAN/VAT: {restaurant.pan_vat_number}</div>}
+        <div style={{ fontWeight: 700, letterSpacing: 1, marginTop: 4 }}>
+          {settled ? "CREDIT RECEIPT — SETTLED" : "CREDIT RECEIPT"}
+        </div>
+      </div>
+      <Divider />
+      <Line label="Credit ID" value={creditNumber} />
+      <Line label="Customer" value={customerName} />
+      {customerPhone && <Line label="Phone" value={customerPhone} />}
+      <Line label="Table" value={location} />
+      <Line label="Opened" value={openedAt.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} />
+      <Divider />
+
+      <Line label="Original bill" value={rupee(billAmount)} />
+      <Line label="Total paid" value={rupee(paidAmount)} />
+      <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
+      <Line label={settled ? "BALANCE" : "BALANCE DUE"} value={rupee(balance)} bold />
+      <Divider />
+
+      <div style={{ fontWeight: 700, fontSize: 11, marginBottom: 4 }}>Payment history</div>
+      {history.length === 0 ? (
+        <div style={{ textAlign: "center", fontSize: 11 }}>No payments received yet.</div>
+      ) : (
+        history.map((h) => (
+          <div key={h.id} style={{ marginTop: 3 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <span>
+                {new Date(h.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                {" · "}
+                {h.method}
+                {h.at_billing ? " (at billing)" : ""}
+              </span>
+              <span>{rupee(h.amount)}</span>
+            </div>
+            {h.staff_name && (
+              <div style={{ fontSize: 10, color: "#444" }}>Received by {h.staff_name}</div>
+            )}
+          </div>
+        ))
+      )}
+
+      {notes && (
+        <>
+          <Divider />
+          <div style={{ fontSize: 11 }}>Note: {notes}</div>
+        </>
+      )}
+
+      <Divider />
+      <div style={{ textAlign: "center", fontSize: 11 }}>
+        {settled
+          ? "This credit is fully settled. Thank you!"
+          : "Please retain this receipt until the balance is settled."}
+      </div>
     </>
   );
 }

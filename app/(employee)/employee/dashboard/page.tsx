@@ -1,10 +1,12 @@
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { getStaffNav, NAV_ACCESS } from "@/lib/permissions";
 import { getMyOrderQueue, getSalesReport } from "@/app/actions/pos";
+import { getCredits, getCreditSummary } from "@/app/actions/credits";
 import { getMenuCategories, getMenuItemsByCategory } from "@/app/actions/menu";
 import type { MenuItemRow } from "@/app/actions/menu";
 import { getWorkstations } from "@/app/actions/workstations";
 import { SalesView } from "../sales/_components/sales-view";
+import { CreditsView } from "../credits/_components/credits-view";
 import { MenuClient } from "@/app/(admin)/admin/menu/_components/menu-client";
 import { TablesSection } from "./_components/tables-section";
 import { OrdersSection } from "./_components/orders-section";
@@ -44,7 +46,22 @@ export default async function EmployeeDashboardPage() {
     });
   }
 
-  // 3. Tables & Rooms.
+  // 3. Credits — Cashier / Receptionist only (Billing + Close Bills), so it only
+  // appears for the staff who actually collect the money.
+  if (navKeys.has("credits")) {
+    const [credits, summary] = await Promise.all([
+      getCredits({ status: "all" }),
+      getCreditSummary(),
+    ]);
+    sections.push({
+      key: "credits",
+      title: "Credits",
+      subtitle: "Unpaid balances & repayments",
+      body: <CreditsView initialCredits={credits} initialSummary={summary} embedded />,
+    });
+  }
+
+  // 4. Tables & Rooms.
   if (navKeys.has("tables")) {
     sections.push({
       key: "tables",
@@ -54,7 +71,7 @@ export default async function EmployeeDashboardPage() {
     });
   }
 
-  // 4. Menu.
+  // 5. Menu.
   if (navKeys.has("menu")) {
     const [categories, workstations] = await Promise.all([
       getMenuCategories(restaurantUser.restaurant_id),

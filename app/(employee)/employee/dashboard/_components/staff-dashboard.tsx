@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ListOrdered, Banknote, LayoutGrid, BookOpen, ChevronDown } from "lucide-react";
+import { ListOrdered, Banknote, LayoutGrid, BookOpen, ChevronDown, HandCoins } from "lucide-react";
 
-export type SectionKey = "orders" | "sales" | "tables" | "menu";
+export type SectionKey = "orders" | "sales" | "credits" | "tables" | "menu";
 
 export type DashboardSection = {
   key: SectionKey;
@@ -18,6 +18,7 @@ export type DashboardSection = {
 const SECTION_ICON: Record<SectionKey, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
   orders: ListOrdered,
   sales: Banknote,
+  credits: HandCoins,
   tables: LayoutGrid,
   menu: BookOpen,
 };

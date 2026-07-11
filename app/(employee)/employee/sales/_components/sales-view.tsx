@@ -3,7 +3,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { getSalesReport, exportSalesCsv } from "@/app/actions/pos";
 import type { SalesPeriod, SalesReport, SalesTxn } from "@/app/actions/pos";
+import { SETTLEMENT_COLOR, SETTLEMENT_LABEL } from "@/lib/credits";
+import type { CreditStats } from "@/lib/credits";
 import { PaidBillButton } from "./paid-bill";
+
+// Fallback for a report that predates credits (a stale client-router payload).
+const EMPTY_CREDIT_STATS: CreditStats = {
+  outstanding: 0,
+  collected: 0,
+  created: 0,
+  pendingCount: 0,
+  partiallyPaidCount: 0,
+  fullyPaidCount: 0,
+  openCount: 0,
+};
 
 function money(n: number) {
   return `₹${Math.round(n).toLocaleString("en-IN")}`;
@@ -14,6 +27,7 @@ const METHOD_LABEL: Record<string, string> = {
   online: "Online",
   mixed: "Cash + Online",
   card: "Card",
+  credit: "Credit",
   upi: "UPI",
   other: "Other",
 };
@@ -112,16 +126,27 @@ function TxnCard({ txn }: { txn: SalesTxn }) {
 
   const time = new Date(txn.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
   const method = METHOD_LABEL[txn.method] ?? txn.method;
-  const symbol = txn.method === "cash" ? "₹" : txn.method === "mixed" ? "⬡₹" : "⬡";
+  // Default to "paid": a transaction from a stale (pre-credits) payload carries
+  // no settlement, and treating that as unpaid would brand old bills as credit.
+  const settlement = txn.settlement ?? "paid";
+  const onCredit = settlement !== "paid";
+  const symbol = onCredit ? "◷" : txn.method === "cash" ? "₹" : txn.method === "mixed" ? "⬡₹" : "⬡";
+  const tone = SETTLEMENT_COLOR[settlement];
 
   return (
     <div
       className="rounded-xl border px-4 py-3 flex items-center gap-3"
-      style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+      style={{
+        background: "var(--color-canvas)",
+        borderColor: onCredit ? `${tone}44` : "var(--color-hairline)",
+      }}
     >
       <div
         className="w-10 h-10 rounded-lg flex items-center justify-center text-xs font-medium shrink-0"
-        style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink-mute)" }}
+        style={{
+          background: onCredit ? `${tone}14` : "var(--color-canvas-soft)",
+          color: onCredit ? tone : "var(--color-ink-mute)",
+        }}
       >
         {symbol}
       </div>
@@ -132,15 +157,25 @@ function TxnCard({ txn }: { txn: SalesTxn }) {
             <span className="ml-2 text-xs font-normal" style={{ color: "var(--color-ink-mute)" }}>{txn.customer_name}</span>
           )}
         </p>
-        <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+        <p className="text-xs truncate" style={{ color: "var(--color-ink-mute)" }}>
           #{txn.id.slice(0, 8)} · {method} · {time}
+          {txn.credit_number && ` · ${txn.credit_number}`}
         </p>
       </div>
       <div className="text-right shrink-0">
+        {/* The full bill value — a credit bill is billed in full, so this is what
+            it contributed to Sales. What's still owed is called out below it. */}
         <p className="text-sm font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>{money(txn.amount)}</p>
-        <p className="text-[10px] uppercase tracking-wide" style={{ color: "#1a7a4a", letterSpacing: "0.06em" }}>Paid</p>
+        <p className="text-[10px] uppercase tracking-wide" style={{ color: tone, letterSpacing: "0.06em" }}>
+          {SETTLEMENT_LABEL[settlement]}
+        </p>
+        {onCredit && txn.credit_unpaid > 0 && (
+          <p className="text-[10px] tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
+            {money(txn.credit_unpaid)} on credit
+          </p>
+        )}
       </div>
-      {/* Reprint the paid bill on demand — reuses the payment record. */}
+      {/* Reprint the bill on demand — reuses the payment record. */}
       <PaidBillButton paymentId={txn.id} />
     </div>
   );
@@ -213,11 +248,21 @@ export function SalesView({ initial, embedded = false }: { initial: SalesReport;
 
   const groups = useMemo(() => groupByDate(report.transactions), [report.transactions]);
 
+  // A report cached by the client router from before credits existed has no
+  // `credit` field, so don't assume it's there — an undefined read would take the
+  // whole Sales screen down until that cache expires.
+  const credit = report.credit ?? EMPTY_CREDIT_STATS;
+  const breakdownCredit = report.breakdown?.credit ?? 0;
+  const hasCredit = credit.outstanding > 0 || credit.created > 0 || credit.collected > 0;
+
+  // "Credit" is the part of the period's billed value that was NOT collected, so
+  // the bars add up to the whole of Sales rather than only the money taken.
   const breakdownItems = [
-    { label: "Cash", value: report.breakdown.cash },
-    { label: "Online", value: report.breakdown.online },
-    { label: "Card", value: report.breakdown.card },
-    { label: "Other", value: report.breakdown.other },
+    { label: "Cash", value: report.breakdown.cash, tone: "var(--color-primary)" },
+    { label: "Online", value: report.breakdown.online, tone: "var(--color-primary)" },
+    { label: "Card", value: report.breakdown.card, tone: "var(--color-primary)" },
+    { label: "Credit", value: breakdownCredit, tone: "#f97316" },
+    { label: "Other", value: report.breakdown.other, tone: "var(--color-primary)" },
   ].filter((b) => b.value > 0);
 
   return (
@@ -337,12 +382,47 @@ export function SalesView({ initial, embedded = false }: { initial: SalesReport;
                 >
                   <span className="text-sm w-16 shrink-0" style={{ color: "var(--color-ink)" }}>{b.label}</span>
                   <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: "var(--color-canvas-soft)" }}>
-                    <div className="h-full rounded-full" style={{ width: `${pct}%`, background: "var(--color-primary)" }} />
+                    <div className="h-full rounded-full" style={{ width: `${pct}%`, background: b.tone }} />
                   </div>
                   <span className="text-sm tabular-nums w-20 text-right" style={{ color: "var(--color-ink)" }}>{money(b.value)}</span>
                 </div>
               );
             })}
+          </div>
+          {breakdownCredit > 0 && (
+            <p className="text-xs mt-1.5 px-1" style={{ color: "var(--color-ink-mute)" }}>
+              Credit is billed but not yet collected — it counts as sales, and is chased in Credits.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* Credits — only shown once there's something to show. Outstanding and the
+          status counts are as-of-now; collected/created follow the period filter. */}
+      {hasCredit && (
+        <section className="mb-6">
+          <p className="text-xs uppercase tracking-wide mb-2 font-medium" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+            Credits
+          </p>
+          <div
+            className="grid gap-3"
+            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}
+          >
+            <StatTile
+              label="Outstanding (now)"
+              value={money(credit.outstanding)}
+            />
+            <StatTile
+              label={`Collected · ${PERIOD_LABEL[report.period]}`}
+              value={money(credit.collected)}
+            />
+            <StatTile
+              label={`Credit created · ${PERIOD_LABEL[report.period]}`}
+              value={money(credit.created)}
+            />
+            <StatTile label="Pending" value={String(credit.pendingCount)} />
+            <StatTile label="Partially paid" value={String(credit.partiallyPaidCount)} />
+            <StatTile label="Fully paid" value={String(credit.fullyPaidCount)} />
           </div>
         </section>
       )}

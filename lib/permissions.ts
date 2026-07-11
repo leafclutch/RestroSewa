@@ -136,6 +136,15 @@ export function hasAnyPermission(
   return permissions.some((p) => user.permissions.includes(p));
 }
 
+// True when the admin, or when the user holds EVERY one of the given permissions.
+export function hasAllPermissions(
+  user: { role: string; permissions: string[] },
+  permissions: Permission[]
+): boolean {
+  if (user.role === "restaurant_admin") return true;
+  return permissions.every((p) => user.permissions.includes(p));
+}
+
 // ─── Staff Navigation (single source of truth) ────────────────────────────────
 // The employee sidebar/nav is derived entirely from permissions so the visible
 // items always match what the backend route guards allow. Each entry declares
@@ -144,7 +153,7 @@ export function hasAnyPermission(
 
 const P_ = PERMISSIONS;
 
-export type StaffNavKey = "tables" | "orders" | "menu" | "sales" | "notifications";
+export type StaffNavKey = "tables" | "orders" | "menu" | "sales" | "credits" | "notifications";
 
 export type StaffNavItem = {
   key: StaffNavKey;
@@ -153,6 +162,12 @@ export type StaffNavItem = {
   exact: boolean;
   /** Any of these permissions grants access. */
   anyOf: Permission[];
+  /**
+   * When set, EVERY one of these is also required. Used by Credits, which is
+   * restricted to staff who both take payments and close bills (Cashier /
+   * Receptionist) — holding just one of the two is not enough.
+   */
+  allOf?: Permission[];
 };
 
 export const STAFF_NAV: StaffNavItem[] = [
@@ -185,6 +200,15 @@ export const STAFF_NAV: StaffNavItem[] = [
     anyOf: [P_.PROCESS_PAYMENTS, P_.CLOSE_BILLS, P_.VIEW_REPORTS],
   },
   {
+    key: "credits",
+    label: "Credits",
+    href: "/employee/credits",
+    exact: false,
+    // Billing + Close Bills, both required — see `allOf` above.
+    anyOf: [P_.PROCESS_PAYMENTS],
+    allOf: [P_.PROCESS_PAYMENTS, P_.CLOSE_BILLS],
+  },
+  {
     key: "notifications",
     label: "Notifications",
     href: "/employee/notifications",
@@ -195,7 +219,11 @@ export const STAFF_NAV: StaffNavItem[] = [
 
 // Returns the nav items a given staff user is permitted to see.
 export function getStaffNav(user: { role: string; permissions: string[] }): StaffNavItem[] {
-  return STAFF_NAV.filter((item) => hasAnyPermission(user, item.anyOf));
+  return STAFF_NAV.filter(
+    (item) =>
+      hasAnyPermission(user, item.anyOf) &&
+      (!item.allOf || hasAllPermissions(user, item.allOf))
+  );
 }
 
 // Convenience booleans used by page guards so nav ↔ route protection stay in sync.
@@ -206,6 +234,10 @@ export const NAV_ACCESS = {
     hasAnyPermission(u, [P_.MANAGE_ORDERS, P_.EDIT_ORDERS]),
   canSeeSales: (u: { role: string; permissions: string[] }) =>
     hasAnyPermission(u, [P_.PROCESS_PAYMENTS, P_.CLOSE_BILLS, P_.VIEW_REPORTS]),
+  // Customer credits — create, view, take repayments, settle. Deliberately
+  // stricter than Sales: a reports-only viewer must NOT reach customer debt.
+  canManageCredits: (u: { role: string; permissions: string[] }) =>
+    hasAllPermissions(u, [P_.PROCESS_PAYMENTS, P_.CLOSE_BILLS]),
 };
 
 // ─── Staff Presets ────────────────────────────────────────────────────────────

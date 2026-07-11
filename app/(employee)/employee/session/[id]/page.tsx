@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getSessionDetail } from "@/app/actions/pos";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
-import { hasPermission, PERMISSIONS } from "@/lib/permissions";
+import { hasPermission, NAV_ACCESS, PERMISSIONS } from "@/lib/permissions";
 import { buildVisibilityFilter } from "@/lib/assignments";
 import { createServiceClient } from "@/lib/supabase/service";
 import { SessionClient } from "./_components/session-client";
@@ -47,6 +47,9 @@ export default async function SessionPage({
   const canForceClose   =
     hasPermission(restaurantUser, PERMISSIONS.CLOSE_BILLS) ||
     hasPermission(restaurantUser, PERMISSIONS.MANAGE_TABLES);
+  // Putting a bill on credit is a Cashier/Receptionist action — Billing +
+  // Close Bills. The server action re-checks this.
+  const canUseCredit = NAV_ACCESS.canManageCredits(restaurantUser);
 
   // Everyone who can view the session can also see its ordering PIN.
   const canSeePIN = canView;
@@ -116,6 +119,7 @@ export default async function SessionPage({
         canCloseBills={canCloseBills}
         canForceClose={canForceClose}
         canSeePIN={canSeePIN}
+        canUseCredit={canUseCredit}
       />
     </div>
   );
