@@ -10,7 +10,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: restaurant } = await (service as any)
     .from("restaurants")
-    .select("name")
+    .select("name, logo_url")
     .eq("id", restaurantUser.restaurant_id)
     .single();
 
@@ -23,6 +23,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
     <div className="min-h-screen" style={{ background: "var(--color-canvas-soft)" }}>
       <StaffNav
         restaurantName={restaurant?.name ?? "Restaurant"}
+        restaurantLogo={restaurant?.logo_url ?? null}
         displayName={restaurantUser.display_name}
         notificationCount={notificationCount}
       />

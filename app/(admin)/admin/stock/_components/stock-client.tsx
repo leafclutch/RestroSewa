@@ -43,6 +43,7 @@ import {
   todayISO,
 } from "@/lib/stock";
 import type { StockMovement } from "@/lib/stock";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal, ConfirmDialog } from "../../_components/modal";
@@ -579,8 +580,10 @@ function HistoryList({ productId, unit }: { productId: string; unit: string }) {
                     ("Kitchen Usage", "Waste") — never a generic placeholder. */}
                 <p className="text-sm" style={{ color: "var(--color-ink)" }}>
                   {label}
-                  {/* A sale names the menu item that consumed the stock. */}
-                  {m.kind === "sale" && m.ref && (
+                  {/* A sale names the menu item that consumed the stock — and so
+                      does the restore that later put it back, so the two lines
+                      read as a matched pair. */}
+                  {(m.kind === "sale" || m.kind === "restore") && m.ref && (
                     <span style={{ color: "var(--color-ink-mute)" }}> · {m.ref}</span>
                   )}
                 </p>
@@ -920,6 +923,10 @@ export function StockClient({
   useEffect(() => { setPage(1); }, [search, filter, day]);
 
   const refresh = useCallback(() => reload(search, filter, day), [reload, search, filter, day]);
+
+  // Stock moves from three places: a POS sale, a purchase, and a manual
+  // deduction. All three push here.
+  useRealtime(["stock", "purchases", "orders"], refresh);
 
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);

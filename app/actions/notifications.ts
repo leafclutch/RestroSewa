@@ -91,7 +91,8 @@ export async function getActiveNotifications(
     const { data: sumItems } = await (service as any)
       .from("session_order_items")
       .select("order_id, item_name, quantity, item_price")
-      .in("order_id", activationOrderIds);
+      .in("order_id", activationOrderIds)
+      .is("cancelled_at", null);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for (const it of (sumItems ?? []) as any[]) {
       if (!summaryByOrder.has(it.order_id)) summaryByOrder.set(it.order_id, []);
@@ -151,22 +152,60 @@ export async function getMyNotifications(): Promise<{
   return { items, count };
 }
 
-export async function acknowledgeNotification(id: string): Promise<void> {
+// A staff member may only act on a notification that belongs to THEIR restaurant
+// and to a table/room they are routed (the same rule that decides whether they
+// see it at all). Without this a server action taking a bare id would let any
+// signed-in user resolve any restaurant's notification.
+async function assertCanActOn(id: string) {
+  const ru = await getRestaurantUser();
   const service = createServiceClient();
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (service as any)
+  const { data: n } = await (service as any)
+    .from("notifications")
+    .select("id, restaurant_id, table_id, room_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!n || n.restaurant_id !== ru.restaurant_id) return null;
+
+  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  if (
+    !visibility.seesAll &&
+    !(visibility.canSeeTable(n.table_id) && visibility.canSeeRoom(n.room_id))
+  ) {
+    return null;
+  }
+
+  return { ru, service };
+}
+
+/** Staff has seen it and is on their way (new → acknowledged). */
+export async function acknowledgeNotification(id: string): Promise<void> {
+  const ctx = await assertCanActOn(id);
+  if (!ctx) return;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (ctx.service as any)
     .from("notifications")
     .update({ status: "acknowledged", acknowledged_at: new Date().toISOString() })
     .eq("id", id);
+
   revalidatePath("/employee/notifications");
+  revalidatePath("/employee/dashboard");
 }
 
+/** Handled — clears it from the panel and the badge. */
 export async function completeNotification(id: string): Promise<void> {
-  const service = createServiceClient();
+  const ctx = await assertCanActOn(id);
+  if (!ctx) return;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (service as any)
+  await (ctx.service as any)
     .from("notifications")
     .update({ status: "completed" })
     .eq("id", id);
+
   revalidatePath("/employee/notifications");
+  revalidatePath("/employee/dashboard");
 }

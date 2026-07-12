@@ -5,6 +5,7 @@ import type { MenuItemRow } from "@/app/actions/menu";
 import { getCustomerNotifState, getCustomerActivationState } from "@/app/actions/customer";
 import type { ActivationStatus } from "@/app/actions/customer";
 import { CustomerMenu } from "./_components/customer-menu";
+import { QrSplash } from "./_components/qr-splash";
 
 // Whether an item belongs on the menu *right now*. This intentionally keeps
 // `out_of_stock` items (they render as disabled "Sold out" cards) and only hides
@@ -47,7 +48,7 @@ export default async function CustomerMenuPage({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: restaurant } = await (service as any)
     .from("restaurants")
-    .select("id, name, is_active, customer_ordering_enabled, qr_mode")
+    .select("id, name, logo_url, is_active, customer_ordering_enabled, qr_mode")
     .eq("slug", slug)
     .maybeSingle();
 
@@ -151,20 +152,27 @@ export default async function CustomerMenuPage({
   );
 
   return (
-    <CustomerMenu
-      restaurantId={restaurant.id}
-      restaurantName={restaurant.name}
-      tableId={tableId}
-      tableNumber={tableNumber}
-      roomId={roomId}
-      roomNumber={roomNumber}
-      sessionId={sessionId}
-      orderingEnabled={orderingEnabled}
-      qrMode={qrMode}
-      categories={categoriesWithItems}
-      items={allItems}
-      initialNotifState={initialNotifState}
-      initialActivationStatus={initialActivationStatus}
-    />
+    <>
+      {/* The RestroSewa moment. Overlays the menu while it renders underneath, so
+          the guest waits once, not twice. */}
+      <QrSplash slug={slug} />
+
+      <CustomerMenu
+        restaurantId={restaurant.id}
+        restaurantName={restaurant.name}
+        restaurantLogo={restaurant.logo_url ?? null}
+        tableId={tableId}
+        tableNumber={tableNumber}
+        roomId={roomId}
+        roomNumber={roomNumber}
+        sessionId={sessionId}
+        orderingEnabled={orderingEnabled}
+        qrMode={qrMode}
+        categories={categoriesWithItems}
+        items={allItems}
+        initialNotifState={initialNotifState}
+        initialActivationStatus={initialActivationStatus}
+      />
+    </>
   );
 }

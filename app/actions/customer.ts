@@ -510,20 +510,26 @@ export async function getCustomerOrderFeed(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: orderRows } = await (service as any)
     .from("session_orders")
-    .select("id, created_at, session_order_items ( id, item_name, quantity, item_price, item_status )")
+    .select("id, created_at, session_order_items ( id, item_name, quantity, item_price, item_status, cancelled_at )")
     .eq("session_id", sessionId)
     .order("created_at", { ascending: false });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const orders: CustomerOrder[] = ((orderRows ?? []) as any[]).map((o) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const items: CustomerOrderItem[] = ((o.session_order_items ?? []) as any[]).map((it) => ({
-      id: it.id,
-      name: it.item_name,
-      quantity: it.quantity,
-      price: Number(it.item_price ?? 0),
-      status: it.item_status,
-    }));
+    // A cancelled item is off the bill and back on the shelf, so it leaves the
+    // guest's order too — their total must never include something they were not
+    // charged for. An order whose items were all cancelled drops out below.
+    const items: CustomerOrderItem[] = ((o.session_order_items ?? []) as any[])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((it: any) => !it.cancelled_at)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((it: any) => ({
+        id: it.id,
+        name: it.item_name,
+        quantity: it.quantity,
+        price: Number(it.item_price ?? 0),
+        status: it.item_status,
+      }));
 
     // Order-level status derived from its items:
     //   all served → served · all ready/served → ready · otherwise pending.

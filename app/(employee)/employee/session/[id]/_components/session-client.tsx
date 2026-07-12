@@ -1,12 +1,19 @@
 "use client";
 
-import { useActionState, useTransition, useState } from "react";
-import { closeSessionWithPayment, updateOrderItemStatus, forceCloseSession } from "@/app/actions/pos";
+import { useActionState, useEffect, useTransition, useState } from "react";
+import {
+  closeSessionWithPayment,
+  updateOrderItemStatus,
+  forceCloseSession,
+  cancelOrderItem,
+} from "@/app/actions/pos";
 import type { ActionResult, OrderItemRow, SessionDetail } from "@/app/actions/pos";
+import { searchCreditCustomers } from "@/app/actions/credits";
+import type { CreditCustomer } from "@/app/actions/credits";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Check, ChevronRight, Plus } from "lucide-react";
+import { Check, ChevronRight, Plus, X } from "lucide-react";
 import { SessionPrintButtons } from "./print-tickets";
 import type { RestaurantInfo } from "./print-tickets";
 
@@ -22,8 +29,17 @@ const STATUS_COLOR: Record<string, string> = {
   served: "var(--color-ink-mute)",
 };
 
-function OrderItem({ item, sessionId }: { item: OrderItemRow; sessionId: string }) {
+function OrderItem({
+  item,
+  sessionId,
+  canCancel = false,
+}: {
+  item: OrderItemRow;
+  sessionId: string;
+  canCancel?: boolean;
+}) {
   const [, start] = useTransition();
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const nextStatus =
     item.item_status === "pending"
@@ -31,6 +47,10 @@ function OrderItem({ item, sessionId }: { item: OrderItemRow; sessionId: string 
       : item.item_status === "ready"
       ? "served"
       : null;
+
+  // A served item was genuinely consumed — its stock stays deducted, so it can
+  // never be cancelled. Only what is still pending or ready can go back.
+  const cancellable = canCancel && item.item_status !== "served";
 
   return (
     <div
@@ -90,6 +110,39 @@ function OrderItem({ item, sessionId }: { item: OrderItemRow; sessionId: string 
           <Check size={13} style={{ color: "var(--color-ink-mute)" }} />
         </button>
       )}
+
+      {/* Cancelling takes the item off the bill AND puts its stock back on the
+          shelf, so it is confirmed rather than one-tap. */}
+      {cancellable && (
+        <button
+          type="button"
+          title="Cancel this item"
+          aria-label={`Cancel ${item.item_name}`}
+          className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+          style={{ background: "var(--color-canvas-soft)" }}
+          onClick={() => {
+            if (
+              !confirm(
+                `Cancel ${item.quantity > 1 ? `${item.quantity} × ` : ""}${item.item_name}?\n\nIt comes off the bill and its stock goes back.`
+              )
+            )
+              return;
+            setCancelError(null);
+            start(async () => {
+              const res = await cancelOrderItem(item.id);
+              if (res?.error) setCancelError(res.error);
+            });
+          }}
+        >
+          <X size={13} style={{ color: "#dc2626" }} />
+        </button>
+      )}
+
+      {cancelError && (
+        <span className="text-xs shrink-0" style={{ color: "#dc2626" }}>
+          {cancelError}
+        </span>
+      )}
     </div>
   );
 }
@@ -126,12 +179,46 @@ function PaymentForm({
   const [cashAmt, setCashAmt]     = useState("");
   const [onlineAmt, setOnlineAmt] = useState("");
 
-  // Credit — who owes it, and what (if anything) they're paying right now.
+  // Credit — WHICH customer's account, and what (if anything) they're paying now.
+  const [custQuery, setCustQuery]     = useState("");
+  const [matches, setMatches]         = useState<CreditCustomer[]>([]);
+  const [searching, setSearching]     = useState(false);
+  const [picked, setPicked]           = useState<CreditCustomer | null>(null);
+  const [creatingNew, setCreatingNew] = useState(false);
   const [custName, setCustName]       = useState("");
   const [custPhone, setCustPhone]     = useState("");
   const [paidNow, setPaidNow]         = useState("");
   const [downTender, setDownTender]   = useState<DownTender>("cash");
   const [creditNotes, setCreditNotes] = useState("");
+
+  // Debounced lookup of existing accounts. This is what stops a returning
+  // customer being handed a second Credit ID: the cashier picks the account
+  // instead of retyping the name.
+  useEffect(() => {
+    if (method !== "credit" || picked || creatingNew) {
+      setMatches([]);
+      return;
+    }
+    const q = custQuery.trim();
+    if (q.length < 2) {
+      setMatches([]);
+      setSearching(false);
+      return;
+    }
+    let alive = true;
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const found = await searchCreditCustomers(q);
+        if (alive) setMatches(found);
+      } catch {
+        if (alive) setMatches([]);
+      } finally {
+        if (alive) setSearching(false);
+      }
+    }, 250);
+    return () => { alive = false; clearTimeout(t); };
+  }, [custQuery, method, picked, creatingNew]);
 
   const total = session.total;
 
@@ -159,8 +246,9 @@ function PaymentForm({
   const paidNowNum   = parseFloat(paidNow) || 0;
   const creditAmount = Math.max(0, total - paidNowNum);
   const paidNowValid = paidNowNum >= 0 && paidNowNum < total;
-  const creditValid =
-    method !== "credit" || (custName.trim().length > 0 && paidNowValid);
+  // Either an existing account is selected, or a new one is being named.
+  const customerChosen = !!picked || (creatingNew && custName.trim().length > 0);
+  const creditValid = method !== "credit" || (customerChosen && paidNowValid);
 
   const canSubmit =
     !pending &&
@@ -194,6 +282,17 @@ function PaymentForm({
           <input type="hidden" name="cash_amount"   value={tender.cash.toFixed(2)} />
           <input type="hidden" name="online_amount" value={tender.online.toFixed(2)} />
           <input type="hidden" name="card_amount"   value={tender.card.toFixed(2)} />
+        </>
+      )}
+
+      {/* The chosen account wins; the name/phone are only used when opening a new
+          one. Sending the id is what guarantees a returning customer keeps their
+          single Credit ID. */}
+      {method === "credit" && (
+        <>
+          <input type="hidden" name="credit_customer_id"    value={picked?.id ?? ""} />
+          <input type="hidden" name="credit_customer_name"  value={picked ? "" : custName} />
+          <input type="hidden" name="credit_customer_phone" value={picked ? "" : custPhone} />
         </>
       )}
 
@@ -330,48 +429,178 @@ function PaymentForm({
       {method === "credit" && (
         <div className="flex flex-col gap-3">
           <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-            The bill is closed in full, and the unpaid balance is recorded against the
-            customer so it can be collected later.
+            The bill is closed in full, and the unpaid balance is added to the customer&apos;s
+            credit account so it can be collected later.
           </p>
 
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="credit_customer_name"
-              className="text-xs uppercase tracking-wide"
-              style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+          {/* An account is CHOSEN, not re-created. A returning customer keeps their
+              one Credit ID and their balance simply grows. */}
+          {picked ? (
+            <div
+              className="rounded-lg border px-4 py-3 flex items-start gap-3"
+              style={{ background: "#f0fdf4", borderColor: "#1a7a4a44" }}
             >
-              Customer name <span style={{ color: "var(--color-ruby)" }}>*</span>
-            </label>
-            <Input
-              id="credit_customer_name"
-              name="credit_customer_name"
-              type="text"
-              required
-              autoComplete="off"
-              placeholder="Who owes this?"
-              value={custName}
-              onChange={(e) => setCustName(e.target.value)}
-            />
-          </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate" style={{ color: "var(--color-ink)" }}>
+                  {picked.name}
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
+                  {picked.customer_code}
+                  {picked.phone ? ` · ${picked.phone}` : ""}
+                </p>
+                {picked.balance > 0 && (
+                  <p className="text-xs mt-1" style={{ color: "#9a3412" }}>
+                    Already owes ₹{picked.balance.toFixed(2)} — this bill will be added to it.
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => { setPicked(null); setCustQuery(""); }}
+                className="text-xs px-2 py-1 rounded-md border shrink-0"
+                style={{ borderColor: "var(--color-hairline)", color: "var(--color-ink-mute)" }}
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <label
+                  htmlFor="credit_search"
+                  className="text-xs uppercase tracking-wide"
+                  style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+                >
+                  Find the customer
+                </label>
+                <Input
+                  id="credit_search"
+                  type="search"
+                  autoComplete="off"
+                  placeholder="Search by phone number or name…"
+                  value={custQuery}
+                  onChange={(e) => setCustQuery(e.target.value)}
+                />
+                <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                  Phone is the surest way to find a returning customer.
+                </p>
+              </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="credit_customer_phone"
-              className="text-xs uppercase tracking-wide"
-              style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
-            >
-              Phone number
-            </label>
-            <Input
-              id="credit_customer_phone"
-              name="credit_customer_phone"
-              type="tel"
-              autoComplete="off"
-              placeholder="Recommended — used to trace the credit"
-              value={custPhone}
-              onChange={(e) => setCustPhone(e.target.value)}
-            />
-          </div>
+              {/* Matching accounts — tap one to reuse it. */}
+              {searching && (
+                <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Searching…</p>
+              )}
+
+              {matches.length > 0 && (
+                <div
+                  className="rounded-lg border overflow-hidden"
+                  style={{ borderColor: "var(--color-hairline)" }}
+                >
+                  {matches.map((m, i) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setPicked(m)}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 text-left"
+                      style={{
+                        borderTop: i === 0 ? "none" : "1px solid var(--color-hairline)",
+                        background: "var(--color-canvas)",
+                      }}
+                    >
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm truncate" style={{ color: "var(--color-ink)" }}>
+                          {m.name}
+                        </span>
+                        <span className="block text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                          {m.customer_code}{m.phone ? ` · ${m.phone}` : ""}
+                        </span>
+                      </span>
+                      <span
+                        className="text-sm tabular-nums shrink-0"
+                        style={{ color: m.balance > 0 ? "#dc2626" : "var(--color-ink-mute)" }}
+                      >
+                        {m.balance > 0 ? `₹${m.balance.toFixed(0)}` : "settled"}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Nothing matched — open a new account without leaving the screen. */}
+              {custQuery.trim().length >= 2 && !searching && matches.length === 0 && !creatingNew && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreatingNew(true);
+                    // Prefill whichever field they typed: digits look like a phone.
+                    const q = custQuery.trim();
+                    if (/^[\d+\-\s]+$/.test(q)) setCustPhone(q);
+                    else setCustName(q);
+                  }}
+                  className="w-full text-sm py-2 rounded-lg border"
+                  style={{ borderColor: "var(--color-primary)", color: "var(--color-primary)" }}
+                >
+                  + Create new credit account
+                </button>
+              )}
+
+              {creatingNew && (
+                <div
+                  className="rounded-lg border px-3 py-3 flex flex-col gap-3"
+                  style={{ background: "var(--color-canvas-soft)", borderColor: "var(--color-hairline)" }}
+                >
+                  <p className="text-xs font-medium" style={{ color: "var(--color-ink)" }}>
+                    New credit account
+                  </p>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label
+                      htmlFor="credit_customer_name"
+                      className="text-xs uppercase tracking-wide"
+                      style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+                    >
+                      Customer name <span style={{ color: "var(--color-ruby)" }}>*</span>
+                    </label>
+                    <Input
+                      id="credit_customer_name"
+                      type="text"
+                      autoComplete="off"
+                      placeholder="Who owes this?"
+                      value={custName}
+                      onChange={(e) => setCustName(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label
+                      htmlFor="credit_customer_phone"
+                      className="text-xs uppercase tracking-wide"
+                      style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+                    >
+                      Phone number
+                    </label>
+                    <Input
+                      id="credit_customer_phone"
+                      type="tel"
+                      autoComplete="off"
+                      placeholder="Recommended — how you'll find them next time"
+                      value={custPhone}
+                      onChange={(e) => setCustPhone(e.target.value)}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => { setCreatingNew(false); setCustName(""); setCustPhone(""); }}
+                    className="self-start text-xs underline"
+                    style={{ color: "var(--color-ink-mute)" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <label
@@ -503,6 +732,7 @@ export function SessionClient({
   canForceClose = false,
   canSeePIN = true,
   canUseCredit = false,
+  canCancelOrders = false,
 }: {
   session: SessionDetail;
   restaurant: RestaurantInfo;
@@ -512,6 +742,7 @@ export function SessionClient({
   canForceClose?: boolean;
   canSeePIN?: boolean;
   canUseCredit?: boolean;
+  canCancelOrders?: boolean;
 }) {
   const [forceClosing, startForceClose] = useTransition();
   const [forceError, setForceError] = useState<string | null>(null);
@@ -573,7 +804,14 @@ export function SessionClient({
           className="rounded-xl border overflow-hidden"
           style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
         >
-          {pendingItems.map((i) => <OrderItem key={i.id} item={i} sessionId={session.id} />)}
+          {pendingItems.map((i) => (
+            <OrderItem
+              key={i.id}
+              item={i}
+              sessionId={session.id}
+              canCancel={canCancelOrders && !isClosed}
+            />
+          ))}
           {servedItems.length > 0 && pendingItems.length > 0 && (
             <div className="px-4 py-1.5 border-t" style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}>
               <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Served</p>

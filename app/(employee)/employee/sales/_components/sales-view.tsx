@@ -5,6 +5,7 @@ import { getSalesReport, exportSalesCsv } from "@/app/actions/pos";
 import type { SalesPeriod, SalesReport, SalesTxn } from "@/app/actions/pos";
 import { SETTLEMENT_COLOR, SETTLEMENT_LABEL } from "@/lib/credits";
 import type { CreditStats } from "@/lib/credits";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 import { PaidBillButton } from "./paid-bill";
 
 // Fallback for a report that predates credits (a stale client-router payload).
@@ -13,7 +14,6 @@ const EMPTY_CREDIT_STATS: CreditStats = {
   collected: 0,
   created: 0,
   pendingCount: 0,
-  partiallyPaidCount: 0,
   fullyPaidCount: 0,
   openCount: 0,
 };
@@ -246,6 +246,13 @@ export function SalesView({ initial, embedded = false }: { initial: SalesReport;
     }
   }, [period, customFrom, customTo]);
 
+  // A bill closed at any till updates takings here at once.
+  const resync = useCallback(
+    () => load(period, customFrom || undefined, customTo || undefined),
+    [load, period, customFrom, customTo]
+  );
+  useRealtime(["billing", "credits"], resync);
+
   const groups = useMemo(() => groupByDate(report.transactions), [report.transactions]);
 
   // A report cached by the client router from before credits existed has no
@@ -420,9 +427,10 @@ export function SalesView({ initial, embedded = false }: { initial: SalesReport;
               label={`Credit created · ${PERIOD_LABEL[report.period]}`}
               value={money(credit.created)}
             />
-            <StatTile label="Pending" value={String(credit.pendingCount)} />
-            <StatTile label="Partially paid" value={String(credit.partiallyPaidCount)} />
-            <StatTile label="Fully paid" value={String(credit.fullyPaidCount)} />
+            {/* Counted over CUSTOMERS now — one person with three unpaid bills is
+                one debtor to chase, not three. */}
+            <StatTile label="Customers owing" value={String(credit.pendingCount)} />
+            <StatTile label="Settled customers" value={String(credit.fullyPaidCount)} />
           </div>
         </section>
       )}

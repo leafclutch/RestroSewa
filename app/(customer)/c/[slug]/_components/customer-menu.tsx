@@ -8,6 +8,8 @@ import {
   useMemo,
   useRef,
 } from "react";
+import { useRealtime } from "@/lib/realtime/use-realtime";
+import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import type { CategoryRow, MenuItemRow } from "@/app/actions/menu";
 import {
   sendNotification,
@@ -51,6 +53,7 @@ import {
   ShieldCheck,
   Utensils,
   UtensilsCrossed,
+  LayoutGrid,
   Coffee,
   CupSoda,
   IceCreamCone,
@@ -75,7 +78,9 @@ import {
 
 // ─── Config ─────────────────────────────────────────────────────────────────────
 
-const POLL_MS = 8000;
+// The customer now gets pushed updates over SSE; this is only a safety net for a
+// dropped stream (flaky café wifi, phone waking from sleep).
+const POLL_MS = 60000;
 
 type FoodKey = "veg" | "non_veg" | "vegan" | "egg";
 
@@ -125,10 +130,6 @@ function isSpicy(item: MenuItemRow): boolean {
   return item.badges?.some((b) => /spic|hot|chilli|chili/i.test(b)) ?? false;
 }
 
-function initialsOf(name: string): string {
-  return name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-}
-
 // ─── Injected animation primitives (Tailwind animate utilities aren't configured) ─
 
 function AnimationStyles() {
@@ -173,24 +174,15 @@ function AnimationStyles() {
 
 // ─── Small shared pieces ─────────────────────────────────────────────────────────
 
-function Monogram({ name, size = 40 }: { name: string; size?: number }) {
-  return (
-    <div
-      className="flex items-center justify-center rounded-2xl shrink-0 rs-elev"
-      style={{
-        width: size,
-        height: size,
-        background: "linear-gradient(135deg, var(--color-primary), var(--color-brand-dark))",
-        color: "#fff",
-        fontWeight: 600,
-        fontSize: size * 0.36,
-        letterSpacing: "-0.5px",
-      }}
-    >
-      {initialsOf(name)}
-    </div>
-  );
-}
+// "All" is a VIRTUAL category — it is never stored, never fetched, and never
+// owns an item. This sentinel stands in for it in the same `activeCategoryId`
+// state the real categories use, so selecting it costs no extra state and no
+// extra request. A `__`-fenced literal cannot collide with a uuid.
+const ALL_CATEGORY_ID = "__all__";
+
+// The monogram that used to live here is now the FALLBACK inside
+// <RestaurantLogo>, so an uploaded logo and the initials share one component
+// and one set of sizes.
 
 function DietMark({ type, size = 15 }: { type: FoodKey; size?: number }) {
   const cfg = FOOD_TYPE_CONFIG[type];
@@ -765,6 +757,7 @@ function InfoSheet({
   open,
   onClose,
   restaurantName,
+  restaurantLogo,
   locationLabel,
   prepRange,
   qrMode,
@@ -778,6 +771,7 @@ function InfoSheet({
   open: boolean;
   onClose: () => void;
   restaurantName: string;
+  restaurantLogo: string | null;
   locationLabel: string | null;
   prepRange: string | null;
   qrMode: string;
@@ -790,7 +784,7 @@ function InfoSheet({
 }) {
   return (
     <Sheet open={open} onClose={onClose} maxWidth={440} label="Restaurant info">
-      <SheetHeader title={restaurantName} subtitle={locationLabel ?? "Dine-in"} onClose={onClose} icon={<Monogram name={restaurantName} size={40} />} />
+      <SheetHeader title={restaurantName} subtitle={locationLabel ?? "Dine-in"} onClose={onClose} icon={<RestaurantLogo name={restaurantName} logoUrl={restaurantLogo} size={40} />} />
       <div className="flex-1 min-h-0 px-5 py-5 flex flex-col gap-3 overflow-y-auto rs-noscroll">
         <div className="grid grid-cols-2 gap-2.5">
           {prepRange && <InfoTile Icon={Timer} label="Avg. prep" value={prepRange} />}
@@ -1168,6 +1162,7 @@ function ActivationSheet({
 export function CustomerMenu({
   restaurantId,
   restaurantName,
+  restaurantLogo = null,
   tableId,
   tableNumber,
   roomId,
@@ -1182,6 +1177,7 @@ export function CustomerMenu({
 }: {
   restaurantId: string;
   restaurantName: string;
+  restaurantLogo?: string | null;
   tableId: string | null;
   tableNumber: string | null;
   roomId: string | null;
@@ -1219,7 +1215,9 @@ export function CustomerMenu({
   const activationBlocks = noPin && (activationStatus === "pending" || activationStatus === "rejected");
   const canOrderNow = orderingAvailable && !activationBlocks;
 
-  const [activeCategoryId, setActiveCategoryId] = useState<string>(categories[0]?.id ?? "");
+  // Opens on "All", so a guest sees the whole menu — grouped by category — before
+  // they narrow it down.
+  const [activeCategoryId, setActiveCategoryId] = useState<string>(ALL_CATEGORY_ID);
   const [pinVerified, setPinVerified] = useState(noPin);
   const [showPinEntry, setShowPinEntry] = useState(false);
   const [cart, setCart] = useState<Map<string, number>>(new Map());
@@ -1239,6 +1237,18 @@ export function CustomerMenu({
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seenReadyRef = useRef<Set<string>>(new Set());
+  // Set by the polling effect below; called by the realtime stream.
+  const pollRef = useRef<null | (() => void)>(null);
+
+  // The customer's phone is pushed to as well: an order going ready, a waiter
+  // acknowledging the call, the table being activated, or the menu changing all
+  // land instantly. Scoped by session id — the stream carries only topic names,
+  // so an unauthenticated guest can never receive data they shouldn't see.
+  useRealtime(
+    ["orders", "notifications", "tables", "menu"],
+    useCallback(() => pollRef.current?.(), []),
+    activeSessionId
+  );
 
   // Service requests
   const [serviceNotif, setServiceNotif] = useState<CustomerNotifState>(initialNotifState);
@@ -1356,12 +1366,17 @@ export function CustomerMenu({
       }
     }
 
+    // Hand the poller to the realtime stream, so a kitchen update / waiter
+    // acknowledgement reaches the customer's phone the moment it happens.
+    pollRef.current = poll;
+
     poll();
     const iv = setInterval(poll, POLL_MS);
     const onVisible = () => document.visibilityState === "visible" && poll();
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       active = false;
+      pollRef.current = null;
       clearInterval(iv);
       document.removeEventListener("visibilitychange", onVisible);
     };
@@ -1574,13 +1589,27 @@ export function CustomerMenu({
 
   // ── Items shown ──
   const searchActive = query.trim().length > 0;
+  const showingAll = !searchActive && activeCategoryId === ALL_CATEGORY_ID;
+
   const visibleItems = useMemo(() => {
     if (searchActive) {
       const q = query.trim().toLowerCase();
       return items.filter((i) => i.name.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q));
     }
+    if (activeCategoryId === ALL_CATEGORY_ID) return items;
     return items.filter((i) => i.category_id === activeCategoryId);
   }, [items, activeCategoryId, query, searchActive]);
+
+  // "All" keeps the category STRUCTURE rather than dumping every dish into one
+  // list — the guest still learns how the menu is organised. Built by walking
+  // `categories`, which arrives in the admin's order, so the sections inherit it
+  // for free; empty categories drop out rather than render a bare heading.
+  const groupedItems = useMemo(() => {
+    if (!showingAll) return [];
+    return categories
+      .map((c) => ({ category: c, items: items.filter((i) => i.category_id === c.id) }))
+      .filter((g) => g.items.length > 0);
+  }, [showingAll, categories, items]);
 
   const categoryCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -1595,7 +1624,6 @@ export function CustomerMenu({
   }
 
   const showCartBar = canOrderNow && cartCount > 0;
-  const heroInitials = initialsOf(restaurantName);
 
   return (
     <div
@@ -1649,7 +1677,7 @@ export function CustomerMenu({
         style={{ background: "rgba(255,255,255,0.82)", backdropFilter: "blur(16px)", borderBottom: "1px solid var(--color-hairline)" }}
       >
         <div className="mx-auto max-w-6xl px-4 py-3 flex items-center gap-3">
-          <Monogram name={restaurantName} size={38} />
+          <RestaurantLogo name={restaurantName} logoUrl={restaurantLogo} size={38} priority />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold leading-tight truncate" style={{ color: "var(--color-ink)" }}>{restaurantName}</p>
             {locationLabel && (
@@ -1766,12 +1794,14 @@ export function CustomerMenu({
 
               <div className="relative">
                 <div className="flex items-center gap-3">
-                  <div
-                    className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
-                    style={{ background: "rgba(255,255,255,0.16)", color: "#fff", fontWeight: 600, fontSize: 16, letterSpacing: "-0.5px" }}
-                  >
-                    {heroInitials}
-                  </div>
+                  {/* variant="plain" — the hero is already a brand gradient, so the
+                      logo plate must not stack a second one on top of it. */}
+                  <RestaurantLogo
+                    name={restaurantName}
+                    logoUrl={restaurantLogo}
+                    size={44}
+                    variant="plain"
+                  />
                   <div className="flex-1 min-w-0">
                     <p className="text-[11px] uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.6)", letterSpacing: "0.14em" }}>Welcome</p>
                     <h1 className="text-xl sm:text-2xl leading-tight truncate" style={{ color: "#fff", fontWeight: 600, letterSpacing: "-0.5px" }}>{restaurantName}</h1>
@@ -1813,9 +1843,13 @@ export function CustomerMenu({
         {!searchActive && categories.length > 0 && (
           <div className="sticky z-30 -mx-4 px-4 py-2.5 mt-4" style={{ top: showSearch ? 128 : 66, background: "linear-gradient(var(--color-canvas-soft) 70%, transparent)" }}>
             <div className="flex gap-2 overflow-x-auto rs-noscroll" style={{ WebkitOverflowScrolling: "touch" }}>
-              {categories.map((c) => {
-                const CatIcon = iconForCategory(c.name);
+              {/* "All" leads, then the admin's own order — the array is never sorted
+                  here, so whatever the admin arranges is what the guest sees. */}
+              {[{ id: ALL_CATEGORY_ID, name: "All" }, ...categories].map((c) => {
+                const isAll = c.id === ALL_CATEGORY_ID;
+                const CatIcon = isAll ? LayoutGrid : iconForCategory(c.name);
                 const active = activeCategoryId === c.id;
+                const count = isAll ? items.length : categoryCounts.get(c.id) ?? 0;
                 return (
                   <button
                     key={c.id}
@@ -1833,7 +1867,7 @@ export function CustomerMenu({
                     <CatIcon size={15} />
                     {c.name}
                     <span className="text-[11px] px-1.5 rounded-full" style={{ background: active ? "rgba(255,255,255,0.2)" : "var(--color-canvas-soft)", color: active ? "#fff" : "var(--color-ink-mute)" }}>
-                      {categoryCounts.get(c.id) ?? 0}
+                      {count}
                     </span>
                   </button>
                 );
@@ -1845,7 +1879,11 @@ export function CustomerMenu({
         {/* Section title */}
         <div className="flex items-center justify-between mt-4 mb-3">
           <h2 className="text-lg" style={{ color: "var(--color-ink)", fontWeight: 600, letterSpacing: "-0.3px" }}>
-            {searchActive ? `Results for "${query.trim()}"` : categories.find((c) => c.id === activeCategoryId)?.name ?? "Menu"}
+            {searchActive
+              ? `Results for "${query.trim()}"`
+              : showingAll
+              ? "Full menu"
+              : categories.find((c) => c.id === activeCategoryId)?.name ?? "Menu"}
           </h2>
           <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>{visibleItems.length} item{visibleItems.length !== 1 ? "s" : ""}</span>
         </div>
@@ -1857,6 +1895,50 @@ export function CustomerMenu({
             title={searchActive ? "No dishes found" : "Nothing here yet"}
             body={searchActive ? "Try a different search term or browse the categories." : "This category has no items right now."}
           />
+        ) : showingAll ? (
+          /* "All" — every dish, still grouped under its category heading, in the
+             admin's order. The `key` re-mounts on switch so the fade-in replays. */
+          <div key="all" className="flex flex-col gap-7">
+            {groupedItems.map(({ category, items: catItems }) => {
+              const CatIcon = iconForCategory(category.name);
+              return (
+                <section key={category.id}>
+                  <div className="flex items-center gap-2 mb-3">
+                    {/* `iconForCategory` returns a component that only takes `size`,
+                        so the colour is applied by the wrapper. */}
+                    <span className="flex items-center" style={{ color: "var(--color-ink-mute)" }}>
+                      <CatIcon size={16} />
+                    </span>
+                    <h3 className="text-base" style={{ color: "var(--color-ink)", fontWeight: 600, letterSpacing: "-0.2px" }}>
+                      {category.name}
+                    </h3>
+                    <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                      {catItems.length}
+                    </span>
+                    {/* A hairline that fills the row, so each group reads as its own
+                        block on a long scroll without shouting. */}
+                    <span className="flex-1 h-px ml-1" style={{ background: "var(--color-hairline)" }} />
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+                    {catItems.map((item) => (
+                      <ItemCard
+                        key={item.id}
+                        item={item}
+                        // The heading above already names the category — repeating it
+                        // on every card would be noise.
+                        categoryName={null}
+                        cartQty={cart.get(item.id) ?? 0}
+                        canOrder={canOrderNow}
+                        onAdd={() => handleAdd(item)}
+                        onRemove={() => removeById(item.id)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
         ) : (
           <div key={searchActive ? "search" : activeCategoryId} className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
             {visibleItems.map((item) => (
@@ -1947,6 +2029,7 @@ export function CustomerMenu({
         open={showInfo}
         onClose={() => setShowInfo(false)}
         restaurantName={restaurantName}
+        restaurantLogo={restaurantLogo}
         locationLabel={locationLabel}
         prepRange={prepRange}
         qrMode={qrMode}

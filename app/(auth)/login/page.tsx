@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { AdminLoginForm } from "./_components/admin-form";
 import { StaffLogin } from "./_components/staff-login";
 import { getRestaurantStaff } from "@/app/actions/auth";
+import { PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
 
 export default async function LoginPage({
   searchParams,
@@ -49,12 +50,7 @@ export default async function LoginPage({
     <div className="w-full max-w-[420px] mx-auto">
       {/* Logo / wordmark */}
       <div className="mb-6 sm:mb-8 text-center">
-        <span
-          className="text-2xl tracking-tight"
-          style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.5px" }}
-        >
-          Restro<span style={{ color: "var(--color-lemon)", fontWeight: 500 }}>Sewa</span>
-        </span>
+        <PlatformWordmark size={24} tone="dark" accent="var(--color-lemon)" letterSpacing="-0.5px" />
       </div>
 
       <div
@@ -115,6 +111,10 @@ export default async function LoginPage({
           </span>
         </p>
       )}
+
+      <div className="flex justify-center mt-6">
+        <PoweredBy height={16} tone="light" />
+      </div>
     </div>
   );
 }
