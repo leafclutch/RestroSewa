@@ -19,6 +19,8 @@ import {
   Menu,
   X,
 } from "lucide-react";
+import { RestaurantLogo } from "@/components/branding/restaurant-logo";
+import { PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
 
 type NavItem = {
   label: string;
@@ -121,10 +123,12 @@ function NavLinks({
 
 export function AdminSidebar({
   restaurantName,
+  restaurantLogo = null,
   showStock = false,
   showFinance = false,
 }: {
   restaurantName: string;
+  restaurantLogo?: string | null;
   showStock?: boolean;
   showFinance?: boolean;
 }) {
@@ -154,18 +158,19 @@ export function AdminSidebar({
         className="w-52 shrink-0 hidden md:flex flex-col sticky top-0 h-screen"
         style={{ background: "var(--color-brand-dark)" }}
       >
+        {/* The RESTAURANT leads — this is their dashboard. RestroSewa stays as the
+            quiet platform mark beneath it. */}
         <div className="px-5 py-5 border-b shrink-0" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-          <Link href="/admin/dashboard" className="block">
+          <Link href="/admin/dashboard" className="flex items-center gap-2.5 min-w-0">
+            <RestaurantLogo name={restaurantName} logoUrl={restaurantLogo} size={34} priority />
             <span
-              className="text-base tracking-tight"
-              style={{ color: "#fff", fontWeight: 300, letterSpacing: "-0.3px" }}
+              className="text-sm truncate"
+              style={{ color: "#fff", fontWeight: 400, letterSpacing: "-0.2px" }}
             >
-              Restro<span style={{ color: "var(--color-primary-soft)", fontWeight: 500 }}>Sewa</span>
+              {restaurantName}
             </span>
           </Link>
-          <p className="text-xs mt-1 truncate" style={{ color: "rgba(255,255,255,0.45)" }}>
-            {restaurantName}
-          </p>
+          <PlatformWordmark size={11} className="block mt-2 opacity-50" />
         </div>
 
         {/* The nav itself scrolls if it ever outgrows the viewport, so Sign out
@@ -185,6 +190,7 @@ export function AdminSidebar({
             <LogOut size={15} strokeWidth={1.5} />
             {logoutPending ? "Signing out…" : "Sign out"}
           </button>
+          <PoweredBy height={14} tone="light" className="px-3 pt-3" />
         </div>
       </aside>
 
@@ -207,9 +213,9 @@ export function AdminSidebar({
         </button>
 
         {/* Brand */}
-        <Link href="/admin/dashboard" className="flex-1 text-sm" style={{ color: "#fff", fontWeight: 300, letterSpacing: "-0.2px" }}>
-          Restro<span style={{ color: "var(--color-primary-soft)", fontWeight: 500 }}>Sewa</span>
-          <span className="ml-2 text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
+        <Link href="/admin/dashboard" className="flex-1 min-w-0 flex items-center gap-2">
+          <RestaurantLogo name={restaurantName} logoUrl={restaurantLogo} size={26} priority />
+          <span className="text-sm truncate" style={{ color: "#fff", fontWeight: 400, letterSpacing: "-0.2px" }}>
             {restaurantName}
           </span>
         </Link>
@@ -250,8 +256,11 @@ export function AdminSidebar({
               className="flex items-center justify-between px-5 py-4 border-b shrink-0"
               style={{ borderColor: "rgba(255,255,255,0.08)" }}
             >
-              <span className="text-sm" style={{ color: "#fff", fontWeight: 300 }}>
-                Restro<span style={{ color: "var(--color-primary-soft)", fontWeight: 500 }}>Sewa</span>
+              <span className="flex items-center gap-2.5 min-w-0">
+                <RestaurantLogo name={restaurantName} logoUrl={restaurantLogo} size={30} />
+                <span className="text-sm truncate" style={{ color: "#fff", fontWeight: 400 }}>
+                  {restaurantName}
+                </span>
               </span>
               <button
                 type="button"
@@ -262,9 +271,7 @@ export function AdminSidebar({
               </button>
             </div>
 
-            <p className="px-5 pt-2 pb-1 text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
-              {restaurantName}
-            </p>
+            <PlatformWordmark size={11} className="block px-5 pt-2 pb-1 opacity-50" />
 
             <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-3 flex flex-col gap-0.5">
               <NavLinks

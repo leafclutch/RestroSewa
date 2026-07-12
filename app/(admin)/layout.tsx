@@ -11,7 +11,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: restaurant } = await (service as any)
     .from("restaurants")
-    .select("name")
+    .select("name, logo_url")
     .eq("id", restaurantUser.restaurant_id)
     .single();
 
@@ -19,6 +19,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     <div className="flex min-h-screen" style={{ background: "var(--color-canvas-soft)" }}>
       <AdminSidebar
         restaurantName={restaurant?.name ?? "Restaurant"}
+        restaurantLogo={restaurant?.logo_url ?? null}
         // Don't advertise links that would only bounce the user. Finance is gated
         // separately from stock, so a storekeeper sees Stock but not Finance.
         showStock={STOCK_ACCESS.canViewStock(restaurantUser)}

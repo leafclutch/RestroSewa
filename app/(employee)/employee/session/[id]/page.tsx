@@ -50,6 +50,9 @@ export default async function SessionPage({
   // Putting a bill on credit is a Cashier/Receptionist action — Billing +
   // Close Bills. The server action re-checks this.
   const canUseCredit = NAV_ACCESS.canManageCredits(restaurantUser);
+  // Cancelling takes an item off the bill and puts its stock back, so it is its
+  // own permission rather than something any waiter may do. Re-checked server-side.
+  const canCancelOrders = hasPermission(restaurantUser, PERMISSIONS.CANCEL_ORDERS);
 
   // Everyone who can view the session can also see its ordering PIN.
   const canSeePIN = canView;
@@ -120,6 +123,7 @@ export default async function SessionPage({
         canForceClose={canForceClose}
         canSeePIN={canSeePIN}
         canUseCredit={canUseCredit}
+        canCancelOrders={canCancelOrders}
       />
     </div>
   );

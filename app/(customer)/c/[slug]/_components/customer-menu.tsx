@@ -9,6 +9,7 @@ import {
   useRef,
 } from "react";
 import { useRealtime } from "@/lib/realtime/use-realtime";
+import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import type { CategoryRow, MenuItemRow } from "@/app/actions/menu";
 import {
   sendNotification,
@@ -128,10 +129,6 @@ function isSpicy(item: MenuItemRow): boolean {
   return item.badges?.some((b) => /spic|hot|chilli|chili/i.test(b)) ?? false;
 }
 
-function initialsOf(name: string): string {
-  return name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-}
-
 // ─── Injected animation primitives (Tailwind animate utilities aren't configured) ─
 
 function AnimationStyles() {
@@ -176,24 +173,9 @@ function AnimationStyles() {
 
 // ─── Small shared pieces ─────────────────────────────────────────────────────────
 
-function Monogram({ name, size = 40 }: { name: string; size?: number }) {
-  return (
-    <div
-      className="flex items-center justify-center rounded-2xl shrink-0 rs-elev"
-      style={{
-        width: size,
-        height: size,
-        background: "linear-gradient(135deg, var(--color-primary), var(--color-brand-dark))",
-        color: "#fff",
-        fontWeight: 600,
-        fontSize: size * 0.36,
-        letterSpacing: "-0.5px",
-      }}
-    >
-      {initialsOf(name)}
-    </div>
-  );
-}
+// The monogram that used to live here is now the FALLBACK inside
+// <RestaurantLogo>, so an uploaded logo and the initials share one component
+// and one set of sizes.
 
 function DietMark({ type, size = 15 }: { type: FoodKey; size?: number }) {
   const cfg = FOOD_TYPE_CONFIG[type];
@@ -768,6 +750,7 @@ function InfoSheet({
   open,
   onClose,
   restaurantName,
+  restaurantLogo,
   locationLabel,
   prepRange,
   qrMode,
@@ -781,6 +764,7 @@ function InfoSheet({
   open: boolean;
   onClose: () => void;
   restaurantName: string;
+  restaurantLogo: string | null;
   locationLabel: string | null;
   prepRange: string | null;
   qrMode: string;
@@ -793,7 +777,7 @@ function InfoSheet({
 }) {
   return (
     <Sheet open={open} onClose={onClose} maxWidth={440} label="Restaurant info">
-      <SheetHeader title={restaurantName} subtitle={locationLabel ?? "Dine-in"} onClose={onClose} icon={<Monogram name={restaurantName} size={40} />} />
+      <SheetHeader title={restaurantName} subtitle={locationLabel ?? "Dine-in"} onClose={onClose} icon={<RestaurantLogo name={restaurantName} logoUrl={restaurantLogo} size={40} />} />
       <div className="flex-1 min-h-0 px-5 py-5 flex flex-col gap-3 overflow-y-auto rs-noscroll">
         <div className="grid grid-cols-2 gap-2.5">
           {prepRange && <InfoTile Icon={Timer} label="Avg. prep" value={prepRange} />}
@@ -1171,6 +1155,7 @@ function ActivationSheet({
 export function CustomerMenu({
   restaurantId,
   restaurantName,
+  restaurantLogo = null,
   tableId,
   tableNumber,
   roomId,
@@ -1185,6 +1170,7 @@ export function CustomerMenu({
 }: {
   restaurantId: string;
   restaurantName: string;
+  restaurantLogo?: string | null;
   tableId: string | null;
   tableNumber: string | null;
   roomId: string | null;
@@ -1615,7 +1601,6 @@ export function CustomerMenu({
   }
 
   const showCartBar = canOrderNow && cartCount > 0;
-  const heroInitials = initialsOf(restaurantName);
 
   return (
     <div
@@ -1669,7 +1654,7 @@ export function CustomerMenu({
         style={{ background: "rgba(255,255,255,0.82)", backdropFilter: "blur(16px)", borderBottom: "1px solid var(--color-hairline)" }}
       >
         <div className="mx-auto max-w-6xl px-4 py-3 flex items-center gap-3">
-          <Monogram name={restaurantName} size={38} />
+          <RestaurantLogo name={restaurantName} logoUrl={restaurantLogo} size={38} priority />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold leading-tight truncate" style={{ color: "var(--color-ink)" }}>{restaurantName}</p>
             {locationLabel && (
@@ -1786,12 +1771,14 @@ export function CustomerMenu({
 
               <div className="relative">
                 <div className="flex items-center gap-3">
-                  <div
-                    className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
-                    style={{ background: "rgba(255,255,255,0.16)", color: "#fff", fontWeight: 600, fontSize: 16, letterSpacing: "-0.5px" }}
-                  >
-                    {heroInitials}
-                  </div>
+                  {/* variant="plain" — the hero is already a brand gradient, so the
+                      logo plate must not stack a second one on top of it. */}
+                  <RestaurantLogo
+                    name={restaurantName}
+                    logoUrl={restaurantLogo}
+                    size={44}
+                    variant="plain"
+                  />
                   <div className="flex-1 min-w-0">
                     <p className="text-[11px] uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.6)", letterSpacing: "0.14em" }}>Welcome</p>
                     <h1 className="text-xl sm:text-2xl leading-tight truncate" style={{ color: "#fff", fontWeight: 600, letterSpacing: "-0.5px" }}>{restaurantName}</h1>
@@ -1967,6 +1954,7 @@ export function CustomerMenu({
         open={showInfo}
         onClose={() => setShowInfo(false)}
         restaurantName={restaurantName}
+        restaurantLogo={restaurantLogo}
         locationLabel={locationLabel}
         prepRange={prepRange}
         qrMode={qrMode}

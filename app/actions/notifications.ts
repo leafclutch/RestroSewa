@@ -91,7 +91,8 @@ export async function getActiveNotifications(
     const { data: sumItems } = await (service as any)
       .from("session_order_items")
       .select("order_id, item_name, quantity, item_price")
-      .in("order_id", activationOrderIds);
+      .in("order_id", activationOrderIds)
+      .is("cancelled_at", null);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for (const it of (sumItems ?? []) as any[]) {
       if (!summaryByOrder.has(it.order_id)) summaryByOrder.set(it.order_id, []);

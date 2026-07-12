@@ -580,8 +580,10 @@ function HistoryList({ productId, unit }: { productId: string; unit: string }) {
                     ("Kitchen Usage", "Waste") — never a generic placeholder. */}
                 <p className="text-sm" style={{ color: "var(--color-ink)" }}>
                   {label}
-                  {/* A sale names the menu item that consumed the stock. */}
-                  {m.kind === "sale" && m.ref && (
+                  {/* A sale names the menu item that consumed the stock — and so
+                      does the restore that later put it back, so the two lines
+                      read as a matched pair. */}
+                  {(m.kind === "sale" || m.kind === "restore") && m.ref && (
                     <span style={{ color: "var(--color-ink-mute)" }}> · {m.ref}</span>
                   )}
                 </p>

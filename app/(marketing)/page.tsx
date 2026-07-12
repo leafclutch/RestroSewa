@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
 
 const FEATURES = [
   {
@@ -27,16 +28,7 @@ export default function LandingPage() {
           backdropFilter: "blur(10px)",
         }}
       >
-        <span
-          style={{
-            fontSize: 18,
-            fontWeight: 300,
-            letterSpacing: "-0.4px",
-            color: "#fff",
-          }}
-        >
-          Restro<span style={{ color: "var(--color-lemon)", fontWeight: 500 }}>Sewa</span>
-        </span>
+        <PlatformWordmark size={18} accent="var(--color-lemon)" />
         <Link
           href="/login"
           className="text-sm px-4 py-1.5 rounded-full transition-all"
@@ -58,19 +50,14 @@ export default function LandingPage() {
           minHeight: "60vh",
         }}
       >
+        {/* The hero mark scales with the viewport, so it stays the loudest thing
+            on the page on a phone as well as a desktop. */}
         <div className="mb-5 sm:mb-6">
-          <span
-            style={{
-              fontSize: "clamp(30px, 8vw, 48px)",
-              fontWeight: 300,
-              letterSpacing: "-0.8px",
-              color: "#fff",
-              lineHeight: 1,
-            }}
-          >
-            Restro
-            <span style={{ color: "var(--color-lemon)", fontWeight: 500 }}>Sewa</span>
-          </span>
+          <PlatformWordmark
+            size="clamp(30px, 8vw, 48px)"
+            accent="var(--color-lemon)"
+            letterSpacing="-0.8px"
+          />
         </div>
 
         <p
@@ -144,12 +131,13 @@ export default function LandingPage() {
 
       {/* Footer */}
       <footer
-        className="border-t px-4 sm:px-6 py-5 sm:py-6 text-center"
+        className="border-t px-4 sm:px-6 py-5 sm:py-6 flex flex-col items-center gap-3"
         style={{ borderColor: "var(--color-hairline)" }}
       >
-        <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+        <p className="text-xs text-center" style={{ color: "var(--color-ink-mute)" }}>
           &copy; {new Date().getFullYear()} RestroSewa &mdash; Hospitality Management Platform
         </p>
+        <PoweredBy height={18} />
       </footer>
     </div>
   );

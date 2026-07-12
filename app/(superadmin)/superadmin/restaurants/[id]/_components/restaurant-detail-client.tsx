@@ -5,6 +5,8 @@ import Link from "next/link";
 import { ExternalLink, Pencil } from "lucide-react";
 import type { RestaurantDetail } from "@/app/actions/restaurants";
 import { EditRestaurantForm } from "./edit-restaurant-form";
+import { LogoUploader } from "./logo-uploader";
+import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import { toggleRestaurantStatus } from "@/app/actions/restaurants";
 import { Button } from "@/components/ui/button";
 
@@ -48,16 +50,19 @@ export function RestaurantDetailClient({ restaurant }: { restaurant: RestaurantD
       style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
     >
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1
-            className="text-xl"
-            style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}
-          >
-            {restaurant.name}
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
-            /c/{restaurant.slug}
-          </p>
+        <div className="flex items-center gap-3 min-w-0">
+          <RestaurantLogo name={restaurant.name} logoUrl={restaurant.logo_url} size={44} />
+          <div className="min-w-0">
+            <h1
+              className="text-xl truncate"
+              style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}
+            >
+              {restaurant.name}
+            </h1>
+            <p className="text-sm mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
+              /c/{restaurant.slug}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2 pt-0.5">
           <Badge color={restaurant.is_active ? "#1a7a4a" : "#d1d5db"}>
@@ -85,6 +90,17 @@ export function RestaurantDetailClient({ restaurant }: { restaurant: RestaurantD
             <Pencil size={13} />
           </button>
         </div>
+      </div>
+
+      {/* Branding. Lives on the detail screen rather than the create form because
+          a logo needs a restaurant to belong to — and creating one lands you
+          straight here, so it is still the first thing you see. */}
+      <div className="mt-4 pt-4 border-t" style={{ borderColor: "var(--color-hairline)" }}>
+        <LogoUploader
+          restaurantId={restaurant.id}
+          restaurantName={restaurant.name}
+          logoUrl={restaurant.logo_url}
+        />
       </div>
 
       <div

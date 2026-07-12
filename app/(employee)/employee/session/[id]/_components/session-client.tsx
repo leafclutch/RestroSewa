@@ -1,14 +1,19 @@
 "use client";
 
 import { useActionState, useEffect, useTransition, useState } from "react";
-import { closeSessionWithPayment, updateOrderItemStatus, forceCloseSession } from "@/app/actions/pos";
+import {
+  closeSessionWithPayment,
+  updateOrderItemStatus,
+  forceCloseSession,
+  cancelOrderItem,
+} from "@/app/actions/pos";
 import type { ActionResult, OrderItemRow, SessionDetail } from "@/app/actions/pos";
 import { searchCreditCustomers } from "@/app/actions/credits";
 import type { CreditCustomer } from "@/app/actions/credits";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Check, ChevronRight, Plus } from "lucide-react";
+import { Check, ChevronRight, Plus, X } from "lucide-react";
 import { SessionPrintButtons } from "./print-tickets";
 import type { RestaurantInfo } from "./print-tickets";
 
@@ -24,8 +29,17 @@ const STATUS_COLOR: Record<string, string> = {
   served: "var(--color-ink-mute)",
 };
 
-function OrderItem({ item, sessionId }: { item: OrderItemRow; sessionId: string }) {
+function OrderItem({
+  item,
+  sessionId,
+  canCancel = false,
+}: {
+  item: OrderItemRow;
+  sessionId: string;
+  canCancel?: boolean;
+}) {
   const [, start] = useTransition();
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const nextStatus =
     item.item_status === "pending"
@@ -33,6 +47,10 @@ function OrderItem({ item, sessionId }: { item: OrderItemRow; sessionId: string 
       : item.item_status === "ready"
       ? "served"
       : null;
+
+  // A served item was genuinely consumed — its stock stays deducted, so it can
+  // never be cancelled. Only what is still pending or ready can go back.
+  const cancellable = canCancel && item.item_status !== "served";
 
   return (
     <div
@@ -91,6 +109,39 @@ function OrderItem({ item, sessionId }: { item: OrderItemRow; sessionId: string 
         >
           <Check size={13} style={{ color: "var(--color-ink-mute)" }} />
         </button>
+      )}
+
+      {/* Cancelling takes the item off the bill AND puts its stock back on the
+          shelf, so it is confirmed rather than one-tap. */}
+      {cancellable && (
+        <button
+          type="button"
+          title="Cancel this item"
+          aria-label={`Cancel ${item.item_name}`}
+          className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+          style={{ background: "var(--color-canvas-soft)" }}
+          onClick={() => {
+            if (
+              !confirm(
+                `Cancel ${item.quantity > 1 ? `${item.quantity} × ` : ""}${item.item_name}?\n\nIt comes off the bill and its stock goes back.`
+              )
+            )
+              return;
+            setCancelError(null);
+            start(async () => {
+              const res = await cancelOrderItem(item.id);
+              if (res?.error) setCancelError(res.error);
+            });
+          }}
+        >
+          <X size={13} style={{ color: "#dc2626" }} />
+        </button>
+      )}
+
+      {cancelError && (
+        <span className="text-xs shrink-0" style={{ color: "#dc2626" }}>
+          {cancelError}
+        </span>
       )}
     </div>
   );
@@ -681,6 +732,7 @@ export function SessionClient({
   canForceClose = false,
   canSeePIN = true,
   canUseCredit = false,
+  canCancelOrders = false,
 }: {
   session: SessionDetail;
   restaurant: RestaurantInfo;
@@ -690,6 +742,7 @@ export function SessionClient({
   canForceClose?: boolean;
   canSeePIN?: boolean;
   canUseCredit?: boolean;
+  canCancelOrders?: boolean;
 }) {
   const [forceClosing, startForceClose] = useTransition();
   const [forceError, setForceError] = useState<string | null>(null);
@@ -751,7 +804,14 @@ export function SessionClient({
           className="rounded-xl border overflow-hidden"
           style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
         >
-          {pendingItems.map((i) => <OrderItem key={i.id} item={i} sessionId={session.id} />)}
+          {pendingItems.map((i) => (
+            <OrderItem
+              key={i.id}
+              item={i}
+              sessionId={session.id}
+              canCancel={canCancelOrders && !isClosed}
+            />
+          ))}
           {servedItems.length > 0 && pendingItems.length > 0 && (
             <div className="px-4 py-1.5 border-t" style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}>
               <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Served</p>

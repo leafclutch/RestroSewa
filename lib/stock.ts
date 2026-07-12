@@ -91,9 +91,20 @@ export const STOCK_REASON_LABEL: Record<string, string> = {
 /** Only a correction may ADD stock — every other reason consumes it. */
 export const CAN_ADD_STOCK = (reason: string) => reason === "adjustment";
 
+// ─── Cancellation reasons ─────────────────────────────────────────────────────
+// Ordering an item reserves its stock immediately. These are the four ways that
+// reservation is released again — the item was never actually consumed.
+
+export const CANCEL_REASON_LABEL: Record<string, string> = {
+  order_rejected: "Order Rejected",
+  session_closed: "Session Closed",
+  order_cancelled: "Order Cancelled",
+  item_cancelled: "Item Cancelled",
+};
+
 // ─── Product history ──────────────────────────────────────────────────────────
 
-export type MovementKind = "opening" | "purchase" | "sale" | "manual";
+export type MovementKind = "opening" | "purchase" | "sale" | "restore" | "manual";
 
 export type StockMovement = {
   at: string;
@@ -129,6 +140,9 @@ export function movementLabel(m: { kind: MovementKind; reason: string | null }):
       return "Purchase";
     case "sale":
       return "POS Sale";
+    case "restore":
+      // Named by WHY the reservation was released — that is the whole audit point.
+      return m.reason ? CANCEL_REASON_LABEL[m.reason] ?? m.reason : "Stock Restored";
     case "manual":
       if (m.reason === "adjustment") return "Stock Adjustment";
       return m.reason ? STOCK_REASON_LABEL[m.reason] ?? m.reason : "Manual Deduction";
@@ -139,5 +153,6 @@ export const MOVEMENT_COLOR: Record<MovementKind, string> = {
   opening: "var(--color-ink-mute)",
   purchase: "#1a7a4a", // stock in
   sale: "#dc2626", // stock out
+  restore: "#1a7a4a", // stock back in — the reservation was released
   manual: "#f97316", // stock out by hand
 };

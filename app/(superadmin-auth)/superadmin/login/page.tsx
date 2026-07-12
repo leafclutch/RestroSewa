@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { SuperAdminLoginForm } from "./_components/super-admin-form";
+import { PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
 
 export default async function SuperAdminLoginPage() {
   const supabase = await createClient();
@@ -33,13 +34,10 @@ export default async function SuperAdminLoginPage() {
 
   return (
     <div className="w-full max-w-[420px] mx-auto">
+      {/* tone="light": this page sits on a near-black gradient. The wordmark was
+          previously painted in `--color-ink` (the dark-text token) against it. */}
       <div className="mb-6 sm:mb-8 text-center">
-        <span
-          className="text-2xl tracking-tight"
-          style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.5px" }}
-        >
-          Restro<span style={{ color: "var(--color-lemon)", fontWeight: 500 }}>Sewa</span>
-        </span>
+        <PlatformWordmark size={24} accent="var(--color-lemon)" letterSpacing="-0.5px" />
         <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>
           Super Admin
         </p>
@@ -71,6 +69,10 @@ export default async function SuperAdminLoginPage() {
           Sign in here
         </Link>
       </p>
+
+      <div className="flex justify-center mt-6">
+        <PoweredBy height={16} tone="light" />
+      </div>
     </div>
   );
 }

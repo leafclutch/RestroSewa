@@ -311,27 +311,24 @@ export async function rejectTableActivation(notificationId: string): Promise<Act
     return null;
   }
 
-  // Close the pending session — the held order never reaches the kitchen (the
-  // queue only reads active sessions) and the table stays free.
-  if (notif.session_id) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (service as any)
-      .from("sessions")
-      .update({ status: "closed", closed_at: new Date().toISOString() })
-      .eq("id", notif.session_id)
-      .eq("restaurant_id", ru.restaurant_id)
-      .eq("status", "pending_activation"); // never close an already-active table
-  }
-
-  // Keep the notification as the record of the decision — the customer page
-  // polls it to show the "request declined" state.
+  // Closing the session, releasing the stock the held order reserved, and
+  // resolving the notification happen in ONE transaction. Rejecting an order the
+  // customer never received must not leave its ingredients deducted.
+  //
+  // The session close inside is a compare-and-swap on `pending_activation`, so if
+  // a colleague accepted the table a moment ago, nothing is cancelled.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (service as any)
-    .from("notifications")
-    .update({ status: "resolved", acknowledged_at: new Date().toISOString() })
-    .eq("id", notif.id);
+  const { error } = await (service as any).rpc("reject_table_activation", {
+    p_restaurant_id: ru.restaurant_id,
+    p_session_id: notif.session_id,
+    p_notification_id: notif.id,
+    p_by: ru.id,
+  });
+
+  if (error) return { error: "Failed to reject the request." };
 
   revalidatePath("/employee/notifications");
+  revalidatePath("/employee/dashboard");
   return null;
 }
 
@@ -368,6 +365,9 @@ export async function getSessionDetail(
         "id, item_name, item_price, workstation_name, quantity, item_status, notes, created_at, order_id"
       )
       .in("order_id", orderIds)
+      // A cancelled item is off the bill and back on the shelf — it must not be
+      // shown, and must not be charged for.
+      .is("cancelled_at", null)
       .order("created_at");
     items = (itemsData as OrderItemRow[]) ?? [];
   }
@@ -783,6 +783,9 @@ async function sessionHasOrders(service: any, sessionId: string): Promise<boolea
     .from("session_order_items")
     .select("id")
     .in("order_id", orderIds)
+    // Cancelled items don't count: a table whose only order was cancelled is
+    // empty again, and any assigned staff member may close it.
+    .is("cancelled_at", null)
     .limit(1);
   return ((items ?? []) as unknown[]).length > 0;
 }
@@ -829,29 +832,81 @@ export async function forceCloseSession(sessionId: string): Promise<ActionResult
     return { error: "This table contains active orders and can only be closed by the Cashier." };
   }
 
-  // Clear pending notifications for this table or room
+  // Releasing the stock, clearing the table's notifications and closing the
+  // session happen in ONE transaction.
+  //
+  // Anything still pending or ready never reached the customer, so its
+  // ingredients go back on the shelf. Items already SERVED stay deducted — they
+  // were genuinely consumed, whether or not the bill was ever settled.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const notifQuery = (service as any)
-    .from("notifications")
-    .update({ status: "completed" })
-    .eq("restaurant_id", ru.restaurant_id)
-    .in("status", ["new", "acknowledged"]);
+  const { error } = await (service as any).rpc("force_close_session", {
+    p_restaurant_id: ru.restaurant_id,
+    p_session_id: sessionId,
+    p_by: ru.id,
+  });
 
-  if (session.table_id) {
-    await notifQuery.eq("table_id", session.table_id);
-  } else if (session.room_id) {
-    await notifQuery.eq("room_id", session.room_id);
-  }
-
-  // Close the session
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (service as any)
-    .from("sessions")
-    .update({ status: "closed", closed_at: new Date().toISOString() })
-    .eq("id", sessionId);
+  if (error) return { error: "Failed to close the session." };
 
   revalidatePath("/employee/dashboard");
   redirect("/employee/dashboard");
+}
+
+// ─── Cancel an order / a single item ─────────────────────────────────────────
+// Scenario 4: an order (or one line of it) is cancelled before it is served.
+// Only the cancelled items are released; anything already served stays deducted.
+//
+// Gated on CANCEL_ORDERS — cancelling moves both money (it leaves the bill) and
+// stock (it returns to the shelf), so it is not something any waiter may do.
+
+export async function cancelOrder(orderId: string): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+
+  if (!hasPermission(ru, PERMISSIONS.CANCEL_ORDERS)) {
+    return { error: "You don't have permission to cancel orders." };
+  }
+
+  const service = createServiceClient();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).rpc("cancel_order", {
+    p_restaurant_id: ru.restaurant_id,
+    p_order_id: orderId,
+    p_by: ru.id,
+  });
+
+  if (error) return { error: "Failed to cancel the order." };
+
+  revalidatePath("/employee/queue");
+  revalidatePath("/employee/dashboard");
+  return null;
+}
+
+export async function cancelOrderItem(itemId: string): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+
+  if (!hasPermission(ru, PERMISSIONS.CANCEL_ORDERS)) {
+    return { error: "You don't have permission to cancel orders." };
+  }
+
+  const service = createServiceClient();
+
+  // Returns 0 when the item was already served or already cancelled — the RPC
+  // refuses rather than silently releasing stock that was actually consumed.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (service as any).rpc("cancel_order_item", {
+    p_restaurant_id: ru.restaurant_id,
+    p_item_id: itemId,
+    p_by: ru.id,
+  });
+
+  if (error) return { error: "Failed to cancel the item." };
+  if (Number(data ?? 0) === 0) {
+    return { error: "That item has already been served or cancelled." };
+  }
+
+  revalidatePath("/employee/queue");
+  revalidatePath("/employee/dashboard");
+  return null;
 }
 
 // ─── Order Queue (grouped by order, for the staff working queue) ──────────────
@@ -928,6 +983,8 @@ export async function getMyOrderQueue(): Promise<QueueOrder[]> {
     .from("session_order_items")
     .select("id, order_id, item_name, quantity, item_status, notes, workstation_id, workstation_name, item_price, created_at")
     .in("order_id", orderIds)
+    // Cancelled items are off the queue — the kitchen must not cook them.
+    .is("cancelled_at", null)
     .order("created_at");
 
   const orderMeta = new Map(
@@ -1536,6 +1593,8 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
         .from("session_order_items")
         .select("id, item_name, item_price, quantity, created_at")
         .in("order_id", order_ids)
+        // Never print a cancelled item on the bill.
+        .is("cancelled_at", null)
         .order("created_at");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       items = ((its ?? []) as any[]).map((it) => ({

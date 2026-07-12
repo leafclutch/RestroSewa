@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getAllRestaurants } from "@/app/actions/restaurants";
 import type { RestaurantRow } from "@/app/actions/restaurants";
 import { Button } from "@/components/ui/button";
+import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import { Plus } from "lucide-react";
 
 const TIER_COLORS: Record<string, string> = {
@@ -34,6 +35,8 @@ function RestaurantCard({ r }: { r: RestaurantRow }) {
         className="w-2 h-2 rounded-full shrink-0"
         style={{ background: r.is_active ? "#1a7a4a" : "#d1d5db" }}
       />
+
+      <RestaurantLogo name={r.name} logoUrl={r.logo_url} size={34} />
 
       <div className="flex-1 min-w-0">
         <p

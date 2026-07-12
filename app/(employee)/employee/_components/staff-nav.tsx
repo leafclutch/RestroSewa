@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useTransition } from "react";
 import { logout } from "@/app/actions/auth";
 import { Home, LogOut } from "lucide-react";
+import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import { NotificationBell } from "./notification-bell";
 
 // The staff top bar. STICKY: it stays pinned while the dashboard scrolls, so
@@ -15,10 +16,12 @@ import { NotificationBell } from "./notification-bell";
 // handled entirely in the bell's dropdown — no navigation to a separate page.
 export function StaffNav({
   restaurantName,
+  restaurantLogo = null,
   displayName,
   notificationCount = 0,
 }: {
   restaurantName: string;
+  restaurantLogo?: string | null;
   displayName: string;
   notificationCount?: number;
 }) {
@@ -37,16 +40,26 @@ export function StaffNav({
         height: 56,
       }}
     >
-      {/* Brand / user — tapping the name returns to the dashboard. */}
-      <Link href="/employee/dashboard" className="flex-1 min-w-0">
-        <span className="text-sm font-medium truncate block" style={{ color: "#fff", letterSpacing: "-0.2px" }}>
-          <span className="hidden sm:inline">{restaurantName}</span>
-          <span className="sm:hidden" style={{ color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>
+      {/* Brand / user — tapping it returns to the dashboard. Staff work for the
+          RESTAURANT, so its logo leads here; RestroSewa is the platform underneath
+          and doesn't compete for the space. */}
+      <Link href="/employee/dashboard" className="flex-1 min-w-0 flex items-center gap-2.5">
+        <RestaurantLogo
+          name={restaurantName}
+          logoUrl={restaurantLogo}
+          size={32}
+          priority
+        />
+        <span className="min-w-0">
+          <span className="text-sm font-medium truncate block" style={{ color: "#fff", letterSpacing: "-0.2px" }}>
+            <span className="hidden sm:inline">{restaurantName}</span>
+            <span className="sm:hidden" style={{ color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>
+              {displayName}
+            </span>
+          </span>
+          <span className="text-xs hidden sm:block" style={{ color: "rgba(255,255,255,0.4)" }}>
             {displayName}
           </span>
-        </span>
-        <span className="text-xs hidden sm:block" style={{ color: "rgba(255,255,255,0.4)" }}>
-          {displayName}
         </span>
       </Link>
 
