@@ -1,8 +1,10 @@
 ﻿import { requireAdminOrPermission } from "@/lib/auth/guards";
-import { PERMISSIONS } from "@/lib/permissions";
+import { PAYROLL_ACCESS, PERMISSIONS } from "@/lib/permissions";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getWorkstations } from "@/app/actions/workstations";
+import { getPayrollSheet } from "@/app/actions/payroll";
 import { WorkstationAssign } from "./_components/workstation-assign";
+import { PayrollClient } from "./_components/payroll-client";
 
 type StaffRow = {
   id: string;
@@ -57,8 +59,14 @@ export default async function AdminStaffPage() {
 
   const canAssignWorkstations = restaurantUser.role === "restaurant_admin";
 
+  // Payroll is gated separately from `view_staff`: seeing the roster is not the
+  // same as seeing what everyone earns. `getPayrollSheet` re-checks this itself,
+  // so a caller who slipped past here would still get an empty sheet.
+  const canViewPayroll = PAYROLL_ACCESS.canViewPayroll(restaurantUser);
+  const payroll = canViewPayroll ? await getPayrollSheet() : null;
+
   return (
-    <div className="p-4 md:p-8 max-w-2xl">
+    <div className="p-4 md:p-8 max-w-3xl">
       <h1
         className="text-xl mb-1"
         style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}
@@ -138,6 +146,15 @@ export default async function AdminStaffPage() {
         <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
           No staff yet. Ask your platform admin to add team members.
         </p>
+      )}
+
+      {/* Payroll — the same people, with what they earn. Not a separate module
+          and not a separate employee list; it hangs off the staff above. */}
+      {payroll && (
+        <PayrollClient
+          initial={payroll}
+          canManage={PAYROLL_ACCESS.canManagePayroll(restaurantUser)}
+        />
       )}
     </div>
   );

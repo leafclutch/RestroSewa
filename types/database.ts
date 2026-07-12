@@ -1206,6 +1206,13 @@ export type Database = {
           /** How many parties sit behind those outstanding totals. */
           pending_customers: number;
           pending_vendors: number;
+          /** Staff salary — money out, on the day it was paid. */
+          salary_cash: number;
+          salary_online: number;
+          salary_advance: number;
+          salary_total: number;
+          /** Salary accrued but not yet paid, across every month since each hire. */
+          salary_outstanding: number;
           closing_cash: number;
           closing_online: number;
           has_opening: boolean;

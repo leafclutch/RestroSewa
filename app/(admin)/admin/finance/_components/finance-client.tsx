@@ -10,12 +10,14 @@ import {
   setOpeningBalance,
 } from "@/app/actions/finance";
 import type { ActionResult, OpeningBalance } from "@/app/actions/finance";
+import { getPayrollSummary } from "@/app/actions/payroll";
 import {
   PERIOD_LABEL,
   PURCHASE_STATUS_COLOR,
   PURCHASE_STATUS_LABEL,
 } from "@/lib/finance";
 import type { FinancePeriod, FinancePurchase, FinanceReport } from "@/lib/finance";
+import type { PayrollSummary } from "@/lib/payroll";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -250,16 +252,19 @@ export function FinanceClient({
   initial,
   initialOpening,
   initialPurchases,
+  initialPayroll,
   canManage,
 }: {
   initial: FinanceReport;
   initialOpening: OpeningBalance;
   initialPurchases: FinancePurchase[];
+  initialPayroll: PayrollSummary;
   canManage: boolean;
 }) {
   const [report, setReport] = useState(initial);
   const [opening, setOpening] = useState(initialOpening);
   const [purchases, setPurchases] = useState(initialPurchases);
+  const [payroll, setPayroll] = useState(initialPayroll);
   const [period, setPeriod] = useState<FinancePeriod>(initial.period);
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -271,12 +276,14 @@ export function FinanceClient({
     startTransition(async () => {
       try {
         const args = { period: p, from: from ?? null, to: to ?? null };
-        const [next, list] = await Promise.all([
+        const [next, list, pay] = await Promise.all([
           getFinanceReport(args),
           getPeriodPurchases(args),
+          getPayrollSummary(args),
         ]);
         setReport(next);
         setPurchases(list);
+        setPayroll(pay);
       } catch {
         // keep the last known report on a transient failure
       }
@@ -332,16 +339,23 @@ export function FinanceClient({
     setOpening(op);
   }, [period, customFrom, customTo]);
 
-  // Sales, purchases, credit and vendor payments all move these figures.
+  // Sales, purchases, credit, vendor payments and payroll all move these figures.
   const resync = useCallback(
     () => load(period, customFrom || undefined, customTo || undefined),
     [load, period, customFrom, customTo]
   );
-  useRealtime(["billing", "credits", "purchases", "vendors", "finance"], resync);
+  useRealtime(["billing", "credits", "purchases", "vendors", "finance", "payroll"], resync);
 
   const netMovement = report.closingNet - (report.openingCash + report.openingOnline);
   const periodLabel = PERIOD_LABEL[report.period];
   const netCredit = report.customerCreditOutstanding - report.vendorCreditOutstanding;
+
+  // What was actually handed over, as opposed to what was billed on credit.
+  const purchasesPaid = report.purchasesCash + report.purchasesOnline;
+  // A "salary payment" on the Expenses list means the settlement, so the advances
+  // are shown on their own line rather than counted twice.
+  const salaryFinal = report.salaryTotal - report.salaryAdvance;
+  const totalExpenses = purchasesPaid + report.vendorCreditPaid + report.salaryTotal;
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto">
@@ -494,6 +508,76 @@ export function FinanceClient({
             },
           ]}
           total={{ label: "Total sales", value: report.salesTotal }}
+        />
+
+        {/* Everything that left the business, gathered in one place. The figures
+            are already on this page — spread across Purchases, Vendor credits and
+            Payroll — and an admin asking "where did the cash go today" should not
+            have to add up three sections to find out. */}
+        <Section
+          title={`Expenses · ${periodLabel}`}
+          note="All money out — purchases, vendors and staff"
+          rows={[
+            {
+              label: "Product purchases",
+              hint: "Paid at the time of purchase",
+              value: purchasesPaid,
+              tone: purchasesPaid > 0 ? WE_OWE : undefined,
+            },
+            {
+              label: "Vendor payments",
+              hint: "Settling earlier credit purchases",
+              value: report.vendorCreditPaid,
+              tone: report.vendorCreditPaid > 0 ? WE_OWE : undefined,
+            },
+            {
+              label: "Staff salary payments",
+              value: salaryFinal,
+              tone: salaryFinal > 0 ? WE_OWE : undefined,
+            },
+            {
+              label: "Salary advances",
+              hint: "Paid ahead of the month ending",
+              value: report.salaryAdvance,
+              tone: report.salaryAdvance > 0 ? "#f97316" : undefined,
+            },
+          ]}
+          total={{ label: "Total money out", value: totalExpenses, tone: totalExpenses > 0 ? WE_OWE : undefined }}
+        />
+
+        {/* Payroll's own line: what was paid, how it left, and what is still owed. */}
+        <Section
+          title={`Staff salary · ${periodLabel}`}
+          note={
+            report.salaryOutstanding > 0.005
+              ? "Outstanding is salary accrued but not yet paid"
+              : "Every salary accrued so far has been paid"
+          }
+          rows={[
+            { label: "Salary paid today", value: payroll.todayTotal },
+            { label: "Salary paid this month", value: payroll.monthTotal },
+            {
+              label: `Paid in cash · ${periodLabel}`,
+              value: report.salaryCash,
+              tone: report.salaryCash > 0 ? WE_OWE : undefined,
+            },
+            {
+              label: `Paid online · ${periodLabel}`,
+              value: report.salaryOnline,
+              tone: report.salaryOnline > 0 ? WE_OWE : undefined,
+            },
+            {
+              label: `Advances · ${periodLabel}`,
+              value: report.salaryAdvance,
+              tone: report.salaryAdvance > 0 ? "#f97316" : undefined,
+            },
+            { label: "Total salary expense", hint: "All time", value: payroll.allTimeTotal },
+          ]}
+          total={{
+            label: "Outstanding salary liability",
+            value: report.salaryOutstanding,
+            tone: report.salaryOutstanding > 0.005 ? WE_OWE : undefined,
+          }}
         />
 
         <Section

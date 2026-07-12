@@ -6,6 +6,7 @@ import {
   getOpeningBalance,
   getPeriodPurchases,
 } from "@/app/actions/finance";
+import { getPayrollSummary } from "@/app/actions/payroll";
 import { FinanceClient } from "./_components/finance-client";
 
 // Stock & Finance → Daily Finance. Gated on `view_finance`, which is deliberately
@@ -18,10 +19,13 @@ export default async function FinancePage() {
     redirect("/employee/dashboard");
   }
 
-  const [report, opening, purchases] = await Promise.all([
+  const [report, opening, purchases, payroll] = await Promise.all([
     getFinanceReport({ period: "today" }),
     getOpeningBalance(),
     getPeriodPurchases({ period: "today" }),
+    // The aggregate wage bill. Gated on `view_finance` like everything else here —
+    // it is a company expense, not a window onto any individual's salary.
+    getPayrollSummary({ period: "today" }),
   ]);
 
   return (
@@ -29,6 +33,7 @@ export default async function FinancePage() {
       initial={report}
       initialOpening={opening}
       initialPurchases={purchases}
+      initialPayroll={payroll}
       // Seeding the opening balance re-bases every balance, so it needs write access.
       canManage={STOCK_ACCESS.canManageStock(restaurantUser)}
     />

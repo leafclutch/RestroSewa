@@ -25,6 +25,7 @@ export type Topic =
   | "purchases"
   | "vendors"
   | "finance"
+  | "payroll"
   | "menu";
 
 type Listener = (topic: Topic) => void;
