@@ -1135,13 +1135,18 @@ export type Database = {
           product_id: string;
           opening: number;
           purchased: number;
-          /** Sold through the POS. */
+          /** Sold through the POS, net of same-day reversals. */
           used_pos: number;
           /** Taken out by hand (kitchen usage, waste, damage, staff meals). */
           used_manual: number;
-          /** Everything consumed = POS + manual. */
+          /** Everything actually consumed = used_pos + manual. */
           used: number;
-          /** Put back by a correction — kept apart from `used` so it can't cancel it. */
+          /** Same-day reservations released (rejected/cancelled). Already netted
+           *  out of `used_pos` — carried separately only so the breakdown can show
+           *  the sale and its reversal as two lines. */
+          reversed: number;
+          /** Put back: manual corrections, plus reservations from an earlier day
+           *  released today. Kept apart from `used` so it can't cancel it. */
           added: number;
           /** opening + purchased − used + added */
           closing: number;

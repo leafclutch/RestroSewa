@@ -695,12 +695,24 @@ function ProductDetailView({
   ];
   // "Used" is POS + manual, so both halves are shown — otherwise the total looks
   // wrong to anyone who only remembers the sales.
-  rows.push({ label: "Sold via POS", value: -detail.used_pos, sign: true });
+  //
+  // `used_pos` arrives NET of anything ordered and then rejected/cancelled today,
+  // so the gross sale and its reversal are shown as two lines that cancel out.
+  // Collapsing them into the net figure alone would leave an admin staring at
+  // "Sold via POS −0" on a day an order visibly came through the kitchen.
+  rows.push({
+    label: "Sold via POS",
+    value: -(detail.used_pos + detail.reversed),
+    sign: true,
+  });
+  if (detail.reversed > 0) {
+    rows.push({ label: "Rejected / cancelled", value: detail.reversed, sign: true });
+  }
   if (detail.used_manual > 0) {
     rows.push({ label: "Deducted manually", value: -detail.used_manual, sign: true });
   }
   if (detail.added > 0) {
-    rows.push({ label: "Added by correction", value: detail.added, sign: true });
+    rows.push({ label: "Added back", value: detail.added, sign: true });
   }
 
   return (
@@ -1104,9 +1116,10 @@ export function StockClient({
                     <td className="px-4 py-3 text-right tabular-nums" style={{ color: p.purchased > 0 ? "#1a7a4a" : "var(--color-ink-mute)" }}>
                       {p.purchased > 0 ? `+${qty(p.purchased)}` : "—"}
                     </td>
-                    {/* Used = POS sales + manual deductions, as ONE total. The
-                        split lives in the product history, not here — this column
-                        is a summary. */}
+                    {/* Used = what was ACTUALLY consumed: POS sales (net of anything
+                        rejected or cancelled today) + manual deductions, as ONE
+                        total. The split lives in the product history, not here —
+                        this column is a summary. */}
                     <td className="px-4 py-3 text-right tabular-nums" style={{ color: p.used > 0 ? "#dc2626" : "var(--color-ink-mute)" }}>
                       {p.used > 0 ? `−${qty(p.used)}` : "—"}
                     </td>

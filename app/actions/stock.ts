@@ -22,14 +22,20 @@ export type StockRow = {
   /** Stock at the start of the selected day (= previous day's final stock). */
   opening: number;
   purchased: number;
-  /** Sold through the POS. */
+  /** Sold through the POS, NET of reservations released the same day. */
   used_pos: number;
   /** Taken out by hand: kitchen usage, waste, damage, staff meals. */
   used_manual: number;
-  /** Everything consumed today = POS + manual. */
+  /** Actually consumed today = used_pos + manual. A rejected or cancelled order
+   *  is not consumption, so it does not appear here. */
   used: number;
-  /** Put BACK by a correction. Kept apart from `used` so a +5 correction can't
-   *  cancel a −5 wastage and report "nothing used today". */
+  /** Reservations placed today and released today (rejected / force closed /
+   *  cancelled). Already netted out of `used_pos` — kept separately so the
+   *  breakdown can show the sale and its reversal as two honest lines. */
+  reversed: number;
+  /** Put BACK: manual corrections, plus reservations from an EARLIER day released
+   *  today. Kept apart from `used` so a +5 correction can't cancel a −5 wastage
+   *  and report "nothing used today". */
   added: number;
   /** Final stock = opening + purchased − used + added. */
   closing: number;
@@ -164,6 +170,7 @@ export async function getStock(params?: {
       used_pos: Number(r?.used_pos ?? 0),
       used_manual: Number(r?.used_manual ?? 0),
       used: Number(r?.used ?? 0),
+      reversed: Number(r?.reversed ?? 0),
       added: Number(r?.added ?? 0),
       closing,
       status: stockStatus(closing, threshold),
