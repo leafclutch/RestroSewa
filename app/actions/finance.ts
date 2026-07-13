@@ -38,6 +38,11 @@ const EMPTY = (period: FinancePeriod, from: string, to: string): FinanceReport =
   vendorCreditOutstanding: 0,
   pendingCustomers: 0,
   pendingVendors: 0,
+  salaryCash: 0,
+  salaryOnline: 0,
+  salaryAdvance: 0,
+  salaryTotal: 0,
+  salaryOutstanding: 0,
   closingCash: 0,
   closingOnline: 0,
   closingNet: 0,
@@ -107,6 +112,12 @@ export async function getFinanceReport(params?: {
     vendorCreditOutstanding: num(row.vendor_credit_outstanding),
     pendingCustomers: Number(row.pending_customers ?? 0),
     pendingVendors: Number(row.pending_vendors ?? 0),
+
+    salaryCash: num(row.salary_cash),
+    salaryOnline: num(row.salary_online),
+    salaryAdvance: num(row.salary_advance),
+    salaryTotal: num(row.salary_total),
+    salaryOutstanding: num(row.salary_outstanding),
 
     closingCash,
     closingOnline,
@@ -316,6 +327,25 @@ export async function exportFinanceCsv(params?: {
           [],
         ]
       : []),
+    // Every rupee that left the business in the period, in one block — the
+    // question "where did the cash go today" answered without adding up four
+    // sections by hand.
+    ["EXPENSES"],
+    ["Product Purchases (paid)", fmt(report.purchasesCash + report.purchasesOnline)],
+    ["Vendor Payments (against credit)", fmt(report.vendorCreditPaid)],
+    ["Staff Salary Payments", fmt(report.salaryTotal - report.salaryAdvance)],
+    ["Salary Advances", fmt(report.salaryAdvance)],
+    ["Total Money Out", fmt(
+      report.purchasesCash + report.purchasesOnline + report.vendorCreditPaid + report.salaryTotal
+    )],
+    [],
+    ["STAFF SALARY"],
+    ["Salary Paid (cash)", fmt(report.salaryCash)],
+    ["Salary Paid (online)", fmt(report.salaryOnline)],
+    ["Salary Advances", fmt(report.salaryAdvance)],
+    ["Total Salary Paid", fmt(report.salaryTotal)],
+    ["Outstanding Salary Liability", fmt(report.salaryOutstanding)],
+    [],
     ["CUSTOMER CREDITS (owed to us)"],
     ["Total Outstanding", fmt(report.customerCreditOutstanding)],
     ["Collected", fmt(report.customerCreditCollected)],

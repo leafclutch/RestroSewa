@@ -97,6 +97,15 @@ export type FinanceReport = {
   /** How many vendors are behind the outstanding total. */
   pendingVendors: number;
 
+  /** Staff salary — real money out, on the day it was handed over. */
+  salaryCash: number;
+  salaryOnline: number;
+  /** The part of `salaryTotal` paid ahead of the month ending. */
+  salaryAdvance: number;
+  salaryTotal: number;
+  /** Salary accrued but not yet paid, across every month since each hire. */
+  salaryOutstanding: number;
+
   closingCash: number;
   closingOnline: number;
   /** Cash + bank. */

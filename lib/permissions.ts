@@ -35,6 +35,10 @@ export const PERMISSIONS = {
   CREATE_STAFF:     "create_staff",
   EDIT_STAFF:       "edit_staff",
   DELETE_STAFF:     "delete_staff",
+  // Payroll — deliberately separate from view_staff. Seeing the team is not the
+  // same as seeing what everyone earns.
+  VIEW_PAYROLL:     "view_payroll",
+  MANAGE_PAYROLL:   "manage_payroll",
   // Settings
   VIEW_SETTINGS:    "view_settings",
   MANAGE_SETTINGS:  "manage_settings",
@@ -120,6 +124,17 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
       { key: "create_staff", label: "Create Staff" },
       { key: "edit_staff",   label: "Edit Staff" },
       { key: "delete_staff", label: "Delete Staff" },
+    ],
+  },
+  {
+    label: "Payroll",
+    items: [
+      // Salaries are the most sensitive thing on the staff record — a colleague
+      // who can see the roster must not thereby see what everyone is paid. Held
+      // apart from `view_staff` for exactly that reason, and off every preset by
+      // default, so payroll is only ever granted on purpose.
+      { key: "view_payroll",   label: "View Payroll & Salaries" },
+      { key: "manage_payroll", label: "Set Salaries & Record Payments" },
     ],
   },
   {
@@ -272,6 +287,23 @@ export const STOCK_ACCESS = {
   /** Shows the Stock & Finance group in the admin sidebar at all. */
   canSeeModule: (u: { role: string; permissions: string[] }) =>
     hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.VIEW_FINANCE]),
+};
+
+// ─── Payroll (Staff → Payroll) ────────────────────────────────────────────────
+// Read and write are split so a bookkeeper can be given the payroll report
+// without the ability to pay anyone. `restaurant_admin` passes both.
+//
+// `manage_payroll` implies `view_payroll`: paying someone you cannot see what
+// they are owed would be absurd, and requiring both boxes to be ticked would be
+// a trap. So the WRITE permission grants the READ.
+
+export const PAYROLL_ACCESS = {
+  /** Sees salaries, payroll status and payment history. */
+  canViewPayroll: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.VIEW_PAYROLL, P_.MANAGE_PAYROLL]),
+  /** Sets salaries, records payments and advances. */
+  canManagePayroll: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.MANAGE_PAYROLL),
 };
 
 // ─── Staff Presets ────────────────────────────────────────────────────────────
