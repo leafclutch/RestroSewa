@@ -11,6 +11,33 @@ const supabaseHost = (() => {
   }
 })();
 
+// Push is configured by three environment variables, and the failure mode when they
+// are missing is uniquely nasty: everything BUILDS, everything RUNS, every screen
+// looks right — and no phone ever rings. There is no error to find, because nothing
+// errored.
+//
+// The public key is worse still, because `NEXT_PUBLIC_*` values are INLINED AT BUILD
+// TIME. A host that sets the variable after deploying has not fixed anything: the
+// bundle already shipped with `undefined` baked into it, and only a rebuild changes
+// that. So the check belongs here, in the build, where it can still be acted on.
+(() => {
+  const missing = [
+    "NEXT_PUBLIC_VAPID_PUBLIC_KEY",
+    "VAPID_PRIVATE_KEY",
+    "VAPID_SUBJECT",
+  ].filter((k) => !process.env[k]);
+
+  if (missing.length > 0) {
+    console.warn(
+      "\n\x1b[33m⚠ WEB PUSH IS NOT CONFIGURED — this build cannot send notifications.\x1b[0m\n" +
+        `  Missing: ${missing.join(", ")}\n` +
+        "  The app will build and run fine, and no phone will ever ring.\n" +
+        "  NEXT_PUBLIC_VAPID_PUBLIC_KEY is baked in at BUILD time — set it on the host\n" +
+        "  BEFORE building, or the bundle ships without it no matter what you set later.\n"
+    );
+  }
+})();
+
 const nextConfig: NextConfig = {
   skipProxyUrlNormalize: true,
 

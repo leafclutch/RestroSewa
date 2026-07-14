@@ -95,6 +95,20 @@ export function PushToggle() {
     );
   }
 
+  // The app's fault, not the browser's. Reported as "this browser can't do
+  // notifications" until now, which blamed the phone for a missing deployment variable
+  // and cost real time.
+  if (state === "misconfigured") {
+    return notice(
+      "var(--color-ruby)",
+      ShieldAlert,
+      "This build has no notification key",
+      "NEXT_PUBLIC_VAPID_PUBLIC_KEY is missing. It is baked into the app when it is " +
+        "BUILT, not read when it runs — so it must be set on the host before the build, " +
+        "and setting it afterwards changes nothing until you rebuild."
+    );
+  }
+
   if (state === "ios-needs-install") {
     return notice(
       "var(--color-lemon)",

@@ -105,6 +105,14 @@ export function PushPrompt() {
       tint: "var(--color-ink-mute)",
       text: "This browser can't do notifications.",
     },
+    // OUR fault, not the browser's — and saying so is the whole point. This used to
+    // report "this browser can't do notifications", which is false and sends people
+    // to check their phone instead of their deployment.
+    misconfigured: {
+      icon: ShieldAlert,
+      tint: "var(--color-ruby)",
+      text: "This build is missing its notification key (NEXT_PUBLIC_VAPID_PUBLIC_KEY).",
+    },
   };
 
   const r = reason[state];

@@ -25,10 +25,25 @@ export type PushState =
   | "insecure" // plain http — the browser refuses push outright
   | "no-sw" // no service worker (a dev build): nothing to receive a push
   | "unsupported" // a browser that genuinely cannot
+  | "misconfigured" // OUR fault: the app was built without a VAPID public key
   | "ios-needs-install" // Safari only delivers push to an installed app
   | "denied" // the user said no, and cannot be asked again
   | "off"
   | "on";
+
+/**
+ * The public half of the VAPID keypair, baked into the bundle at BUILD time.
+ *
+ * `NEXT_PUBLIC_*` values are not read at runtime — they are substituted as literals
+ * when the bundle is compiled. So a host that has the variable set but was built
+ * before it existed ships `undefined` here, and no amount of restarting fixes it. It
+ * has to be present when `next build` runs.
+ *
+ * This being missing used to surface as "this browser can't do notifications", which
+ * is a lie: the browser is fine, the deployment isn't. That message sent people
+ * debugging their phone for an hour. It is now its own state, with its own words.
+ */
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
 /**
  * base64url text → the raw bytes the Push API insists on.
@@ -104,6 +119,19 @@ export function usePush() {
       return;
     }
 
+    // Checked HERE, before the button is offered — not on click. Presenting a switch
+    // that cannot possibly work, and only admitting it after someone has pressed it
+    // and granted an OS permission prompt, is a small cruelty.
+    if (!VAPID_PUBLIC_KEY) {
+      console.error(
+        "[push] NEXT_PUBLIC_VAPID_PUBLIC_KEY is missing from this build. " +
+          "It is inlined at build time, so it must be set BEFORE `next build` runs — " +
+          "setting it on the server afterwards changes nothing."
+      );
+      setState("misconfigured");
+      return;
+    }
+
     if (Notification.permission === "denied") {
       setState("denied");
       return;
@@ -134,10 +162,11 @@ export function usePush() {
         return;
       }
 
-      const key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-      if (!key) {
-        console.error("[push] NEXT_PUBLIC_VAPID_PUBLIC_KEY is not set");
-        setState("unsupported");
+      if (!VAPID_PUBLIC_KEY) {
+        // Should be unreachable — refresh() catches this before the button is shown —
+        // but if it ever isn't, say the TRUE thing. This used to report "unsupported",
+        // blaming the browser for our own missing key.
+        setState("misconfigured");
         return;
       }
 
@@ -152,7 +181,7 @@ export function usePush() {
           // Non-negotiable everywhere: a push MUST show the user something. Silent push
           // is not available to websites, by design.
           userVisibleOnly: true,
-          applicationServerKey: decodeVapidKey(key),
+          applicationServerKey: decodeVapidKey(VAPID_PUBLIC_KEY),
         }));
 
       const json = sub.toJSON();
