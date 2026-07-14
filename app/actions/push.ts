@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { isCategory } from "@/lib/push/categories";
 import type { NotificationCategory } from "@/lib/push/categories";
+import { sendToUsers } from "@/lib/push/send";
 
 // The browser hands us this after the user grants permission. It is the address the
 // push service will deliver to, plus the keys payloads are encrypted to.
@@ -103,6 +104,59 @@ export async function isPushSubscribed(endpoint: string): Promise<boolean> {
     .maybeSingle();
 
   return Boolean(data);
+}
+
+/**
+ * Push a test alert to the caller's own devices, right now.
+ *
+ * This exists because there was no way to tell a WORKING push setup from a broken one
+ * without arranging for a guest to tap "call waiter" and then hoping. When it didn't
+ * arrive there was nothing to look at: no subscription, no error, no signal — just a
+ * phone that stayed quiet, which looks identical to a feature that was never built.
+ *
+ * So it reports what actually happened, including the boring answer ("this device
+ * isn't subscribed"), which is the answer most of the time and the one nobody was
+ * being given.
+ */
+export async function sendTestPush(): Promise<{ ok: boolean; message: string }> {
+  const ru = await getRestaurantUser();
+
+  const { sent, failed, pruned } = await sendToUsers([ru.id], {
+    title: "Test alert",
+    body: "If you can read this on your lock screen, alerts are working.",
+    url: "/employee/notifications",
+    tag: "test-push",
+    requireInteraction: false,
+  });
+
+  if (sent > 0) {
+    return {
+      ok: true,
+      message:
+        sent === 1
+          ? "Sent. Lock your phone — it should appear within a few seconds."
+          : `Sent to ${sent} devices. Lock your phone — it should appear within a few seconds.`,
+    };
+  }
+
+  if (pruned > 0) {
+    return {
+      ok: false,
+      message: "This device's subscription had expired and was removed. Turn alerts off and on again.",
+    };
+  }
+
+  if (failed > 0) {
+    return {
+      ok: false,
+      message: "The push service rejected it. Check the server logs for the reason.",
+    };
+  }
+
+  return {
+    ok: false,
+    message: "No subscribed device found for you. Turn alerts on first.",
+  };
 }
 
 // ─── Notification preferences ────────────────────────────────────────────────

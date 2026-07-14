@@ -33,10 +33,38 @@ const OFFLINE_URL = "/offline";
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
-      const cache = await caches.open(STATIC_CACHE);
-      // `cache: "reload"` so installing a new worker cannot pick the offline page
-      // up out of the HTTP cache and bake a stale copy in for the next release.
-      await cache.add(new Request(OFFLINE_URL, { cache: "reload" }));
+      // ── This try/catch is load-bearing. ──────────────────────────────────────
+      //
+      // An install handler that REJECTS kills the worker: the browser marks it
+      // `redundant` and throws it away. Not "installs without a cache" — throws the
+      // whole thing away. And a worker that does not exist cannot receive a push.
+      //
+      // So the original code, which awaited `cache.add()` bare, had precaching the
+      // offline page — a nicety — holding a loaded gun to the head of push, which is
+      // the entire point of this file. Any hiccup in CacheStorage (a full disk, a
+      // corrupt profile, a browser in a mood, private mode on some platforms) took
+      // notifications down with it. Silently. The only symptom is a phone that never
+      // rings, which looks exactly like a feature nobody built.
+      //
+      // Observed for real: `caches.open()` failing with "Unexpected internal error"
+      // left the worker redundant, so the app had no service worker, so the push
+      // toggle had nothing to attach to, so nobody could ever subscribe.
+      //
+      // Push must survive the cache failing. The offline page is allowed to be
+      // missing; the worker is not.
+      try {
+        const cache = await caches.open(STATIC_CACHE);
+        // `cache: "reload"` so installing a new worker cannot pick the offline page
+        // up out of the HTTP cache and bake a stale copy in for the next release.
+        await cache.add(new Request(OFFLINE_URL, { cache: "reload" }));
+      } catch (err) {
+        console.error(
+          "[sw] could not precache the offline page — carrying on without it. " +
+            "Offline navigation will fall back to a plain message; push is unaffected.",
+          err
+        );
+      }
+
       // Take over as soon as we're ready. A half-updated app — new HTML asking an
       // old worker for assets it no longer knows about — is worse than a swap.
       await self.skipWaiting();
@@ -47,12 +75,19 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
-      const keys = await caches.keys();
-      await Promise.all(
-        keys
-          .filter((k) => k.startsWith("restrosewa-") && k !== STATIC_CACHE)
-          .map((k) => caches.delete(k))
-      );
+      // Same reasoning as install: sweeping old caches is housekeeping, and
+      // housekeeping is not allowed to cost us the worker.
+      try {
+        const keys = await caches.keys();
+        await Promise.all(
+          keys
+            .filter((k) => k.startsWith("restrosewa-") && k !== STATIC_CACHE)
+            .map((k) => caches.delete(k))
+        );
+      } catch (err) {
+        console.error("[sw] could not sweep old caches", err);
+      }
+
       await self.clients.claim();
     })()
   );
@@ -69,17 +104,23 @@ function isImmutable(url) {
 }
 
 async function cacheFirst(request) {
-  const cache = await caches.open(STATIC_CACHE);
-  const hit = await cache.match(request);
-  if (hit) return hit;
+  // A broken CacheStorage must degrade to "no cache", never to "no asset". Falling
+  // through to the network is always a correct answer; throwing is not.
+  try {
+    const cache = await caches.open(STATIC_CACHE);
+    const hit = await cache.match(request);
+    if (hit) return hit;
 
-  const response = await fetch(request);
-  // Only store a real, complete, same-origin 200. Caching an opaque or partial
-  // response means caching a failure and replaying it until the next release.
-  if (response.ok && response.type === "basic") {
-    cache.put(request, response.clone());
+    const response = await fetch(request);
+    // Only store a real, complete, same-origin 200. Caching an opaque or partial
+    // response means caching a failure and replaying it until the next release.
+    if (response.ok && response.type === "basic") {
+      cache.put(request, response.clone()).catch(() => {});
+    }
+    return response;
+  } catch {
+    return fetch(request);
   }
-  return response;
 }
 
 async function networkOnlyWithOfflinePage(request) {
@@ -88,15 +129,19 @@ async function networkOnlyWithOfflinePage(request) {
   } catch {
     // The network is gone. We do NOT have a cached copy of this screen and that is
     // the point — see the header. Say so honestly instead of showing yesterday's
-    // floor plan. (Phase 7 revisits which read-only screens, if any, earn a cache.)
-    const cache = await caches.open(STATIC_CACHE);
-    const offline = await cache.match(OFFLINE_URL);
-    return (
-      offline ??
-      new Response("You are offline.", {
-        status: 503,
-        headers: { "Content-Type": "text/plain; charset=utf-8" },
-      })
+    // floor plan.
+    try {
+      const cache = await caches.open(STATIC_CACHE);
+      const offline = await cache.match(OFFLINE_URL);
+      if (offline) return offline;
+    } catch {
+      // No cache available — fall through to the plain message below rather than
+      // turning "you are offline" into an unhandled rejection.
+    }
+
+    return new Response(
+      "You are offline. RestroSewa needs a connection — reopen once you are back.",
+      { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } }
     );
   }
 }
