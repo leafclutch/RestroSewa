@@ -47,7 +47,11 @@ export async function getActiveNotifications(
     .select("id, type, status, table_id, room_id, session_id, order_id, created_at, acknowledged_at, restaurant_tables ( number ), rooms ( number )")
     .eq("restaurant_id", restaurantId)
     .in("status", ["new", "acknowledged"])
-    .order("created_at", { ascending: false });
+    // FIFO. These are people waiting — the guest who called a waiter at 7:20 is
+    // served before the one who called at 7:28. Oldest first, so the top of the
+    // list is always the next thing to do, and a fresh arrival is appended at the
+    // bottom instead of shoving the queue down.
+    .order("created_at", { ascending: true });
 
   if (!data) return [];
 
