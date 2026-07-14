@@ -16,7 +16,16 @@ import type { EmployeeOption } from "../page";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { QrCode, Trash2, X, Download, Pencil, RefreshCw, UserRound } from "lucide-react";
-import { QRCodeCanvas } from "qrcode.react";
+import dynamic from "next/dynamic";
+
+// The QR canvas only ever renders INSIDE the print dialog — a modal most admins open
+// rarely and many never open at all. Loading its library on the initial page render
+// makes every visit to the table list pay for a feature it is not using. Fetched on
+// demand instead, at the moment the dialog opens.
+const QRCodeCanvas = dynamic(
+  () => import("qrcode.react").then((m) => m.QRCodeCanvas),
+  { ssr: false, loading: () => <div style={{ width: 220, height: 220 }} /> }
+);
 
 // ─── QR Modal ─────────────────────────────────────────────────────────────────
 

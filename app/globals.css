@@ -83,3 +83,90 @@ body {
   font-feature-settings: "tnum";
   letter-spacing: -0.42px;
 }
+
+/* ═══ Native feel ═════════════════════════════════════════════════════════════
+   The tells that give a web app away on a phone are small and almost all of them
+   are defaults you have to switch off. These apply in the browser too — none of
+   them make the website worse — but they are what stop the installed app from
+   feeling like a website in a costume.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+html {
+  /* iOS silently inflates text in landscape unless told not to. On a table map,
+     that reflows the grid. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  /* The grey flash Android paints over anything tappable. No native app does this. */
+  -webkit-tap-highlight-color: transparent;
+  /* Rubber-band scrolling past the end of the page exposes a blank strip above the
+     header — in the browser that strip is browser chrome, but in a standalone app
+     it is nothing, and it looks broken. Also stops a downward drag on the body from
+     triggering the browser's own pull-to-refresh, which would fight ours. */
+  overscroll-behavior-y: none;
+}
+
+/* A 300ms wait before every tap, because the browser is holding out for a possible
+   double-tap-to-zoom. It makes every button feel a beat behind the finger.
+   `manipulation` keeps pinch-zoom (an accessibility affordance we deliberately did
+   NOT disable in the viewport) while dropping the double-tap wait. */
+button,
+a,
+[role="button"],
+input,
+select,
+textarea,
+label {
+  touch-action: manipulation;
+}
+
+/* Long-pressing a button on iOS pops the text-selection loupe and a Copy bubble.
+   Chrome on the floor plan, not on a menu item's name — so this is scoped to
+   controls, and body copy stays selectable. */
+button,
+[role="button"],
+nav,
+header {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Safe areas. Only meaningful because the viewport is `viewport-fit: cover`; on a
+   device with no notch every one of these resolves to 0px, so they are free. */
+.pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.h-safe-top { height: env(safe-area-inset-top, 0px); }
+
+/* The home-indicator bar on a gesture-nav iPhone sits on top of the last ~34px of
+   the page. Anything scrollable needs to be able to scroll clear of it. */
+.scroll-pb-safe { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px); }
+
+@media (display-mode: standalone) {
+  /* Installed, so there is no address bar to pull down and no browser to go "back"
+     to. Selecting page furniture with a stray drag is pure noise here. */
+  body {
+    overscroll-behavior: none;
+  }
+}
+
+/* ── Page transitions ─────────────────────────────────────────────────────────
+   A native app moves between screens; a website blinks. This is the cheapest
+   honest version of the former: the incoming screen fades and lifts a few pixels.
+   Deliberately fast (180ms) — a transition a staff member has to WAIT through is
+   worse than none, and these people are mid-service.
+   ─────────────────────────────────────────────────────────────────────────── */
+@keyframes rs-page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.rs-page {
+  animation: rs-page-in 180ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rs-page {
+    animation: none;
+  }
+}

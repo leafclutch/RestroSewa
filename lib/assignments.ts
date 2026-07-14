@@ -106,33 +106,99 @@ const loadAssignments = cache(async (restaurantId: string, viewerId: string) => 
   };
 });
 
+type Assignments = Awaited<ReturnType<typeof loadAssignments>>;
+
+/**
+ * The rules themselves, in ONE place.
+ *
+ * Pulled out because there are now two directions of travel through them. The
+ * screens ask "given this viewer, which rows may they see?"; web push asks the
+ * inverse, "given this row, which staff should be woken?" — and if those two ever
+ * answered differently, a push would land on a phone whose owner cannot open the
+ * screen it links to. Same predicate, both directions.
+ */
+function makeFilter(a: Assignments): VisibilityFilter {
+  return {
+    seesAll: false,
+    canSeeTable(tableId) {
+      if (!tableId) return true;                 // walk-in / no table → no group boundary
+      const groupId = a.tableGroup.get(tableId) ?? null;
+      if (!groupId) return false;                // ungrouped table → admins/managers only
+      return a.myGroups.has(groupId);
+    },
+    canSeeRoom(roomId) {
+      if (!roomId) return true;                  // no room context → no boundary
+      if (a.myRooms.has(roomId)) return true;    // pinned directly to this room
+      const typeId = a.roomTypeOf.get(roomId) ?? null;
+      return typeId ? a.myRoomTypes.has(typeId) : false;
+    },
+  };
+}
+
+const SEES_EVERYTHING: VisibilityFilter = {
+  seesAll: true,
+  canSeeTable: () => true,
+  canSeeRoom: () => true,
+};
+
 export async function buildVisibilityFilter(
   restaurantId: string,
   viewer: StaffViewer
 ): Promise<VisibilityFilter> {
   // Managers and admins bypass all group filtering — and don't touch the database.
-  if (viewerSeesAllGroups(viewer)) {
-    return { seesAll: true, canSeeTable: () => true, canSeeRoom: () => true };
-  }
+  if (viewerSeesAllGroups(viewer)) return SEES_EVERYTHING;
 
-  const { myGroups, myRoomTypes, myRooms, tableGroup, roomTypeOf } = await loadAssignments(
-    restaurantId,
-    viewer.id
+  return makeFilter(await loadAssignments(restaurantId, viewer.id));
+}
+
+/**
+ * May this staff member see this actionable notification?
+ *
+ * The one rule, shared by the Notifications panel (which filters rows for a viewer)
+ * and by the push fan-out (which picks viewers for a row). Kitchen/bar staff are
+ * excluded outright: they work the Orders queue, and a waiter call or a bill request
+ * is not their job — waking a chef's phone for one would be noise, and noise is how
+ * a staff member learns to swipe notifications away without reading them.
+ */
+export function canSeeNotification(
+  visibility: VisibilityFilter,
+  assignedWorkstationCount: number,
+  notif: { table_id: string | null; room_id: string | null }
+): boolean {
+  const isWorkstationStaff = !visibility.seesAll && assignedWorkstationCount > 0;
+  if (isWorkstationStaff) return false;
+
+  return (
+    visibility.seesAll ||
+    (visibility.canSeeTable(notif.table_id) && visibility.canSeeRoom(notif.room_id))
   );
+}
 
-  return {
-    seesAll: false,
-    canSeeTable(tableId) {
-      if (!tableId) return true;                 // walk-in / no table → no group boundary
-      const groupId = tableGroup.get(tableId) ?? null;
-      if (!groupId) return false;                // ungrouped table → admins/managers only
-      return myGroups.has(groupId);
-    },
-    canSeeRoom(roomId) {
-      if (!roomId) return true;                  // no room context → no boundary
-      if (myRooms.has(roomId)) return true;      // pinned directly to this room
-      const typeId = roomTypeOf.get(roomId) ?? null;
-      return typeId ? myRoomTypes.has(typeId) : false;
-    },
-  };
+/**
+ * The other half of the floor: does this WORKSTATION event belong to this person?
+ *
+ * The exact inverse of the rule above, and it has to exist separately because the
+ * two audiences are disjoint by design. `canSeeNotification` deliberately EXCLUDES
+ * workstation staff — a chef should not be pinged because table 6 wants their bill.
+ * But that same exclusion is why the chef and the bartender, the two people most
+ * likely to have a phone in an apron and their hands full, currently receive nothing
+ * at all. A new order for their station is the one thing they DO need.
+ *
+ * Routed by station, not by table: a kitchen cooks for every table in the building,
+ * so table groups are meaningless here. An order with items for the Bar and items for
+ * the Kitchen reaches both, and only those.
+ *
+ * Note who is NOT here: the owner. Restaurant admins see everything else in this
+ * system, but they are not given every kitchen ticket — a phone that buzzes on every
+ * single order is a phone whose owner learns to ignore it, and that habit is exactly
+ * what you cannot afford when the alert that matters finally arrives. An owner who
+ * genuinely wants kitchen pings can assign themselves to the Kitchen workstation,
+ * which is a deliberate act.
+ */
+export function canSeeWorkstationEvent(
+  assignedWorkstations: Set<string>,
+  eventWorkstationIds: string[]
+): boolean {
+  if (assignedWorkstations.size === 0) return false;
+  return eventWorkstationIds.some((id) => assignedWorkstations.has(id));
 }

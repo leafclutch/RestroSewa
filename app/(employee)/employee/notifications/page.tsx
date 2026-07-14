@@ -7,6 +7,9 @@ import {
 import { approveTableActivation, rejectTableActivation } from "@/app/actions/pos";
 import type { NotificationRow } from "@/app/actions/notifications";
 import { Bell, UtensilsCrossed, Check, CheckCheck, DoorOpen, X } from "lucide-react";
+import { PushToggle } from "@/components/pwa/push-toggle";
+import { NotificationPreferences } from "@/components/pwa/notification-preferences";
+import { getMutedCategories } from "@/app/actions/push";
 
 const TYPE_CONFIG = {
   call_waiter:  { label: "Call Waiter",   Icon: Bell,            color: "#6366f1" },
@@ -190,6 +193,7 @@ function NotifCard({ n }: { n: NotificationRow }) {
 export default async function NotificationsPage() {
   const { restaurantUser } = await requireRestaurantStaff();
   const notifications = await getActiveNotifications(restaurantUser.restaurant_id, restaurantUser);
+  const muted = await getMutedCategories();
 
   const newNotifs = notifications.filter((n) => n.status === "new");
   const ackNotifs = notifications.filter((n) => n.status === "acknowledged");
@@ -207,6 +211,15 @@ export default async function NotificationsPage() {
           ? "All clear — no pending notifications."
           : `${newNotifs.length} new · ${ackNotifs.length} acknowledged`}
       </p>
+
+      {/* Per-DEVICE, not per-account: a waiter who works from a phone and a till has
+          to switch it on in both places, because a push subscription belongs to a
+          browser. It hides itself where push cannot work at all. */}
+      <PushToggle />
+
+      {/* Per-ACCOUNT, unlike the toggle above: muting Finance means you meant it, and
+          shouldn't have to mean it again on every device you sign in to. */}
+      <NotificationPreferences muted={muted} />
 
       {notifications.length === 0 && (
         <div

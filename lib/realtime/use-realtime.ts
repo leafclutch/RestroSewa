@@ -48,6 +48,7 @@ type Conn = {
   flushTimer: ReturnType<typeof setTimeout> | null;
   pending: Set<string>;
   onVisible: () => void;
+  onOnline: () => void;
 };
 
 // Keyed by URL: staff share "/api/realtime", a customer page has its own session
@@ -119,14 +120,19 @@ function acquire(url: string, sub: Subscriber): () => void {
       flushTimer: null,
       pending: new Set(),
       onVisible: () => {},
+      onOnline: () => {},
     };
 
-    // Coming back to a backgrounded tab: the stream may have been cut. Reconnect
-    // and resync at once rather than showing stale tables.
-    fresh.onVisible = () => {
-      if (document.visibilityState !== "visible") return;
+    // Reconnect the stream (if it died) and resync every subscriber at once, rather
+    // than showing stale tables while the backoff timer counts down.
+    const resync = () => {
       if (!fresh.es) {
         if (fresh.reopenTimer) clearTimeout(fresh.reopenTimer);
+        // Reset the backoff. It may have climbed to its 30s ceiling while the network
+        // was down, and without this a device that has JUST come back would sit there
+        // deaf for another half a minute — which on a floor is an eternity, and is
+        // exactly the moment the staff member is looking at the screen expecting it
+        // to be right.
         fresh.retry = 0;
         open(url, fresh);
       }
@@ -135,7 +141,20 @@ function acquire(url: string, sub: Subscriber): () => void {
         for (const t of s.topics) s.cb(t as Topic);
       }
     };
+
+    // Coming back to a backgrounded tab: the stream may have been cut.
+    fresh.onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      resync();
+    };
     document.addEventListener("visibilitychange", fresh.onVisible);
+
+    // Coming back from a dead network. Distinct from the above and NOT covered by it:
+    // an installed app sitting open on a till while the wifi drops never fires a
+    // visibility change — it was visible the whole time. Without this, the stream
+    // stays down until someone happens to switch away and back.
+    fresh.onOnline = resync;
+    window.addEventListener("online", fresh.onOnline);
 
     conns.set(url, fresh);
     conn = fresh;
@@ -152,6 +171,7 @@ function acquire(url: string, sub: Subscriber): () => void {
     // Last listener gone — tear the whole thing down.
     c.closed = true;
     document.removeEventListener("visibilitychange", c.onVisible);
+    window.removeEventListener("online", c.onOnline);
     if (c.reopenTimer) clearTimeout(c.reopenTimer);
     if (c.flushTimer) clearTimeout(c.flushTimer);
     c.es?.close();

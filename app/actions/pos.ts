@@ -9,6 +9,13 @@ import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignme
 import { computeCreditStats, settlementOf } from "@/lib/credits";
 import type { BillSettlement, CreditStats } from "@/lib/credits";
 import { resolveOrderItems } from "@/lib/order-items";
+import {
+  emitNewOrder,
+  emitOrderCancelled,
+  emitPaymentReceived,
+  loadOrderContext,
+  captureStations,
+} from "@/lib/notify";
 
 export type ActionResult = { error: string } | null;
 
@@ -269,9 +276,13 @@ export async function approveTableActivation(notificationId: string): Promise<Ac
       .eq("restaurant_id", ru.restaurant_id);
   }
 
-  // The table is now active, so the held order surfaces in the Orders queue for
-  // the kitchen/workstations. No `new_order` notification is created — the queue
-  // is the dedicated place for orders.
+  // The table is now active, so the held order surfaces in the Orders queue for the
+  // kitchen/workstations — and THIS is the moment the kitchen is told about it. Not
+  // when the guest placed it: until a staff member approved the table, nobody had
+  // agreed to cook anything. Now they have.
+  if (notif.order_id) {
+    await emitNewOrder(service, ru.restaurant_id, notif.order_id);
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (service as any)
@@ -441,9 +452,12 @@ export async function submitOrder(
 
   if (itemsErr) return { error: "Failed to add items." };
 
-  // The order shows up in the Orders queue (driven by order rows) — no
-  // `new_order` notification is created, keeping the Notifications panel for
-  // actionable events only.
+  // The order shows up in the Orders queue (driven by order rows) and NOT in the
+  // Notifications panel, which stays a list of things to acknowledge. But it does now
+  // ring the stations that have to make it — a chef with their hands full and their
+  // back to the screen cannot see a queue.
+  await emitNewOrder(service, ru.restaurant_id, order.id as string);
+
   revalidatePath("/employee/queue");
   redirect(`/employee/session/${sessionId}`);
 }
@@ -555,7 +569,10 @@ export async function closeSessionWithPayment(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: sess } = await (service as any)
     .from("sessions")
-    .select("room_stay_id")
+    // table/room come along for the ride so the "payment received" alert can say WHERE
+    // — the row is already being read, and a second query to name a table would be
+    // one more round-trip on the hot path of closing a bill.
+    .select("room_stay_id, table_id, room_id, restaurant_tables ( number ), rooms ( number )")
     .eq("id", sessionId)
     .eq("restaurant_id", ru.restaurant_id)
     .maybeSingle();
@@ -661,6 +678,18 @@ export async function closeSessionWithPayment(
     total_amount:   totalAmount,
     payment_method: method,
     created_by:     ru.id,
+  });
+
+  // Tell whoever handles billing. Routed by JOB, not by table group: a payment is the
+  // cashier's business wherever in the building it came from.
+  await emitPaymentReceived(service, {
+    restaurantId: ru.restaurant_id,
+    sessionId,
+    tableId: sess?.table_id ?? null,
+    roomId: sess?.room_id ?? null,
+    tableNumber: sess?.restaurant_tables?.number ?? null,
+    roomNumber: sess?.rooms?.number ?? null,
+    amount: totalAmount,
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -832,6 +861,12 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
 
   const service = createServiceClient();
 
+  // Capture what the stations are working on BEFORE the cancel lands. Afterwards
+  // every item is marked cancelled and there is nothing left to name — "stop" is not
+  // a useful instruction if you can't say stop WHAT.
+  const ctx = await loadOrderContext(service, ru.restaurant_id, orderId);
+  const captured = await captureStations(service, orderId);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any).rpc("cancel_order", {
     p_restaurant_id: ru.restaurant_id,
@@ -840,6 +875,10 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
   });
 
   if (error) return { error: "Failed to cancel the order." };
+
+  // Only now — the cancellation is real. Something may already be on the heat, and
+  // every second it stays there is food in the bin.
+  if (ctx) await emitOrderCancelled(service, ctx, captured);
 
   revalidatePath("/employee/queue");
   revalidatePath("/employee/dashboard");
@@ -855,6 +894,24 @@ export async function cancelOrderItem(itemId: string): Promise<ActionResult> {
 
   const service = createServiceClient();
 
+  // Which order does this item belong to? Needed to describe it, and captured before
+  // the RPC for the same reason as cancelOrder above.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: item } = await (service as any)
+    .from("session_order_items")
+    .select("order_id")
+    .eq("id", itemId)
+    .maybeSingle();
+
+  const ctx = item?.order_id
+    ? await loadOrderContext(service, ru.restaurant_id, item.order_id)
+    : null;
+  // Scoped to this ONE item — the rest of the order is still being cooked, and telling
+  // the kitchen to stop the whole ticket would be a lie.
+  const captured = item?.order_id
+    ? await captureStations(service, item.order_id, [itemId])
+    : null;
+
   // Returns 0 when the item was already served or already cancelled — the RPC
   // refuses rather than silently releasing stock that was actually consumed.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -868,6 +925,8 @@ export async function cancelOrderItem(itemId: string): Promise<ActionResult> {
   if (Number(data ?? 0) === 0) {
     return { error: "That item has already been served or cancelled." };
   }
+
+  if (ctx && captured) await emitOrderCancelled(service, ctx, captured);
 
   revalidatePath("/employee/queue");
   revalidatePath("/employee/dashboard");

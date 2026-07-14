@@ -2,7 +2,9 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
-import { emitTableActivationRequest } from "@/lib/notify";
+import { afterResponse } from "@/lib/push/after";
+import { emitTableActivationRequest, emitNewOrder } from "@/lib/notify";
+import { notifyStaff } from "@/lib/push/send";
 import { resolveOrderItems } from "@/lib/order-items";
 
 export type CustomerOrderItem = {
@@ -170,6 +172,12 @@ async function insertSessionOrder(
     .from("session_order_items")
     .insert(resolved.items.map((item) => ({ order_id: order.id, ...item })));
   if (itemsErr) return { orderId: null, error: "Failed to add items." };
+
+  // Ring the stations that have to make it. Silent when the session is still
+  // `pending_activation` — emitNewOrder checks — so the no-PIN path, which routes
+  // through here to HOLD an order pending approval, does not wake a chef about food
+  // nobody has agreed to cook yet.
+  await emitNewOrder(service, restaurantId, order.id as string);
 
   return { orderId: order.id as string };
 }
@@ -487,16 +495,46 @@ export async function sendNotification(
   if (existing) return { alreadyPending: true };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (service as any).from("notifications").insert({
-    restaurant_id: restaurantId,
-    table_id: tableId ?? null,
-    room_id: roomId ?? null,
-    session_id: sessionId,
-    type,
-    status: "new",
-  });
+  const { data: created, error } = await (service as any)
+    .from("notifications")
+    .insert({
+      restaurant_id: restaurantId,
+      table_id: tableId ?? null,
+      room_id: roomId ?? null,
+      session_id: sessionId,
+      type,
+      status: "new",
+    })
+    // The row comes back so the push can name the table without a second read.
+    .select("id, type, table_id, room_id, restaurant_tables ( number ), rooms ( number )")
+    .single();
 
   if (error) return { error: error.message };
+
+  // Wake the staff who are allowed to see this table.
+  //
+  // `after()` runs this once the response has already gone back to the guest. That
+  // matters: the guest tapped "call waiter" and deserves an instant acknowledgement,
+  // not a spinner held open while we negotiate TLS with a push service in Frankfurt.
+  // It also means a push failure cannot fail the guest's request — the notification
+  // row is committed either way, and the panel will show it regardless.
+  //
+  // Note the dedup guard above: an impatient guest tapping the button five times
+  // produces ONE notification, and therefore one push. Without it this would be a
+  // spam cannon pointed at the staff's lock screens.
+  if (created) {
+    afterResponse(async () => {
+      await notifyStaff(restaurantId, {
+        id: created.id,
+        type: created.type,
+        table_id: created.table_id,
+        room_id: created.room_id,
+        table_number: created.restaurant_tables?.number ?? null,
+        room_number: created.rooms?.number ?? null,
+      });
+    });
+  }
+
   revalidatePath("/employee/notifications");
   return {};
 }

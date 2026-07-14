@@ -37,7 +37,13 @@ export function StaffNav({
       style={{
         background: "var(--color-brand-dark)",
         borderColor: "rgba(255,255,255,0.08)",
-        height: 56,
+        // The viewport is `viewport-fit: cover`, so on a notched phone the page
+        // starts at the physical top of the screen — under the clock. Padding the
+        // bar by the inset makes it grow UP into that strip and paint it brand-dark,
+        // which is what puts the status bar on the header instead of in front of it.
+        // On a device with no notch the inset is 0px and this is exactly the old 56.
+        height: "calc(56px + env(safe-area-inset-top, 0px))",
+        paddingTop: "env(safe-area-inset-top, 0px)",
       }}
     >
       {/* Brand / user — tapping it returns to the dashboard. Staff work for the

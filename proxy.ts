@@ -51,5 +51,14 @@ export async function proxy(request: NextRequest) {
 }
 
 export const proxyConfig = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api|c/).*)"],
+  // The PWA's static surface is excluded alongside _next/static for the same
+  // reason: every path that reaches this proxy costs an auth round-trip to
+  // Supabase. The service worker precaches the icon set and 28 splash images on
+  // install, and none of those bytes depend on who is signed in — running the
+  // session lookup 30-odd times to hand back a PNG is pure latency. `sw.js` and
+  // the manifest must be reachable with no session at all, which they now
+  // demonstrably are.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|api|c/|sw\\.js|manifest\\.webmanifest|icons/|splash/).*)",
+  ],
 };

@@ -6,6 +6,7 @@ import { AdminLoginForm } from "./_components/admin-form";
 import { StaffLogin } from "./_components/staff-login";
 import { getRestaurantStaff } from "@/app/actions/auth";
 import { PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
+import { InstallPrompt } from "@/components/pwa/install-prompt";
 
 export default async function LoginPage({
   searchParams,
@@ -52,6 +53,11 @@ export default async function LoginPage({
       <div className="mb-6 sm:mb-8 text-center">
         <PlatformWordmark size={24} tone="dark" accent="var(--color-lemon)" letterSpacing="-0.5px" />
       </div>
+
+      {/* Offered here and nowhere else: it is the one screen a staff member is
+          looking at while NOT mid-service. It hides itself when already installed,
+          when dismissed, and in browsers with no install path at all. */}
+      <InstallPrompt />
 
       <div
         className="rounded-xl border px-5 py-6 sm:px-8 sm:py-8"
