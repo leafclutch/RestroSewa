@@ -123,13 +123,33 @@ export function StaffDashboard({
     document.getElementById(`sec-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // Arriving from a credit bill: switch to the Credits section rather than
-  // leaving the cashier at the top of the dashboard hunting for it.
+  // Arriving pointed at a section — a credit bill just closed, or a tapped push —
+  // scroll there rather than leaving the staff member at the top hunting for it.
+  //
+  // The target may not exist yet: every section streams in under its own <Suspense>,
+  // so #sec-orders can be a skeleton (or nothing) for a beat after mount. So retry
+  // until it lands rather than firing once at 50ms and missing. Once it's scrolled,
+  // strip ?focus from the URL so a pull-to-refresh doesn't yank the page back down.
   useEffect(() => {
     if (!focus) return;
-    // Next paint, so the section is mounted before we scroll to it.
-    const t = setTimeout(() => jump(focus), 50);
-    return () => clearTimeout(t);
+    let tries = 0;
+    const timer = setInterval(() => {
+      const el = document.getElementById(`sec-${focus}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        clearInterval(timer);
+        const url = new URL(window.location.href);
+        if (url.searchParams.has("focus")) {
+          url.searchParams.delete("focus");
+          window.history.replaceState(null, "", url.pathname + url.search);
+        }
+      } else if (++tries > 30) {
+        // ~3s and it never appeared (the staff member lacks that section): give up
+        // quietly rather than spin forever.
+        clearInterval(timer);
+      }
+    }, 100);
+    return () => clearInterval(timer);
   }, [focus]);
 
   return (

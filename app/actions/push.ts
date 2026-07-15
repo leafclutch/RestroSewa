@@ -124,7 +124,7 @@ export async function sendTestPush(): Promise<{ ok: boolean; message: string }> 
   const { sent, failed, pruned } = await sendToUsers([ru.id], {
     title: "Test alert",
     body: "If you can read this on your lock screen, alerts are working.",
-    url: "/employee/notifications",
+    url: "/employee/dashboard?focus=notifications",
     tag: "test-push",
     requireInteraction: false,
   });

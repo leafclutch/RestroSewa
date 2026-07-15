@@ -20,8 +20,18 @@ import type { NotificationCategory } from "@/lib/push/categories";
  * The toggles are optimistic: a switch that waits for a round-trip before moving
  * feels broken, and there is nothing at stake in being wrong for 200ms. If the write
  * fails, the state snaps back on the next render, which is the honest outcome.
+ *
+ * `embedded` drops the standalone card chrome so it can sit as a strip inside the
+ * notification dropdown — which is now its only home, the standalone settings page
+ * having been folded into the single workspace.
  */
-export function NotificationPreferences({ muted }: { muted: NotificationCategory[] }) {
+export function NotificationPreferences({
+  muted,
+  embedded = false,
+}: {
+  muted: NotificationCategory[];
+  embedded?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [, startTransition] = useTransition();
 
@@ -39,14 +49,14 @@ export function NotificationPreferences({ muted }: { muted: NotificationCategory
 
   return (
     <div
-      className="rounded-xl border mb-6 overflow-hidden"
+      className={embedded ? "border-b overflow-hidden" : "rounded-xl border mb-6 overflow-hidden"}
       style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
     >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left"
+        className={`w-full flex items-center gap-3 text-left ${embedded ? "px-4 py-2.5" : "px-4 py-3"}`}
       >
         <div
           className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"

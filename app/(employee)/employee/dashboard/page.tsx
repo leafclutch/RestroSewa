@@ -13,7 +13,7 @@ import { TablesSection } from "./_components/tables-section";
 import { RoomsSection } from "./_components/rooms-section";
 import { OrdersSection } from "./_components/orders-section";
 import { StaffDashboard, SectionSkeleton } from "./_components/staff-dashboard";
-import type { DashboardSection } from "./_components/staff-dashboard";
+import type { DashboardSection, SectionKey } from "./_components/staff-dashboard";
 
 // Single-page staff dashboard: every section the staff member has permission for
 // is stacked vertically (Orders first). Section visibility is derived from the
@@ -77,13 +77,23 @@ async function MenuBody({ ru }: { ru: RestaurantUserContext }) {
 export default async function EmployeeDashboardPage({
   searchParams,
 }: {
-  // Closing a bill on credit lands back HERE with ?credit=<accountId> — the
-  // dashboard scrolls to its Credits section and opens that customer's account,
-  // instead of throwing the cashier out to a separate page.
-  searchParams: Promise<{ credit?: string }>;
+  // Two ways to arrive pointed at a particular part of the workspace:
+  //   ?credit=<accountId>  — a bill was just closed on credit; open that account.
+  //   ?focus=<section>     — a tapped push (or a redirected legacy /employee/* page)
+  //                          asking the dashboard to scroll to a section. `focus`'s
+  //                          `notifications` value is handled by the bell, not here.
+  // Both keep staff on the one page instead of bouncing them to a standalone route.
+  searchParams: Promise<{ credit?: string; focus?: string }>;
 }) {
   const { restaurantUser } = await requireRestaurantStaff();
-  const { credit: openCreditId } = await searchParams;
+  const { credit: openCreditId, focus: focusParam } = await searchParams;
+
+  const SCROLLABLE: SectionKey[] = ["orders", "tables", "rooms", "sales", "credits", "menu"];
+  const focusSection: SectionKey | null = openCreditId
+    ? "credits"
+    : SCROLLABLE.includes(focusParam as SectionKey)
+      ? (focusParam as SectionKey)
+      : null;
 
   const navKeys = new Set(getStaffNav(restaurantUser).map((n) => n.key));
   const sections: DashboardSection[] = [];
@@ -179,8 +189,9 @@ export default async function EmployeeDashboardPage({
   return (
     <StaffDashboard
       sections={sections}
-      // Just billed to credit → land in the Credits section, not at the top.
-      focus={openCreditId ? "credits" : null}
+      // Just billed to credit, or arrived from a tapped push → land in that
+      // section rather than at the top of the dashboard.
+      focus={focusSection}
     />
   );
 }

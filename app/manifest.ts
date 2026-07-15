@@ -46,22 +46,24 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: "/icons/maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
 
-    // Long-press the installed icon. These are the three screens staff actually
-    // open, and /employee/* admits restaurant_admin as well as employees, so they
-    // work for both. (A manifest is per-origin and cannot vary by role.)
+    // Long-press the installed icon. Everything is the one dashboard now, so these
+    // deep-link into it (?focus opens the bell / scrolls to a section) rather than
+    // pointing at the old standalone pages — which still exist only to redirect here.
+    // /employee/* admits restaurant_admin as well as employees, so they work for both.
+    // (A manifest is per-origin and cannot vary by role.)
     shortcuts: [
       {
         name: "Notifications",
         short_name: "Alerts",
         description: "Waiter calls, bill requests and table activations waiting on you",
-        url: "/employee/notifications",
+        url: "/employee/dashboard?focus=notifications",
         icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }],
       },
       {
         name: "Orders",
         short_name: "Orders",
         description: "The live order queue",
-        url: "/employee/queue",
+        url: "/employee/dashboard?focus=orders",
         icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }],
       },
       {

@@ -220,7 +220,10 @@ self.addEventListener("push", (event) => {
       // A short double-buzz — enough to feel through an apron pocket.
       vibrate: [100, 50, 100],
       data: {
-        url: payload.url || "/employee/notifications",
+        // The dashboard is the one workspace; `?focus=notifications` opens the bell
+        // dropdown where the actions live. Only a fallback — every real payload
+        // carries its own url.
+        url: payload.url || "/employee/dashboard?focus=notifications",
         notificationId: payload.notificationId || null,
       },
       actions: Array.isArray(payload.actions) ? payload.actions.slice(0, 2) : [],
@@ -261,7 +264,7 @@ async function openApp(url) {
 
 self.addEventListener("notificationclick", (event) => {
   const data = event.notification.data || {};
-  const url = data.url || "/employee/notifications";
+  const url = data.url || "/employee/dashboard?focus=notifications";
   const notificationId = data.notificationId;
   const action = event.action; // "" when the body was tapped rather than a button
 

@@ -5,6 +5,18 @@
 // lock screen, in a noisy dining room, with one hand full of plates. It has about
 // three seconds and forty characters to be useful.
 
+// Every staff alert now lands on the one workspace — the dashboard — with a hint
+// of what to surface, rather than throwing the user out to a standalone page they
+// then have to navigate back from. `notifications` opens the bell dropdown (the
+// actions live there); a section key scrolls the dashboard to it. The old targets
+// (/employee/notifications, /queue, /sales) still resolve — they redirect here — so
+// an alert already sitting in someone's tray keeps working after this ships.
+const FOCUS = {
+  notifications: "/employee/dashboard?focus=notifications",
+  orders: "/employee/dashboard?focus=orders",
+  sales: "/employee/dashboard?focus=sales",
+} as const;
+
 export type PushPayload = {
   title: string;
   body: string;
@@ -96,7 +108,7 @@ export function buildPushPayload(n: NotifiableRow): PushPayload | null {
       return {
         title: "Table activation request",
         body: `${place} — ${detail}`,
-        url: "/employee/notifications",
+        url: FOCUS.notifications,
         tag: `activation-${n.id}`,
         notificationId: n.id,
         requireInteraction: true,
@@ -114,7 +126,7 @@ export function buildPushPayload(n: NotifiableRow): PushPayload | null {
       return {
         title: "Waiter call",
         body: `${place} needs a waiter`,
-        url: "/employee/notifications",
+        url: FOCUS.notifications,
         tag: `waiter-${n.id}`,
         notificationId: n.id,
         requireInteraction: true,
@@ -127,7 +139,7 @@ export function buildPushPayload(n: NotifiableRow): PushPayload | null {
       return {
         title: "Bill request",
         body: `${place} is asking for the bill`,
-        url: "/employee/notifications",
+        url: FOCUS.notifications,
         tag: `bill-${n.id}`,
         notificationId: n.id,
         requireInteraction: true,
@@ -144,7 +156,7 @@ export function buildPushPayload(n: NotifiableRow): PushPayload | null {
       return {
         title: `New order · ${station}`,
         body: `${place} — ${describeItems(n.order_summary ?? [])}`,
-        url: "/employee/queue",
+        url: FOCUS.orders,
         // Tagged by ORDER, so a kitchen that gets three orders in a minute sees
         // three alerts — unlike a service call, each one is a separate job.
         tag: `order-${n.id}`,
@@ -165,7 +177,7 @@ export function buildPushPayload(n: NotifiableRow): PushPayload | null {
         // This one IS urgent in the other direction — something may already be on the
         // heat, and every second it stays there is food and money in the bin.
         body: `${place} — stop ${lead}`,
-        url: "/employee/queue",
+        url: FOCUS.orders,
         tag: `cancel-${n.id}`,
         notificationId: n.id,
         requireInteraction: true,
@@ -179,7 +191,7 @@ export function buildPushPayload(n: NotifiableRow): PushPayload | null {
           n.amount != null
             ? `${place} — ${rupee(n.amount)} settled`
             : `${place} — bill settled`,
-        url: "/employee/sales",
+        url: FOCUS.sales,
         tag: `paid-${n.id}`,
         notificationId: n.id,
         requireInteraction: false,
