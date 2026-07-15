@@ -155,6 +155,19 @@ header {
    honest version of the former: the incoming screen fades and lifts a few pixels.
    Deliberately fast (180ms) — a transition a staff member has to WAIT through is
    worse than none, and these people are mid-service.
+
+   fill-mode is `backwards`, NOT `both`, and that distinction is load-bearing. With
+   `both`, the page RETAINS the final keyframe's transform after the animation ends —
+   and Chrome resolves `transform: none` into the identity matrix `matrix(1,0,0,1,0,0)`,
+   which is a value OTHER THAN the keyword `none`. Any such value makes the element a
+   containing block for `position: fixed` descendants. So every in-page modal (the
+   credit account sheet, for one) stopped resolving `fixed inset-0` against the VIEWPORT
+   and started resolving it against this 2000px-tall page instead — anchoring the modal
+   thousands of pixels off-screen while its backdrop dimmed the page and ate every tap.
+   It read as "the Credits section is frozen," and only on mobile, because a short
+   desktop page hid the displacement. `backwards` keeps the fade-in and the no-flash
+   start but lets `transform` fall back to the keyword `none` once the animation is done,
+   so no containing block lingers.
    ─────────────────────────────────────────────────────────────────────────── */
 @keyframes rs-page-in {
   from { opacity: 0; transform: translateY(6px); }
@@ -162,7 +175,7 @@ header {
 }
 
 .rs-page {
-  animation: rs-page-in 180ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation: rs-page-in 180ms cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {

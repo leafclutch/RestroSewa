@@ -1,5 +1,6 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { useActionState, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import {
   addCreditPayment,
@@ -145,6 +146,11 @@ function CustomerDetailModal({
   const [method, setMethod] = useState("cash");
   const [state, action, pending] = useActionState<ActionResult, FormData>(addCreditPayment, null);
 
+  // The modal is portaled to <body> (see the return). `document` doesn't exist during
+  // SSR, and createPortal must run only after mount, so gate on this.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const load = useCallback(async () => {
     const res = await getCreditDetail(customerId);
     if ("error" in res) setLoadError(res.error);
@@ -171,7 +177,17 @@ function CustomerDetailModal({
   const amountNum = parseFloat(amount) || 0;
   const amountValid = amountNum > 0 && amountNum <= balance + 0.005;
 
-  return (
+  if (!mounted) return null;
+
+  // Portaled to <body>, NOT rendered inline. A modal that stays in the page tree is a
+  // hostage to every ancestor: any one of them with a `transform` (the .rs-page entry
+  // animation, a pull-to-refresh drag), a `filter`, or `contain` becomes the containing
+  // block for this `position: fixed`, and the modal anchors to THAT box instead of the
+  // viewport — landing off-screen while its backdrop still dims the page. That is exactly
+  // the "only the dimmed overlay shows, the dialog is missing" bug. At <body> there is no
+  // such ancestor, so `fixed inset-0` always means the viewport. The React tree is
+  // unchanged (state, the payment form, onClose all live here); only the DOM host moves.
+  return createPortal(
     <div
       className="fixed inset-0 z-[70] flex items-start sm:items-center justify-center overflow-y-auto"
       style={{ background: "rgba(13,37,61,0.45)" }}
@@ -487,7 +503,8 @@ function CustomerDetailModal({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
