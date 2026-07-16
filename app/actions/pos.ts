@@ -33,6 +33,10 @@ export type OrderItemRow = {
   id: string;
   item_name: string;
   item_price: number;
+  // Both the live FK and the immutable snapshot name. The id is what a printed ticket
+  // maps to a workstation's kind (Kitchen → KOT, Bar → BOT); the name is the fallback
+  // if the station was later deleted (FK nulled) or renamed.
+  workstation_id: string | null;
   workstation_name: string | null;
   quantity: number;
   item_status: "pending" | "served";
@@ -364,7 +368,7 @@ export async function getSessionDetail(
     const { data: itemsData } = await (service as any)
       .from("session_order_items")
       .select(
-        "id, item_name, item_price, workstation_name, quantity, item_status, notes, created_at, order_id"
+        "id, item_name, item_price, workstation_id, workstation_name, quantity, item_status, notes, created_at, order_id"
       )
       .in("order_id", orderIds)
       // A cancelled item is off the bill and back on the shelf — it must not be
@@ -1558,6 +1562,8 @@ export type PaidBill = {
     address: string | null;
     contact_phone: string | null;
     pan_vat_number: string | null;
+    logo_url?: string | null;
+    paper_width_mm?: 58 | 80;
     tax_percent?: number;
     service_charge_percent?: number;
   };
@@ -1647,7 +1653,7 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: rest } = await (service as any)
     .from("restaurants")
-    .select("name, address, contact_phone, pan_vat_number, settings")
+    .select("name, address, contact_phone, pan_vat_number, logo_url, settings")
     .eq("id", ru.restaurant_id)
     .maybeSingle();
 
@@ -1681,6 +1687,8 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
       address: rest?.address ?? null,
       contact_phone: rest?.contact_phone ?? null,
       pan_vat_number: rest?.pan_vat_number ?? null,
+      logo_url: rest?.logo_url ?? null,
+      paper_width_mm: rest?.settings?.print_paper_width === "58" ? 58 : 80,
       tax_percent: settingsNumber(rest?.settings, "tax_percent", "tax_rate", "gst_percent"),
       service_charge_percent: settingsNumber(rest?.settings, "service_charge_percent", "service_charge"),
     },

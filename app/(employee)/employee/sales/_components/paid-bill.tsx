@@ -55,7 +55,7 @@ export function PaidBillButton({ paymentId }: { paymentId: string }) {
       </button>
 
       {bill && (
-        <PrintModal open={open} onClose={() => setOpen(false)} title="Bill — preview">
+        <PrintModal open={open} onClose={() => setOpen(false)} title="Bill — preview" paperWidthMm={bill.restaurant.paper_width_mm ?? 80}>
           <BillTicket
             restaurant={bill.restaurant}
             billNo={`BILL-${bill.payment_id.slice(0, 8).toUpperCase()}`}

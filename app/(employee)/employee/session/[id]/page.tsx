@@ -1,8 +1,9 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionDetail } from "@/app/actions/pos";
+import { getWorkstations } from "@/app/actions/workstations";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
-import { hasPermission, NAV_ACCESS, PERMISSIONS } from "@/lib/permissions";
+import { hasPermission, hasAnyPermission, NAV_ACCESS, PERMISSIONS } from "@/lib/permissions";
 import { buildVisibilityFilter } from "@/lib/assignments";
 import { createServiceClient } from "@/lib/supabase/service";
 import { SessionClient } from "./_components/session-client";
@@ -53,6 +54,14 @@ export default async function SessionPage({
 
   const canCreateOrders = hasPermission(restaurantUser, PERMISSIONS.CREATE_ORDERS);
   const canCloseBills   = hasPermission(restaurantUser, PERMISSIONS.CLOSE_BILLS);
+  // KOT/BOT printing is a billing/order-management action — Cashier / Receptionist,
+  // NOT a waiter. It used to be gated on CREATE_ORDERS, which waiters hold, so any
+  // waiter could print kitchen tickets. Billing permissions are the ones only
+  // Cashier / Receptionist / Manager carry.
+  const canPrintTickets = hasAnyPermission(restaurantUser, [
+    PERMISSIONS.PROCESS_PAYMENTS,
+    PERMISSIONS.CLOSE_BILLS,
+  ]);
   const canForceClose   =
     hasPermission(restaurantUser, PERMISSIONS.CLOSE_BILLS) ||
     hasPermission(restaurantUser, PERMISSIONS.MANAGE_TABLES);
@@ -66,20 +75,26 @@ export default async function SessionPage({
   // Everyone who can view the session can also see its ordering PIN.
   const canSeePIN = canView;
 
-  // Restaurant header details for the KOT / Bill tickets.
+  // Restaurant header details for the KOT / Bill tickets, plus the station list so a
+  // ticket can sort each item onto the KOT (kitchen) or the BOT (bar).
   const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: rest } = await (service as any)
-    .from("restaurants")
-    .select("name, address, contact_phone, pan_vat_number, settings")
-    .eq("id", restaurantUser.restaurant_id)
-    .maybeSingle();
+  const [{ data: rest }, workstations] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("restaurants")
+      .select("name, address, contact_phone, pan_vat_number, logo_url, settings")
+      .eq("id", restaurantUser.restaurant_id)
+      .maybeSingle(),
+    getWorkstations(restaurantUser.restaurant_id),
+  ]);
 
   const restaurant: RestaurantInfo = {
     name: rest?.name ?? "Restaurant",
     address: rest?.address ?? null,
     contact_phone: rest?.contact_phone ?? null,
     pan_vat_number: rest?.pan_vat_number ?? null,
+    logo_url: rest?.logo_url ?? null,
+    paper_width_mm: rest?.settings?.print_paper_width === "58" ? 58 : 80,
     tax_percent: numFromSettings(rest?.settings, "tax_percent", "tax_rate", "gst_percent"),
     service_charge_percent: numFromSettings(rest?.settings, "service_charge_percent", "service_charge"),
   };
@@ -127,8 +142,10 @@ export default async function SessionPage({
         session={session}
         restaurant={restaurant}
         staffName={restaurantUser.display_name}
+        workstations={workstations}
         canCreateOrders={canCreateOrders}
         canCloseBills={canCloseBills}
+        canPrintTickets={canPrintTickets}
         canForceClose={canForceClose}
         canSeePIN={canSeePIN}
         canUseCredit={canUseCredit}

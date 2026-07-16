@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Check, ChevronRight, Plus, Receipt, X } from "lucide-react";
 import { OrderItem } from "@/app/(employee)/employee/_components/order-item";
 import { SessionPrintButtons } from "./print-tickets";
-import type { RestaurantInfo } from "./print-tickets";
+import type { RestaurantInfo, PrintStation } from "./print-tickets";
 
 
 type PaymentMethod = "cash" | "online" | "card" | "mixed" | "credit";
@@ -599,8 +599,10 @@ export function SessionClient({
   session,
   restaurant,
   staffName = "",
+  workstations = [],
   canCreateOrders = false,
   canCloseBills = false,
+  canPrintTickets = false,
   canForceClose = false,
   canSeePIN = true,
   canUseCredit = false,
@@ -609,8 +611,11 @@ export function SessionClient({
   session: SessionDetail;
   restaurant: RestaurantInfo;
   staffName?: string;
+  workstations?: PrintStation[];
   canCreateOrders?: boolean;
   canCloseBills?: boolean;
+  /** KOT/BOT printing — a billing/order-management action, not any waiter's. */
+  canPrintTickets?: boolean;
   canForceClose?: boolean;
   canSeePIN?: boolean;
   canUseCredit?: boolean;
@@ -714,14 +719,16 @@ export function SessionClient({
             </Link>
           )}
 
-          {/* KOT / Bill printing — for staff with order/billing permissions,
-              once the table has at least one order. */}
+          {/* KOT / BOT / Bill printing — a billing/order-management action (Cashier /
+              Receptionist), NOT any waiter, once the table has at least one order.
+              KOT lists kitchen-station items, BOT lists bar-station items. */}
           {hasOrders && (
             <SessionPrintButtons
               session={session}
               restaurant={restaurant}
               staffName={staffName}
-              canPrintKot={canCreateOrders}
+              workstations={workstations}
+              canPrintTickets={canPrintTickets}
               canPrintBill={canCloseBills}
             />
           )}
