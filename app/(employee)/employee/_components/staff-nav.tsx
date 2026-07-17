@@ -7,6 +7,7 @@ import { logout } from "@/app/actions/auth";
 import { Home, LogOut } from "lucide-react";
 import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import { NotificationBell } from "./notification-bell";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 // The staff top bar. STICKY: it stays pinned while the dashboard scrolls, so
 // Notifications and Logout are always one tap away — which matters when a waiter
@@ -88,11 +89,13 @@ export function StaffNav({
       {/* Notifications — the bell owns the dropdown, the badge and the stream. */}
       <NotificationBell initialCount={notificationCount} />
 
+      <ThemeToggle />
+
       <button
         type="button"
         disabled={pending}
         onClick={() => startTransition(async () => { await logout(); })}
-        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-sm"
+        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-sm transition-colors hover:bg-white/5 active:bg-white/10"
         style={{ color: "rgba(255,255,255,0.4)" }}
       >
         <LogOut size={14} strokeWidth={1.5} />

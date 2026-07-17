@@ -10,6 +10,7 @@ import { SalesView } from "../sales/_components/sales-view";
 import { CreditsView } from "../credits/_components/credits-view";
 import { MenuClient } from "@/app/(admin)/admin/menu/_components/menu-client";
 import { TablesSection } from "./_components/tables-section";
+import { WalkInsSection } from "./_components/walkins-section";
 import { RoomsSection } from "./_components/rooms-section";
 import { OrdersSection } from "./_components/orders-section";
 import { StaffDashboard, SectionSkeleton } from "./_components/staff-dashboard";
@@ -88,7 +89,7 @@ export default async function EmployeeDashboardPage({
   const { restaurantUser } = await requireRestaurantStaff();
   const { credit: openCreditId, focus: focusParam } = await searchParams;
 
-  const SCROLLABLE: SectionKey[] = ["orders", "tables", "rooms", "sales", "credits", "menu"];
+  const SCROLLABLE: SectionKey[] = ["orders", "tables", "walkins", "rooms", "sales", "credits", "menu"];
   const focusSection: SectionKey | null = openCreditId
     ? "credits"
     : SCROLLABLE.includes(focusParam as SectionKey)
@@ -122,6 +123,21 @@ export default async function EmployeeDashboardPage({
       body: (
         <Suspense fallback={<SectionSkeleton />}>
           <TablesSection restaurantUser={restaurantUser} />
+        </Suspense>
+      ),
+    });
+  }
+
+  // 2b. Walk-ins — fixed W1/W2/W3 workspaces that behave like tables (takeaway/delivery
+  // friendly). Same audience as Tables; no table-group filter (walk-ins have no group).
+  if (navKeys.has("tables")) {
+    sections.push({
+      key: "walkins",
+      title: "Walk-ins",
+      subtitle: "Takeaway, phone & delivery orders",
+      body: (
+        <Suspense fallback={<SectionSkeleton />}>
+          <WalkInsSection restaurantUser={restaurantUser} />
         </Suspense>
       ),
     });

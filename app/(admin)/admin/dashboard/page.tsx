@@ -1,4 +1,4 @@
-﻿import { requireRestaurantAdmin } from "@/lib/auth/guards";
+import { requireRestaurantAdmin } from "@/lib/auth/guards";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getDashboardAnalytics } from "@/app/actions/analytics";
 import { StockFinanceOverview } from "./_components/stock-finance-overview";
@@ -17,26 +17,26 @@ function StatCard({ label, value, href, icon: Icon }: StatCard) {
   return (
     <Link
       href={href}
-      className="rounded-xl border px-5 py-5 flex items-center gap-4 transition-colors"
+      className="group rounded-xl border px-5 py-5 flex items-center gap-4 transition-all duration-200 hover:shadow-md hover:border-primary/30 active:scale-[0.98] shadow-xs"
       style={{
         background: "var(--color-canvas)",
         borderColor: "var(--color-hairline)",
       }}
     >
       <div
-        className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+        className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 transition-all duration-200 group-hover:bg-primary-subdued/10"
         style={{ background: "var(--color-canvas-soft)" }}
       >
         <Icon size={18} strokeWidth={1.5} style={{ color: "var(--color-primary)" }} />
       </div>
       <div>
         <p
-          className="text-2xl"
+          className="text-2xl tabular-nums"
           style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.5px" }}
         >
           {value}
         </p>
-        <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
+        <p className="text-xs mt-0.5 font-light" style={{ color: "var(--color-ink-mute)" }}>
           {label}
         </p>
       </div>
@@ -137,7 +137,7 @@ export default async function AdminDashboardPage() {
         {restaurantUser.display_name} · Restaurant Admin
       </p>
 
-      <div className="grid grid-cols-2 gap-3 max-w-xl">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         {stats.map((s) => (
           <StatCard key={s.label} {...s} />
         ))}

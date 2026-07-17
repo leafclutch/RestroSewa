@@ -3,6 +3,8 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { RegisterServiceWorker } from "@/components/pwa/register-sw";
 import { APPLE_SPLASH } from "@/lib/pwa/apple-splash";
+import { cookies } from "next/headers";
+import { ThemeSync } from "@/components/ui/theme-sync";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -60,14 +62,35 @@ export const viewport: Viewport = {
   // person who needs it.
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const cookieStore = await cookies();
+  const theme = cookieStore.get("theme")?.value || "light";
+
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={`${inter.variable} ${theme}`}>
       <head>
+        {/* Anti-theme-flash inline script */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var theme = document.cookie.split('; ').find(function(row) { return row.startsWith('theme='); })?.split('=')[1] || 'light';
+                  var isDashboard = window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/employee');
+                  if (theme === 'dark' && isDashboard) {
+                    document.documentElement.classList.add('dark');
+                  } else {
+                    document.documentElement.classList.remove('dark');
+                  }
+                } catch (e) {}
+              })()
+            `,
+          }}
+        />
         {/* iOS launch images. Safari matches on an exact device query and shows a
             blank white screen when nothing matches, so these are generated per
             device rather than written by hand — see scripts/generate-pwa-assets.mjs. */}
@@ -81,6 +104,7 @@ export default function RootLayout({
         ))}
       </head>
       <body>
+        <ThemeSync />
         {children}
         <RegisterServiceWorker />
       </body>

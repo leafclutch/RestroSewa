@@ -2,10 +2,9 @@
 
 import Link from "next/link";
 import { memo, useCallback, useState, useTransition } from "react";
-import { getMyTables, openTableSession, openWalkInSession } from "@/app/actions/pos";
+import { getMyTables, openTableSession } from "@/app/actions/pos";
 import type { TableStatus } from "@/app/actions/pos";
 import { useRealtime } from "@/lib/realtime/use-realtime";
-import { Button } from "@/components/ui/button";
 
 const CARD =
   "flex flex-col items-center justify-center rounded-xl border w-full p-2 text-center transition-all";
@@ -125,14 +124,9 @@ export function TablesGrid({
     <div>
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Tables</p>
-        <div className="flex items-center gap-3">
-          <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-            {active} active · {tables.length} total
-          </span>
-          <form action={openWalkInSession}>
-            <Button type="submit" variant="secondary">+ Walk-in</Button>
-          </form>
-        </div>
+        <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+          {active} active · {tables.length} total
+        </span>
       </div>
 
       {tables.length === 0 ? (

@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionDetail } from "@/app/actions/pos";
+import { walkInLabel } from "@/lib/walk-ins";
 import { getWorkstations } from "@/app/actions/workstations";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { hasPermission, hasAnyPermission, NAV_ACCESS, PERMISSIONS } from "@/lib/permissions";
@@ -82,7 +83,7 @@ export default async function SessionPage({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("restaurants")
-      .select("name, address, contact_phone, pan_vat_number, logo_url, settings")
+      .select("name, address, contact_phone, pan_vat_number, logo_url, settings, discount_pin_hash")
       .eq("id", restaurantUser.restaurant_id)
       .maybeSingle(),
     getWorkstations(restaurantUser.restaurant_id),
@@ -95,15 +96,24 @@ export default async function SessionPage({
     pan_vat_number: rest?.pan_vat_number ?? null,
     logo_url: rest?.logo_url ?? null,
     paper_width_mm: rest?.settings?.print_paper_width === "58" ? 58 : 80,
+    bill_number_pad: Number.isFinite(Number(rest?.settings?.bill_number_pad)) ? Number(rest?.settings?.bill_number_pad) : 0,
+    bill_number_label: rest?.settings?.bill_number_label === "order" ? "order" : "bill",
     tax_percent: numFromSettings(rest?.settings, "tax_percent", "tax_rate", "gst_percent"),
     service_charge_percent: numFromSettings(rest?.settings, "service_charge_percent", "service_charge"),
   };
+
+  // Discounts exist only where an admin has set a discount PIN. Collapsed to a boolean here
+  // so the hash never crosses to the client; the PIN itself is still checked server-side at
+  // payment, so this only decides whether the field is worth showing.
+  const discountEnabled = !!rest?.discount_pin_hash;
 
   const label =
     session.type === "table" && session.table_number
       ? `Table ${session.table_number}`
       : session.type === "walk_in"
-      ? "Walk-in"
+      ? session.walk_in_no
+        ? `Walk-in ${walkInLabel(session.walk_in_no)}`
+        : "Walk-in"
       : session.type === "room_service"
       ? "Room service"
       : "Session";
@@ -150,6 +160,7 @@ export default async function SessionPage({
         canSeePIN={canSeePIN}
         canUseCredit={canUseCredit}
         canCancelOrders={canCancelOrders}
+        discountEnabled={discountEnabled}
       />
     </div>
   );

@@ -91,9 +91,9 @@ function FoodTypePicker({
 }
 
 const STATUS_CONFIG = {
-  available:    { color: "#1a7a4a", bg: "#f0fdf4", label: "Available" },
+  available: { color: "#1a7a4a", bg: "#f0fdf4", label: "Available" },
   out_of_stock: { color: "#b45309", bg: "#fffbeb", label: "Out of Stock" },
-  hidden:       { color: "#6b7280", bg: "#f9fafb", label: "Hidden" },
+  hidden: { color: "#6b7280", bg: "#f9fafb", label: "Hidden" },
 } as const;
 
 const BADGE_OPTIONS = ["Featured", "Chef's Recommendation", "Best Seller", "New"] as const;

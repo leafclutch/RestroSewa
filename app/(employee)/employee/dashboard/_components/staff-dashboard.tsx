@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ListOrdered, Banknote, LayoutGrid, BedDouble, BookOpen, ChevronDown, HandCoins } from "lucide-react";
+import { ListOrdered, Banknote, LayoutGrid, BedDouble, BookOpen, ChevronDown, HandCoins, ShoppingBag } from "lucide-react";
 
-export type SectionKey = "orders" | "tables" | "rooms" | "sales" | "credits" | "menu";
+export type SectionKey = "orders" | "tables" | "walkins" | "rooms" | "sales" | "credits" | "menu";
 
 export type DashboardSection = {
   key: SectionKey;
@@ -18,6 +18,7 @@ export type DashboardSection = {
 const SECTION_ICON: Record<SectionKey, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
   orders: ListOrdered,
   tables: LayoutGrid,
+  walkins: ShoppingBag,
   rooms: BedDouble,
   sales: Banknote,
   credits: HandCoins,
@@ -74,10 +75,10 @@ function SectionCard({ section, className }: { section: DashboardSection; classN
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 text-left"
+        className="w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 text-left transition-colors hover:bg-canvas-soft"
       >
         <span
-          className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+          className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition-transform duration-200"
           style={{ background: "var(--color-canvas-soft)", color: "var(--color-primary)" }}
         >
           <Icon size={18} strokeWidth={1.6} />
@@ -159,12 +160,9 @@ export function StaffDashboard({
         <div
           // Parks directly under the sticky top bar (56px) rather than sliding
           // beneath it. z-30 keeps it below the bar and its notification panel.
-          className="sticky z-30 px-4 sm:px-5 py-2.5 border-b"
+          className="sticky z-30 px-4 sm:px-5 py-2.5 border-b bg-canvas/90 backdrop-blur-md border-hairline"
           style={{
             top: 56,
-            background: "rgba(255,255,255,0.9)",
-            backdropFilter: "blur(12px)",
-            borderColor: "var(--color-hairline)",
           }}
         >
           <div className="max-w-6xl mx-auto flex gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
@@ -175,8 +173,7 @@ export function StaffDashboard({
                   key={s.key}
                   type="button"
                   onClick={() => jump(s.key)}
-                  className="inline-flex items-center gap-1.5 shrink-0 text-sm px-3 py-1.5 rounded-full border transition-colors"
-                  style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+                  className="inline-flex items-center gap-1.5 shrink-0 text-sm px-3 py-1.5 rounded-full border border-hairline bg-canvas text-ink transition-all duration-200 hover:border-primary/40 active:scale-95 shadow-xs"
                 >
                   <Icon size={14} strokeWidth={1.6} />
                   {s.title}

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { hasPermission, PERMISSIONS, NAV_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
+import { WALK_IN_SLOT_COUNT } from "@/lib/walk-ins";
 import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignments";
 import { computeCreditStats, settlementOf } from "@/lib/credits";
 import type { BillSettlement, CreditStats } from "@/lib/credits";
@@ -60,8 +61,21 @@ export type SessionDetail = {
   room_stay_id: string | null;
   table_number: string | null;
   room_number: string | null;
+  /** Which walk-in slot (1..N) this session occupies; null for tables/rooms. */
+  walk_in_no: number | null;
   opened_at: string;
   customer_pin: string | null;
+  /** Optional walk-in customer details (takeaway / phone / delivery). */
+  customer_name: string | null;
+  customer_phone: string | null;
+  customer_address: string | null;
+  /** The order's sequential number, claimed at its first order (see the
+   *  assign_session_bill_number trigger). Null when the restaurant hasn't configured
+   *  numbering — its documents fall back to derived refs. Shared by KOT/BOT and the bill. */
+  bill_number: number | null;
+  /** Per-workstation OT numbers stamped for this session (KOT-00125, BOT-00086, …).
+   *  Each workstation's own independent number; empty when OT numbering is off. */
+  workstation_tickets: { workstation_id: string; ot_number: number; prefix: string | null }[];
   items: OrderItemRow[];
   total: number;
 };
@@ -213,24 +227,152 @@ async function pinForNewSession(
 // by `checkInRoom`, which opens the stay and the session together. Removed
 // rather than deprecated, so there is no second way to make a stay-less session.
 
-export async function openWalkInSession() {
+// ─── Walk-ins ─────────────────────────────────────────────────────────────────
+// Walk-ins are fixed workspaces (W1, W2, W3 …) that behave exactly like tables: a slot
+// stays occupied by its session until the bill is closed, and reopening the slot returns
+// to the same session. WALK_IN_SLOT_COUNT / walkInLabel live in lib/walk-ins.ts because a
+// "use server" module may only export async functions.
+
+export type WalkInStatus = {
+  no: number;
+  session_id: string | null;
+  session_opened_at: string | null;
+  /** Shown on the card so a delivery/takeaway slot is recognisable at a glance. */
+  customer_name: string | null;
+};
+
+// The N walk-in slots with their live session state — the walk-in counterpart of
+// getTableStatusOverview. Walk-ins have no table group, so every staff member who can
+// work tables sees all of them (no visibility filter).
+export async function getWalkInStatusOverview(
+  restaurantId: string
+): Promise<WalkInStatus[]> {
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("sessions")
+    .select("id, walk_in_no, opened_at, customer_name")
+    .eq("restaurant_id", restaurantId)
+    .eq("type", "walk_in")
+    .eq("status", "active")
+    .not("walk_in_no", "is", null);
+
+  const active = (data ?? []) as {
+    id: string;
+    walk_in_no: number;
+    opened_at: string;
+    customer_name: string | null;
+  }[];
+
+  return Array.from({ length: WALK_IN_SLOT_COUNT }, (_, i) => {
+    const no = i + 1;
+    const s = active.find((a) => a.walk_in_no === no) ?? null;
+    return {
+      no,
+      session_id: s?.id ?? null,
+      session_opened_at: s?.opened_at ?? null,
+      customer_name: s?.customer_name ?? null,
+    };
+  });
+}
+
+/** For the dashboard's live refetch — same data, callable from the client action layer. */
+export async function getMyWalkIns(): Promise<WalkInStatus[]> {
+  const ru = await getRestaurantUser();
+  return getWalkInStatusOverview(ru.restaurant_id);
+}
+
+// Open (or resume) a walk-in slot. If the slot already has a live session, go straight
+// back to it — that is what makes a walk-in persist like a table. Otherwise create one,
+// tagged with the slot number. The customer PIN follows the SAME rule as a table: only a
+// "With PIN" restaurant gets one, so a "Without PIN" restaurant's walk-in never shows a PIN.
+export async function openWalkInSlot(no: number) {
   const ru = await getRestaurantUser();
   const service = createServiceClient();
 
-  const customer_pin = String(Math.floor(1000 + Math.random() * 9000));
+  if (!Number.isInteger(no) || no < 1 || no > WALK_IN_SLOT_COUNT) {
+    redirect("/employee/dashboard");
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: existing } = await (service as any)
+    .from("sessions")
+    .select("id")
+    .eq("restaurant_id", ru.restaurant_id)
+    .eq("type", "walk_in")
+    .eq("status", "active")
+    .eq("walk_in_no", no)
+    .maybeSingle();
+
+  if (existing) {
+    redirect(`/employee/session/${existing.id}`);
+  }
+
+  const customer_pin = await pinForNewSession(service, ru.restaurant_id);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: session, error } = await (service as any)
     .from("sessions")
     .insert({
       restaurant_id: ru.restaurant_id,
       type: "walk_in",
+      walk_in_no: no,
       customer_pin,
     })
     .select("id")
     .single();
 
-  if (error) redirect("/employee/dashboard");
+  // A unique-index clash means the slot was taken between our check and insert (another
+  // device opened it first) — resolve to that session rather than erroring.
+  if (error) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: raced } = await (service as any)
+      .from("sessions")
+      .select("id")
+      .eq("restaurant_id", ru.restaurant_id)
+      .eq("type", "walk_in")
+      .eq("status", "active")
+      .eq("walk_in_no", no)
+      .maybeSingle();
+    if (raced) redirect(`/employee/session/${raced.id}`);
+    return { error: "Could not open the walk-in. Please try again." };
+  }
   redirect(`/employee/session/${session.id}`);
+}
+
+// Save the optional customer details on a walk-in (takeaway / phone / delivery). Editable
+// any time before the bill is closed; scoped to the caller's restaurant.
+export async function updateWalkInCustomer(
+  _prev: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!hasPermission(ru, PERMISSIONS.CREATE_ORDERS)) return { error: "Permission denied." };
+  const service = createServiceClient();
+
+  const sessionId = (formData.get("session_id") as string) || "";
+  const name = ((formData.get("customer_name") as string) || "").trim() || null;
+  const phone = ((formData.get("customer_phone") as string) || "").trim() || null;
+  const address = ((formData.get("customer_address") as string) || "").trim() || null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: sess } = await (service as any)
+    .from("sessions")
+    .select("id, restaurant_id, type, status")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (!sess || sess.restaurant_id !== ru.restaurant_id || sess.type !== "walk_in")
+    return { error: "Walk-in not found." };
+  if (sess.status !== "active") return { error: "This walk-in is already closed." };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("sessions")
+    .update({ customer_name: name, customer_phone: phone, customer_address: address })
+    .eq("id", sessionId);
+
+  if (error) return { error: error.message };
+  revalidatePath(`/employee/session/${sessionId}`);
+  return null;
 }
 
 // ─── Table Activation Requests (Menu + Ordering without PIN) ───────────────────
@@ -348,7 +490,7 @@ export async function getSessionDetail(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: session } = await (service as any)
     .from("sessions")
-    .select(`id, type, status, opened_at, customer_pin, table_id, room_id, room_stay_id, restaurant_tables ( number ), rooms ( number )`)
+    .select(`id, type, status, opened_at, customer_pin, table_id, room_id, room_stay_id, walk_in_no, customer_name, customer_phone, customer_address, bill_number, restaurant_tables ( number ), rooms ( number )`)
     .eq("id", sessionId)
     .maybeSingle();
 
@@ -383,6 +525,18 @@ export async function getSessionDetail(
     0
   );
 
+  // Per-workstation OT numbers stamped for this session (KOT-00125, BOT-00086, …).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: otRows } = await (service as any)
+    .from("workstation_ticket_numbers")
+    .select("workstation_id, ot_number, prefix")
+    .eq("session_id", session.id);
+  const workstation_tickets = ((otRows ?? []) as {
+    workstation_id: string;
+    ot_number: number;
+    prefix: string | null;
+  }[]);
+
   return {
     id: session.id,
     type: session.type,
@@ -397,9 +551,20 @@ export async function getSessionDetail(
     table_number: (session as any).restaurant_tables?.number ?? null,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     room_number: (session as any).rooms?.number ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    walk_in_no: (session as any).walk_in_no ?? null,
     opened_at: session.opened_at,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     customer_pin: (session as any).customer_pin ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    customer_name: (session as any).customer_name ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    customer_phone: (session as any).customer_phone ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    customer_address: (session as any).customer_address ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    bill_number: (session as any).bill_number ?? null,
+    workstation_tickets,
     items,
     total,
   };
@@ -556,13 +721,44 @@ export async function closeSessionWithPayment(
   const cashAmount   = parseFloat(formData.get("cash_amount")   as string) || 0;
   const onlineAmount = parseFloat(formData.get("online_amount") as string) || 0;
   const cardAmount   = parseFloat(formData.get("card_amount")   as string) || 0;
+  // The client sends `total_amount` = the PAYABLE (order total − discount) — the net amount
+  // actually collected, and what every report treats as the sale. `discount_amount` rides
+  // alongside it purely so the bill can show the reduction.
   const totalAmount  = parseFloat(formData.get("total_amount")  as string);
+  const discount     = parseFloat(formData.get("discount_amount") as string) || 0;
 
   const validMethods = ["cash", "online", "card", "mixed", "credit"];
   if (!validMethods.includes(method)) return { error: "Invalid payment method." };
   if (isNaN(totalAmount) || totalAmount < 0) return { error: "Invalid total amount." };
   if (cashAmount < 0 || onlineAmount < 0 || cardAmount < 0) {
     return { error: "Amounts cannot be negative." };
+  }
+  // The order total is payable + discount, so a discount that exceeded it would have
+  // driven the payable negative — already refused above. Only the sign is left to check.
+  if (isNaN(discount) || discount < 0) {
+    return { error: "Invalid discount amount." };
+  }
+
+  // A discount needs the restaurant's discount PIN — money coming off the till is an
+  // authorized act, not a cashier's own call. This check is the ONLY thing that enforces
+  // it: the form is a POST endpoint any logged-in staff member can hit directly, so
+  // hiding the field client-side protects nothing on its own.
+  //
+  // `verify_discount_pin` returns false when the restaurant has no PIN configured, which
+  // is what makes "no PIN" mean "discounts off" rather than "discounts unguarded".
+  if (discount > 0) {
+    const pin = ((formData.get("discount_pin") as string) || "").trim();
+    if (!pin) return { error: "Enter the discount PIN to apply a discount." };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: pinOk, error: pinErr } = await (service as any).rpc("verify_discount_pin", {
+      p_restaurant_id: ru.restaurant_id,
+      p_pin: pin,
+    });
+    // A failed CHECK must never be read as a pass — refuse on error too.
+    if (pinErr || pinOk !== true) {
+      return { error: "Incorrect discount PIN. The discount was not applied." };
+    }
   }
 
   // A hotel stay is NOT billable here. This path charges the session's food and
@@ -635,6 +831,7 @@ export async function closeSessionWithPayment(
       p_customer_phone: customerPhone || null,
       p_notes:          creditNotes || null,
       p_created_by:     ru.id,
+      p_discount:       discount,
     });
 
     if (error) {
@@ -679,7 +876,8 @@ export async function closeSessionWithPayment(
     session_id:     sessionId,
     amount:         totalAmount,
     ...split,
-    total_amount:   totalAmount,
+    total_amount:    totalAmount,
+    discount_amount: discount,
     payment_method: method,
     created_by:     ru.id,
   });
@@ -1117,8 +1315,11 @@ export async function getMyOrderQueue(): Promise<QueueOrder[]> {
 
 export type SalesTxn = {
   id: string;
-  /** The FULL value of the bill — including anything that went on credit. */
+  /** The FULL value of the bill — including anything that went on credit. Already NET of
+   *  `discount`: the discounted figure IS the sale everywhere in the system. */
   amount: number;
+  /** Knocked off at payment. Informational only — it is not part of `amount`. */
+  discount: number;
   method: string;
   cash_amount: number;
   online_amount: number;
@@ -1157,6 +1358,9 @@ export type SalesReport = {
    * breakdown always explains the whole of Sales.
    */
   breakdown: { cash: number; online: number; card: number; credit: number; other: number };
+  /** Total knocked off across the period. Sits ALONGSIDE `periodTotal` rather than adding to
+   *  it — Sales is the net figure; this just says how much was given away to get there. */
+  discountsTotal: number;
   /** Outstanding / collected / created, plus status counts. */
   credit: CreditStats;
   transactions: SalesTxn[];
@@ -1227,6 +1431,7 @@ export async function getSalesReport(params?: {
       orderCount: 0,
       avgOrderValue: 0,
       breakdown: { cash: 0, online: 0, card: 0, credit: 0, other: 0 },
+      discountsTotal: 0,
       credit: emptyCredit,
       transactions: [],
     };
@@ -1246,7 +1451,7 @@ export async function getSalesReport(params?: {
     (service as any)
       .from("payments")
       .select(
-        "id, amount, total_amount, cash_amount, online_amount, card_amount, payment_method, created_at, sessions ( type, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), credits ( id, credit_number, customer_name, down_payment )"
+        "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, sessions ( type, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), credits ( id, credit_number, customer_name, down_payment )"
       )
       .eq("restaurant_id", ru.restaurant_id)
       .order("created_at", { ascending: false }),
@@ -1288,6 +1493,7 @@ export async function getSalesReport(params?: {
   const breakdown = { cash: 0, online: 0, card: 0, credit: 0, other: 0 };
   let periodTotal = 0;
   let orderCount = 0;
+  let discountsTotal = 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const inRange: any[] = [];
 
@@ -1311,6 +1517,8 @@ export async function getSalesReport(params?: {
       const card = Number(p.card_amount ?? 0);
       periodTotal += value;
       orderCount += 1;
+      // Not added to periodTotal: `value` is already net of it.
+      discountsTotal += Number(p.discount_amount ?? 0);
 
       // Every row carries its tendered split; the breakdown is what was actually
       // taken, by tender.
@@ -1352,6 +1560,7 @@ export async function getSalesReport(params?: {
     return {
       id: p.id,
       amount: value,
+      discount: Number(p.discount_amount ?? 0),
       method: p.payment_method,
       cash_amount: cash,
       online_amount: online,
@@ -1380,6 +1589,7 @@ export async function getSalesReport(params?: {
     orderCount,
     avgOrderValue,
     breakdown,
+    discountsTotal,
     credit: computeCreditStats(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (accountsRes.data ?? []) as any[],
@@ -1438,7 +1648,7 @@ export async function exportSalesCsv(params?: {
   const { data } = await (service as any)
     .from("payments")
     .select(
-      "id, amount, total_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, sessions ( type, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), credits ( credit_number, customer_name )"
+      "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, sessions ( type, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), credits ( credit_number, customer_name )"
     )
     .eq("restaurant_id", ru.restaurant_id)
     .order("created_at", { ascending: false });
@@ -1471,6 +1681,8 @@ export async function exportSalesCsv(params?: {
     "Customer",
     "Payment Method",
     "Payment Status",
+    "Discount",
+    // Already net of Discount — the discounted figure is the sale.
     "Total Amount",
     "Amount Paid",
     "On Credit",
@@ -1521,6 +1733,7 @@ export async function exportSalesCsv(params?: {
         customer,
         method,
         SALES_STATUS_LABEL[settlement],
+        Number(p.discount_amount ?? 0).toFixed(2),
         value.toFixed(2),
         tendered.toFixed(2),
         onCredit.toFixed(2),
@@ -1553,10 +1766,21 @@ export type PaidBill = {
   cash_amount: number;
   online_amount: number;
   card_amount: number;
+  /** The NET sale — what was actually collected, i.e. the order total minus `discount`. */
   total: number;
+  /** Knocked off at payment. Shown on the bill so `total` reconciles with the items above it. */
+  discount: number;
   cashier_name: string | null;
   order_ids: string[];
   location: string;
+  /** The restaurant's own sequential bill number, stamped at payment. Null when the
+   *  restaurant hasn't configured custom numbering (bill falls back to a derived ref). */
+  bill_number: number | null;
+  /** How to format/label that number on the bill (from the restaurant's settings). */
+  bill_number_pad: number;
+  bill_number_label: "bill" | "order";
+  /** Walk-in customer details (takeaway / delivery), when present. */
+  customer: { name: string | null; phone: string | null; address: string | null } | null;
   restaurant: {
     name: string;
     address: string | null;
@@ -1602,7 +1826,7 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
   const { data: p } = await (service as any)
     .from("payments")
     .select(
-      "id, amount, total_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, session_id, restaurant_id, sessions ( type, restaurant_tables ( number ), rooms ( number ) ), credits ( credit_number, customer_name, customer_phone, paid_amount, balance )"
+      "id, bill_number, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, session_id, restaurant_id, sessions ( type, bill_number, customer_name, customer_phone, customer_address, restaurant_tables ( number ), rooms ( number ) ), credits ( credit_number, customer_name, customer_phone, paid_amount, balance )"
     )
     .eq("id", paymentId)
     .maybeSingle();
@@ -1679,9 +1903,23 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
     online_amount: online,
     card_amount: card,
     total,
+    discount: Number(p.discount_amount ?? 0),
     cashier_name,
     order_ids,
     location,
+    // The order's number lives on the SESSION now (shared with its KOT/BOT). Fall back to
+    // the payment's own stamped number for bills closed under the old payment-time model.
+    bill_number: p.sessions?.bill_number ?? p.bill_number ?? null,
+    bill_number_pad: Number.isFinite(Number(rest?.settings?.bill_number_pad)) ? Number(rest?.settings?.bill_number_pad) : 0,
+    bill_number_label: rest?.settings?.bill_number_label === "order" ? "order" : "bill",
+    customer:
+      p.sessions?.customer_name || p.sessions?.customer_phone || p.sessions?.customer_address
+        ? {
+            name: p.sessions?.customer_name ?? null,
+            phone: p.sessions?.customer_phone ?? null,
+            address: p.sessions?.customer_address ?? null,
+          }
+        : null,
     restaurant: {
       name: rest?.name ?? "Restaurant",
       address: rest?.address ?? null,

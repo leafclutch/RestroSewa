@@ -9,10 +9,11 @@ import {
   Divider,
   Line,
   ticketNumber,
-  shortId,
 } from "@/app/(employee)/employee/_components/bill-ticket";
 import type { RestaurantInfo, BillItem } from "@/app/(employee)/employee/_components/bill-ticket";
 import { ticketCodeOf } from "@/lib/workstations/ticket-code";
+import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
+import { formatOtNumber } from "@/lib/billing/ot-number";
 
 // Re-export so existing imports (`./print-tickets`) keep working.
 export type { RestaurantInfo } from "@/app/(employee)/employee/_components/bill-ticket";
@@ -38,8 +39,18 @@ function locationLabel(session: SessionDetail): string {
   return "—";
 }
 
-function orderIds(session: SessionDetail): string[] {
-  return [...new Set(session.items.map((i) => i.order_id))];
+// The order's ONE sequential number — the same on the KOT, the BOT, every other
+// workstation ticket, and the customer bill. Null when the restaurant hasn't configured
+// numbering, in which case each document falls back to its own derived reference.
+function resolveOrderNumber(
+  session: SessionDetail,
+  restaurant: RestaurantInfo
+): { label: string; value: string } | null {
+  if (session.bill_number == null) return null;
+  return {
+    label: billNumberLabel(restaurant.bill_number_label),
+    value: formatBillNumber(session.bill_number, restaurant.bill_number_pad ?? 0),
+  };
 }
 
 /**
@@ -101,12 +112,15 @@ function StationTicket({
   staffName,
   at,
   docket,
+  orderNo,
 }: {
   session: SessionDetail;
   restaurant: RestaurantInfo;
   staffName: string;
   at: Date;
   docket: Docket;
+  /** The order's shared number (same as the bill). Null → legacy per-ticket ref. */
+  orderNo: { label: string; value: string } | null;
 }) {
   return (
     <>
@@ -121,8 +135,27 @@ function StationTicket({
       <div style={{ textAlign: "center", fontWeight: 700, fontSize: 20, margin: "2px 0 6px" }}>
         {locationLabel(session)}
       </div>
-      <Line label={`${docket.code} No`} value={ticketNumber(docket.code, session.id, at)} />
-      <Line label={orderIds(session).length > 1 ? "Orders" : "Order"} value={orderIds(session).map(shortId).join(", ") || "—"} />
+      {/* Walk-in customer — the kitchen/delivery needs the name + phone on a takeaway. */}
+      {(session.customer_name || session.customer_phone) && (
+        <div style={{ textAlign: "center", fontSize: 12, marginBottom: 4 }}>
+          {session.customer_name}
+          {session.customer_name && session.customer_phone ? " · " : ""}
+          {session.customer_phone}
+        </div>
+      )}
+      {/* Number line, in priority order:
+          1. this workstation's OWN OT number (KOT No.: KOT-00125) when OT numbering is on;
+          2. else the order's shared number (Bill/Order No) when bill numbering is on;
+          3. else the legacy derived ticket ref. */}
+      {(() => {
+        const ot = session.workstation_tickets.find((t) => t.workstation_id === docket.key);
+        if (ot) {
+          const prefix = (ot.prefix || docket.code).toUpperCase();
+          return <Line label={`${prefix} No`} value={formatOtNumber(prefix, ot.ot_number)} />;
+        }
+        if (orderNo) return <Line label={orderNo.label} value={orderNo.value} />;
+        return <Line label={`${docket.code} No`} value={ticketNumber(docket.code, session.id, at)} />;
+      })()}
       <Line label="Date" value={at.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} />
       {staffName && <Line label="Staff" value={staffName} />}
       <Divider />
@@ -175,6 +208,9 @@ export function SessionPrintButtons({
 
   const paperWidthMm = restaurant.paper_width_mm ?? 80;
 
+  // The order's shared number — used identically on every workstation ticket and the bill.
+  const orderNo = resolveOrderNumber(session, restaurant);
+
   // One docket per workstation, computed once.
   const dockets = useMemo(() => splitDockets(session.items, workstations), [session.items, workstations]);
 
@@ -222,7 +258,7 @@ export function SessionPrintButtons({
             title={`${d.name} — ${d.code} preview`}
             paperWidthMm={paperWidthMm}
           >
-            <StationTicket session={session} restaurant={restaurant} staffName={staffName} at={at} docket={d} />
+            <StationTicket session={session} restaurant={restaurant} staffName={staffName} at={at} docket={d} orderNo={orderNo} />
           </PrintModal>
         ))}
 
@@ -230,11 +266,16 @@ export function SessionPrintButtons({
         <PrintModal open={openKey === "bill"} onClose={() => setOpenKey(null)} title="Bill — preview" paperWidthMm={paperWidthMm}>
           <BillTicket
             restaurant={restaurant}
-            billNo={ticketNumber("BILL", session.id, at)}
-            orders={orderIds(session)}
+            billNo={orderNo ? orderNo.value : ticketNumber("BILL", session.id, at)}
+            billLabel={orderNo ? orderNo.label : undefined}
             location={locationLabel(session)}
             at={at}
             items={billItems}
+            customer={
+              session.type === "walk_in"
+                ? { name: session.customer_name, phone: session.customer_phone, address: session.customer_address }
+                : null
+            }
           />
         </PrintModal>
       )}

@@ -25,6 +25,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         // separately from stock, so a storekeeper sees Stock but not Finance.
         showStock={STOCK_ACCESS.canViewStock(restaurantUser)}
         showFinance={STOCK_ACCESS.canViewFinance(restaurantUser)}
+        // Settings (billing) is owner-only; the page redirects non-admins anyway.
+        showSettings={restaurantUser.role === "restaurant_admin"}
       />
       {/* Only this column scrolls — the sidebar is sticky and stays put.
           pt-12 offsets the fixed mobile top bar; md:pt-0 on desktop, where the

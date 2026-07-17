@@ -6,18 +6,18 @@ import { cn } from "@/lib/utils";
 const buttonVariants = cva(
   [
     "inline-flex items-center justify-center gap-2 whitespace-nowrap",
-    "rounded-pill font-normal transition-colors",
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
+    "rounded-pill font-normal transition-all duration-200 active:scale-[0.98]",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas",
     "disabled:pointer-events-none disabled:opacity-50",
   ],
   {
     variants: {
       variant: {
         primary:
-          "bg-primary text-white hover:bg-primary-deep active:bg-primary-press",
+          "bg-primary text-white hover:bg-primary-deep active:bg-primary-press shadow-sm",
         secondary:
-          "bg-canvas text-primary border border-primary hover:bg-canvas-soft",
-        "on-dark": "bg-brand-dark text-white hover:opacity-90",
+          "bg-canvas text-primary border border-primary hover:bg-primary-subdued/10 active:bg-primary-subdued/20",
+        "on-dark": "bg-brand-dark text-white hover:opacity-90 border border-hairline",
       },
       size: {
         md: "px-4 py-2 text-base",

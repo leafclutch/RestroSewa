@@ -72,6 +72,8 @@ export default async function RoomPage({
         pan_vat_number: rest?.pan_vat_number ?? null,
         logo_url: rest?.logo_url ?? null,
         paper_width_mm: rest?.settings?.print_paper_width === "58" ? 58 : 80,
+        bill_number_pad: Number.isFinite(Number(rest?.settings?.bill_number_pad)) ? Number(rest?.settings?.bill_number_pad) : 0,
+        bill_number_label: rest?.settings?.bill_number_label === "order" ? "order" : "bill",
       }}
       staffName={restaurantUser.display_name}
       workstations={workstations}

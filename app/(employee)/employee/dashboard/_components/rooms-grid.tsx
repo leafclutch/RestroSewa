@@ -42,9 +42,9 @@ function useNow(everyMs = 60_000): number | null {
 }
 
 const STATUS: Record<RoomOverview["status"], { label: string; color: string; soft: string }> = {
-  available:   { label: "Available",   color: "#1a7a4a", soft: "#f0fdf4" },
-  occupied:    { label: "Occupied",    color: "#4f46e5", soft: "#eef2ff" },
-  cleaning:    { label: "Cleaning",    color: "#b45309", soft: "#fff7ed" },
+  available: { label: "Available", color: "#1a7a4a", soft: "#f0fdf4" },
+  occupied: { label: "Occupied", color: "#4f46e5", soft: "#eef2ff" },
+  cleaning: { label: "Cleaning", color: "#b45309", soft: "#fff7ed" },
   maintenance: { label: "Maintenance", color: "#6b7280", soft: "#f9fafb" },
 };
 
@@ -283,10 +283,10 @@ const RoomCard = memo(function RoomCard({ room, canCheckIn, onCheckIn }: {
               {room.session_id
                 ? "An open session from before check-in existed — settle it to free the room."
                 : room.status === "available"
-                ? "Ready for the next guest."
-                : room.status === "cleaning"
-                ? "Being cleaned."
-                : "Out of service."}
+                  ? "Ready for the next guest."
+                  : room.status === "cleaning"
+                    ? "Being cleaned."
+                    : "Out of service."}
             </p>
           </>
         )}

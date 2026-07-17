@@ -20,6 +20,10 @@ export type RestaurantInfo = {
   logo_url?: string | null;
   // Thermal roll width in mm; sizes the print page + on-screen preview. Default 80.
   paper_width_mm?: 58 | 80;
+  // How the order's sequential number is shown (Admin → Settings). Used by the bill
+  // AND the workstation tickets so every document on an order reads the same.
+  bill_number_pad?: number;
+  bill_number_label?: "bill" | "order";
 };
 
 export type BillItem = { id: string; item_name: string; item_price: number; quantity: number };
@@ -276,31 +280,45 @@ export function PoweredBy() {
 // ── Bill (customer bill) — works both before payment (UNPAID) and as a reprint
 //    of a completed transaction (PAID + method + cashier) ─────────────────────────
 
+// Optional customer block for takeaway / delivery bills.
+export type BillCustomer = { name: string | null; phone: string | null; address: string | null };
+
 export function BillTicket({
   restaurant,
   billNo,
-  orders,
+  billLabel,
   location,
   at,
   items,
   payment,
   credit,
+  customer,
+  discount = 0,
 }: {
   restaurant: RestaurantInfo;
   billNo: string;
-  orders: string[];
+  /** Overrides the bill-number line label (e.g. "Bill No" / "Order No" from settings).
+   *  When absent, falls back to "Receipt No" for a paid bill, "Bill No" otherwise. */
+  billLabel?: string;
   location: string;
   at: Date;
   items: BillItem[];
   payment?: BillPayment;
   credit?: BillCredit | null;
+  customer?: BillCustomer | null;
+  /** Knocked off at payment. Only a paid bill has one — the pre-payment preview is
+   *  printed before the cashier has entered it, so it passes 0. */
+  discount?: number;
 }) {
+  const hasCustomer = !!(customer && (customer.name || customer.phone || customer.address));
   const subtotal = items.reduce((s, i) => s + Number(i.item_price) * i.quantity, 0);
   const taxPct = restaurant.tax_percent ?? 0;
   const svcPct = restaurant.service_charge_percent ?? 0;
   const tax = subtotal * (taxPct / 100);
   const service = subtotal * (svcPct / 100);
-  const grandTotal = subtotal + tax + service;
+  // The discount comes off AFTER tax/service — it's a reduction of the amount payable,
+  // not of the goods, so the tax lines still reconcile against the subtotal above them.
+  const grandTotal = Math.max(0, subtotal + tax + service - discount);
 
   // Show the tender split whenever the bill was settled with more than one.
   const parts = payment
@@ -327,18 +345,26 @@ export function BillTicket({
         <div style={{ fontWeight: 700, fontSize: 15 }}>{restaurant.name}</div>
         {restaurant.address && <div style={{ fontSize: 11 }}>{restaurant.address}</div>}
         {restaurant.contact_phone && <div style={{ fontSize: 11 }}>Ph: {restaurant.contact_phone}</div>}
-        {restaurant.pan_vat_number && <div style={{ fontSize: 11 }}>PAN/VAT: {restaurant.pan_vat_number}</div>}
+        {restaurant.pan_vat_number && <div style={{ fontSize: 11 }}>PAN No.: {restaurant.pan_vat_number}</div>}
         <div style={{ fontWeight: 700, letterSpacing: 1, marginTop: 4 }}>{payment ? "TAX INVOICE" : "BILL"}</div>
       </div>
       <Divider />
       {/* The table/room is what staff match the bill to — make it prominent. */}
       <div style={{ textAlign: "center", fontWeight: 700, fontSize: 18, marginBottom: 4 }}>{location}</div>
-      <Line label={payment ? "Receipt No" : "Bill No"} value={billNo} />
-      <Line label={orders.length > 1 ? "Orders" : "Order"} value={orders.map(shortId).join(", ") || "—"} />
+      <Line label={billLabel ?? (payment ? "Receipt No" : "Bill No")} value={billNo} />
       <Line label="Date" value={at.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} />
       {payment?.cashier && <Line label="Cashier" value={payment.cashier} />}
       {credit && <Line label="Credit ID" value={credit.credit_number} />}
       {credit && <Line label="Customer" value={credit.customer_name} />}
+      {hasCustomer && (
+        <>
+          {customer!.name && <Line label="Customer" value={customer!.name} />}
+          {customer!.phone && <Line label="Phone" value={customer!.phone} />}
+          {customer!.address && (
+            <div style={{ fontSize: 11, marginTop: 2 }}>{customer!.address}</div>
+          )}
+        </>
+      )}
       <Divider />
 
       {/* Items */}
@@ -366,8 +392,9 @@ export function BillTicket({
       <Line label="Subtotal" value={rupee(subtotal)} />
       {tax > 0 && <Line label={`Tax (${taxPct}%)`} value={rupee(tax)} />}
       {service > 0 && <Line label={`Service (${svcPct}%)`} value={rupee(service)} />}
+      {discount > 0 && <Line label="Discount" value={`- ${rupee(discount)}`} />}
       <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
-      <Line label="GRAND TOTAL" value={rupee(grandTotal)} bold />
+      <Line label={discount > 0 ? "TOTAL PAYABLE" : "GRAND TOTAL"} value={rupee(grandTotal)} bold />
       <Divider />
 
       {credit ? (

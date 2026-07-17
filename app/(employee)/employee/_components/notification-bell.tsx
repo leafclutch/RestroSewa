@@ -564,7 +564,7 @@ export function NotificationBell({ initialCount = 0 }: { initialCount?: number }
                   type="button"
                   onClick={jumpToLatest}
                   className="notif-jump absolute left-1/2 bottom-3 -translate-x-1/2 flex items-center gap-1.5 min-h-[36px] px-3.5 rounded-full text-xs font-medium shadow-lg"
-                  style={{ background: "#0d253d", color: "#fff" }}
+                  style={{ background: "var(--color-ink)", color: "var(--color-canvas)" }}
                 >
                   <ArrowDown size={13} />
                   {pendingBelow} new notification{pendingBelow > 1 ? "s" : ""}
@@ -597,11 +597,11 @@ export function NotificationBell({ initialCount = 0 }: { initialCount?: number }
 .notif-scroll {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
-  scrollbar-color: rgba(13,37,61,0.25) transparent;
+  scrollbar-color: rgba(156,163,175,0.25) transparent;
 }
 .notif-scroll::-webkit-scrollbar { width: 6px; }
 .notif-scroll::-webkit-scrollbar-thumb {
-  background: rgba(13,37,61,0.22);
+  background: rgba(156,163,175,0.25);
   border-radius: 999px;
 }
 .notif-scroll::-webkit-scrollbar-track { background: transparent; }
