@@ -289,6 +289,49 @@ html:not(.dark) .admin-surface {
   --color-hairline-input: #7d93b2;
 }
 
+/* ── Customer QR menu surface ──────────────────────────────────────────────────
+ * The customer site has its own TEAL accent (not the app's indigo) and a set of hardcoded
+ * status colours. Both live here as tokens so the site can have a real dark theme (it follows the
+ * device via ThemeSync) WITHOUT touching light: every `:root`-tier value below is the exact literal
+ * the components used before, and only the `.dark` block changes. Applied via
+ * `className="customer-surface"` on the customer menu root.
+ */
+.customer-surface {
+  --color-primary: #0891b2;
+  --color-primary-deep: #0e7490;
+  --color-primary-soft: #22d3ee;
+  --color-brand-dark: #0b3a47;
+
+  --c-glass: rgba(255, 255, 255, 0.82);        /* sticky header glass */
+  --c-glass-strong: rgba(255, 255, 255, 0.86); /* cart bar glass */
+  --c-hover-border: #d7dee8;                   /* card hover edge */
+  --c-accent-soft: rgba(8, 145, 178, 0.1);     /* teal tint behind icons / selected states */
+
+  --c-ok: #0d9488;      --c-ok-bg: rgba(13, 148, 136, 0.082);   /* available / success */
+  --c-warn: #b45309;    --c-warn-bg: #fff7ed;                   /* preparing / popular */
+  --c-danger: #dc2626;  --c-danger-bg: #fef2f2;                 /* sold out / spicy / rejected */
+  --c-served: #64748b;  --c-served-bg: #f1f5f9;                 /* served / neutral */
+}
+
+.dark .customer-surface {
+  /* Lighter cyan so the accent and its gradients read on the dark canvas. */
+  --color-primary: #22d3ee;
+  --color-primary-deep: #0891b2;
+  --color-primary-soft: #67e8f9;
+  --color-brand-dark: #0b3a47;
+
+  --c-glass: rgba(16, 19, 28, 0.82);
+  --c-glass-strong: rgba(16, 19, 28, 0.86);
+  --c-hover-border: #2a3340;
+  --c-accent-soft: rgba(34, 211, 238, 0.16);
+
+  /* Status colours: brighter foregrounds + 14%-wash backgrounds so no light slab survives. */
+  --c-ok: #2dd4bf;      --c-ok-bg: rgba(45, 212, 191, 0.15);
+  --c-warn: #fbbf24;    --c-warn-bg: rgba(251, 191, 36, 0.14);
+  --c-danger: #f87171;  --c-danger-bg: rgba(248, 113, 113, 0.14);
+  --c-served: #94a3b8;  --c-served-bg: rgba(148, 163, 184, 0.14);
+}
+
 /* ── Base ────────────────────────────────────────────────────── */
 body {
   font-family: var(--font-inter, "Inter", "SF Pro Display", system-ui, -apple-system, sans-serif);

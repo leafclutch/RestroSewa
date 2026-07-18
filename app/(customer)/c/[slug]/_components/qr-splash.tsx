@@ -60,7 +60,10 @@ export function QrSplash({ slug }: { slug: string }) {
       // aria-hidden: this is decoration. A screen-reader user should land on the
       // menu itself, not be read a loading screen that is about to vanish.
       aria-hidden="true"
-      className="fixed inset-0 z-[100] flex flex-col items-center justify-center"
+      // `customer-surface` gives the splash the menu's TEAL brand (not the app indigo), so the
+      // "HRestroSewa moment" flows straight into the teal menu it precedes. In dark it picks up the
+      // lighter-cyan overrides automatically.
+      className="customer-surface fixed inset-0 z-[100] flex flex-col items-center justify-center"
       style={{
         background: "linear-gradient(140deg, var(--color-brand-dark), var(--color-primary) 160%)",
         opacity: leaving ? 0 : 1,

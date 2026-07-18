@@ -77,7 +77,7 @@ export default async function RootLayout({
   const theme = cookieStore.get("theme")?.value || "light";
 
   return (
-    <html lang="en" className={`${inter.variable} ${theme}`}>
+    <html lang="en" className={`${inter.variable} ${theme}`} suppressHydrationWarning>
       <head>
         {/* Anti-theme-flash inline script */}
         <script
@@ -85,9 +85,18 @@ export default async function RootLayout({
             __html: `
               (function() {
                 try {
-                  var theme = document.cookie.split('; ').find(function(row) { return row.startsWith('theme='); })?.split('=')[1] || 'light';
-                  var isDashboard = window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/employee');
-                  if (theme === 'dark' && isDashboard) {
+                  var p = window.location.pathname;
+                  var isDashboard = p.startsWith('/admin') || p.startsWith('/employee');
+                  var isCustomer = p.startsWith('/c/');
+                  var dark = false;
+                  if (isDashboard) {
+                    var theme = document.cookie.split('; ').find(function(row) { return row.startsWith('theme='); })?.split('=')[1] || 'light';
+                    dark = theme === 'dark';
+                  } else if (isCustomer) {
+                    // Customer menu follows the device — set it before paint so there's no light flash.
+                    dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                  }
+                  if (dark) {
                     document.documentElement.classList.add('dark');
                   } else {
                     document.documentElement.classList.remove('dark');
