@@ -161,7 +161,7 @@ export default async function CustomerMenuPage({
 
   return (
     <>
-      {/* The RestroSewa moment. Overlays the menu while it renders underneath, so
+      {/* The HRestroSewa moment. Overlays the menu while it renders underneath, so
           the guest waits once, not twice. */}
       <QrSplash slug={slug} />
 

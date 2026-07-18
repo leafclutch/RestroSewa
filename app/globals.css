@@ -1,70 +1,335 @@
 @import "tailwindcss";
 
-@theme inline {
+@variant dark (&:where(.dark, .dark *));
+
+/*
+ * DO NOT add `inline` to this @theme block.
+ *
+ * `@theme inline` bakes each token's *value* into the utility, so `--color-ink: #0d253d`
+ * compiles to `.text-ink{color:#0d253d}` — a frozen literal the `.dark` block below can
+ * never reach. Every dark override for primary/ink/canvas/hairline was silently inert
+ * until this word was removed. Plain `@theme` emits `.text-ink{color:var(--color-ink)}`,
+ * which `.dark` overrides correctly.
+ *
+ * `inline` is only right when every token is itself a `var()` reference (shadcn's pattern —
+ * see the semantic colors below, which were the only ones done that way and so the only
+ * ones that ever flipped). We keep literals here, so no `inline`.
+ */
+@theme {
   /* ── Colors ──────────────────────────────────────────────── */
-  --color-primary:              #533afd;
-  --color-primary-deep:         #4434d4;
-  --color-primary-press:        #2e2b8c;
-  --color-primary-soft:         #665efd;
-  --color-primary-subdued:      #b9b9f9;
-  --color-brand-dark:           #1c1e54;
+  --color-primary: #533afd;
+  --color-primary-deep: #4434d4;
+  --color-primary-press: #2e2b8c;
+  --color-primary-soft: #665efd;
+  --color-primary-subdued: #b9b9f9;
+  --color-brand-dark: #1c1e54;
 
-  --color-ink:                  #0d253d;
-  --color-ink-secondary:        #273951;
-  --color-ink-mute:             #64748d;
-  --color-ink-mute-2:           #61718a;
+  /* Light mode carried a washed-out feel that dark didn't, and it came from the two
+     secondary inks rather than from --color-ink (already ~14:1 on white).
+     --color-ink-mute was #64748d = 4.74:1 — technically AA, but only just, and it's used for
+     nearly every label and subtitle on the dashboard. Now ~6.7:1: still clearly secondary,
+     but readable at 12-14px on a bright screen in a bright room. */
+  --color-ink: #0d253d;
+  --color-ink-secondary: #1e2f45;
+  --color-ink-mute: #4d5b74;
+  --color-ink-mute-2: #4d5b74;
 
-  --color-canvas:               #ffffff;
-  --color-canvas-soft:          #f6f9fc;
-  --color-canvas-cream:         #f5e9d4;
+  --color-canvas: #ffffff;
+  --color-canvas-soft: #f6f9fc;
+  --color-canvas-cream: #f5e9d4;
 
-  --color-hairline:             #e3e8ee;
-  --color-hairline-input:       #a8c3de;
+  /* Every card, section, divider and grid line in light mode is one of these. #e3e8ee sat so
+     close to the white canvas that surfaces had no edge — the single biggest reason light felt
+     flat next to dark, where the borders read clearly against the dark canvas. Stepped down
+     enough to define a card without drawing a hard box around it. */
+  --color-hairline: #d5dde7;
+  --color-hairline-input: #8fa6c2;
 
-  --color-ruby:                 #ea2261;
-  --color-magenta:              #f96bee;
-  --color-lemon:                #9b6829;
-  --color-shadow-blue:          #003770;
+  --color-ruby: #ea2261;
+  --color-magenta: #f96bee;
+  --color-lemon: #9b6829;
+  --color-shadow-blue: #003770;
+
+  /* ── Semantic Colors ─────────────────────────────────────── */
+  --color-success: var(--color-success-val);
+  --color-success-bg: var(--color-success-bg-val);
+  --color-warning: var(--color-warning-val);
+  --color-warning-bg: var(--color-warning-bg-val);
+  --color-danger: var(--color-danger-val);
+  --color-danger-bg: var(--color-danger-bg-val);
+  --color-info: var(--color-info-val);
+  --color-info-bg: var(--color-info-bg-val);
 
   /* ── Border Radius ───────────────────────────────────────── */
-  --radius-xs:                  4px;
-  --radius-sm:                  6px;
-  --radius-md:                  8px;
-  --radius-lg:                  12px;
-  --radius-xl:                  16px;
-  --radius-pill:                9999px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 9999px;
 
   /* ── shadcn token overrides ──────────────────────────────── */
-  --color-background:           #ffffff;
-  --color-foreground:           #0d253d;
-  --color-card:                 #ffffff;
-  --color-card-foreground:      #0d253d;
-  --color-popover:              #ffffff;
-  --color-popover-foreground:   #0d253d;
-  --color-secondary:            #f6f9fc;
+  --color-background: #ffffff;
+  --color-foreground: #0d253d;
+  --color-card: #ffffff;
+  --color-card-foreground: #0d253d;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #0d253d;
+  --color-secondary: #f6f9fc;
   --color-secondary-foreground: #0d253d;
-  --color-muted:                #f6f9fc;
-  --color-muted-foreground:     #64748d;
-  --color-accent:               #f6f9fc;
-  --color-accent-foreground:    #0d253d;
-  --color-destructive:          #ea2261;
+  --color-muted: #f6f9fc;
+  --color-muted-foreground: #64748d;
+  --color-accent: #f6f9fc;
+  --color-accent-foreground: #0d253d;
+  --color-destructive: #ea2261;
   --color-destructive-foreground: #ffffff;
-  --color-border:               #e3e8ee;
-  --color-input:                #a8c3de;
-  --color-ring:                 #533afd;
-  --radius:                     0.375rem;
+  --color-border: #e3e8ee;
+  --color-input: #a8c3de;
+  --color-ring: #533afd;
+  --radius: 0.375rem;
 }
 
-/* ── Spacing reference (plain CSS vars, not Tailwind tokens) ─ */
 :root {
-  --ds-spacing-xxs: 2px;
-  --ds-spacing-xs:  4px;
-  --ds-spacing-sm:  8px;
-  --ds-spacing-md:  12px;
-  --ds-spacing-lg:  16px;
-  --ds-spacing-xl:  24px;
-  --ds-spacing-xxl: 32px;
-  --ds-spacing-huge: 64px;
+  /* Declare the page's colour scheme so a dark-mode phone's browser does NOT algorithmically
+   * "force-dark" it. `only light` opts the light surfaces (customer menu, marketing, and the app
+   * whenever `.dark` is off) OUT of Chrome/Android Auto-Dark — which otherwise re-tinted the
+   * customer site and turned the variant picker into an unreadable blurry sheet. The dashboards keep
+   * their OWN dark mode via the `.dark` class below (which sets `color-scheme: dark`), so their theme
+   * is controlled by the app's toggle, never by the browser. Also makes native controls/scrollbars
+   * match the surface. See [[theme-inline-dark-mode-trap]] for the related token machinery. */
+  color-scheme: only light;
+
+  /* The --ds-spacing-* scale that used to live here was removed: it sat outside @theme, so it
+     generated no utilities, and nothing referenced it in four months. Tailwind's own spacing
+     scale (p-2, gap-3, …) is the source of truth for spacing. */
+
+  /* Semantic Default Color Values */
+  --color-success-val: #16a34a;
+  --color-success-bg-val: #f0fdf4;
+  --color-warning-val: #d97706;
+  --color-warning-bg-val: #fffbeb;
+  --color-danger-val: #dc2626;
+  --color-danger-bg-val: #fef2f2;
+  --color-info-val: #2563eb;
+  --color-info-bg-val: #eff6ff;
+
+  /* ── Solid fills (behind WHITE text) ──────────────────────────────────────────
+   * These do NOT flip — they are the ONE case where a colour must stay constant across
+   * themes. The --sec- and --st- accents are foreground colours: 700-tier in light, 400-tier
+   * (bright) in dark, so they read as text/icons on the canvas. Used as a FILL behind white
+   * text they invert in dark — white on a bright #4ade80 green is unreadable. A filled badge/
+   * tile/active-card therefore uses these fixed 700-tier fills instead, where white clears AA
+   * on both a light and a dark card. There is deliberately no .dark override below.
+   */
+  --fill-amber: #b45309;
+  --fill-green: #15803d;
+  --fill-blue: #1d4ed8;
+  --fill-indigo: #4338ca;
+  --fill-purple: #7e22ce;
+  --fill-teal: #0f766e;
+  --fill-red: #b91c1c;
+
+  /* ── Dashboard accents ────────────────────────────────────────────────────────
+   * Deliberately NOT in @theme. These are applied dynamically — the section a card
+   * belongs to is data, so the colour arrives as `style={{ color: "var(--sec-tables)" }}`
+   * and never as a literal class name. Tailwind v4 prunes theme vars that no *generated
+   * utility* references, and it cannot see a var() inside a TSX style object — so putting
+   * these in @theme would silently drop them. Plain :root/.dark is always emitted.
+   * (`bg-${x}` doesn't work either: v4 has no dynamic class generation.)
+   *
+   * Light values are 700-tier for >=4.5:1 on white; dark are 400-tier for the same on
+   * #0f111a. `-soft` is a 50-tier tint in light and a 14% wash of the accent in dark, so a
+   * tinted panel never becomes a light slab on a dark page.
+   */
+  --sec-orders: #b45309;         --sec-orders-soft: #fff7ed;
+  --sec-tables: #1d4ed8;         --sec-tables-soft: #eff6ff;
+  --sec-walkins: #7e22ce;        --sec-walkins-soft: #faf5ff;
+  --sec-rooms: #0f766e;          --sec-rooms-soft: #f0fdfa;
+  --sec-sales: #15803d;          --sec-sales-soft: #f0fdf4;
+  --sec-credits: #4338ca;        --sec-credits-soft: #eef2ff;
+  --sec-menu: #047857;           --sec-menu-soft: #ecfdf5;
+  --sec-notifications: #b91c1c;  --sec-notifications-soft: #fef2f2;
+
+  /* ── Status ───────────────────────────────────────────────────────────────────
+   * ONE meaning per colour, shared by tables, walk-ins and rooms: a cashier scanning 55
+   * cards reads "blue = in use" without asking which section they're in. Sections are told
+   * apart by their chrome and icon, not by re-colouring status.
+   */
+  --st-available: #15803d;    --st-available-soft: #f0fdf4;
+  --st-occupied: #1d4ed8;     --st-occupied-soft: #eff6ff;
+  --st-cleaning: #b45309;     --st-cleaning-soft: #fff7ed;
+  --st-maintenance: #b91c1c;  --st-maintenance-soft: #fef2f2;
+
+  /* ── Menu category hues ───────────────────────────────────────────────────────
+   * Categories are free-text rows with no colour column, so a hue is resolved from the
+   * name (or the id, as a stable fallback) at render time — see lib/category-colors.ts.
+   */
+  --cat-orange: #c2410c;  --cat-orange-soft: #fff7ed;
+  --cat-green: #15803d;   --cat-green-soft: #f0fdf4;
+  --cat-yellow: #a16207;  --cat-yellow-soft: #fefce8;
+  --cat-blue: #1d4ed8;    --cat-blue-soft: #eff6ff;
+  --cat-pink: #be185d;    --cat-pink-soft: #fdf2f8;
+  --cat-brown: #78350f;   --cat-brown-soft: #fdf6ec;
+  --cat-purple: #7e22ce;  --cat-purple-soft: #faf5ff;
+  --cat-cyan: #0e7490;    --cat-cyan-soft: #ecfeff;
+  --cat-red: #b91c1c;     --cat-red-soft: #fef2f2;
+  --cat-teal: #0f766e;    --cat-teal-soft: #f0fdfa;
+  --cat-indigo: #4338ca;  --cat-indigo-soft: #eef2ff;
+  --cat-lime: #4d7c0f;    --cat-lime-soft: #f7fee7;
+}
+
+.dark {
+  /* The app's own dark mode owns the scheme here (native controls/scrollbars go dark, and the
+   * browser won't try to re-tint an already-dark page). Only the dashboards ever get `.dark`. */
+  color-scheme: dark;
+
+  /* ── Dark Mode Variable Overrides ────────────────────────── */
+  --color-primary: #818cf8;
+  --color-primary-deep: #6366f1;
+  --color-primary-press: #4f46e5;
+  --color-primary-soft: #a5b4fc;
+  --color-primary-subdued: #1e1b4b;
+  /* The navigation bar (staff top bar, admin sidebar, superadmin sidebar — all three read this
+     one token). Near-black in dark, blue (#1c1e54) in light.
+     Tried carrying the light blue into dark so the bar stayed blue in both themes; it looked
+     wrong against the dark canvas and was reverted. The bar is meant to recede in dark mode. */
+  --color-brand-dark: #090a0f;
+
+  --color-ink: #f3f4f6;
+  --color-ink-secondary: #e5e7eb;
+  --color-ink-mute: #9ca3af;
+  --color-ink-mute-2: #9ca3af;
+
+  --color-canvas: #0f111a;
+  --color-canvas-soft: #07080d;
+  --color-canvas-cream: #1e293b;
+
+  --color-hairline: #1e2230;
+  --color-hairline-input: #2e344a;
+
+  --color-ruby: #f43f5e;
+  --color-magenta: #fb7185;
+  --color-lemon: #f59e0b;
+  --color-shadow-blue: #020617;
+
+  /* shadcn mappings */
+  --color-background: #07080d;
+  --color-foreground: #f3f4f6;
+  --color-card: #0f111a;
+  --color-card-foreground: #f3f4f6;
+  --color-popover: #0f111a;
+  --color-popover-foreground: #f3f4f6;
+  --color-secondary: #1a1d29;
+  --color-secondary-foreground: #f3f4f6;
+  --color-muted: #1a1d29;
+  --color-muted-foreground: #9ca3af;
+  --color-accent: #1a1d29;
+  --color-accent-foreground: #f3f4f6;
+  /* Was missing, so `bg-destructive` stayed at the light ruby on dark surfaces. Tracks
+     --color-ruby's dark value. */
+  --color-destructive: #f43f5e;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #1e2230;
+  --color-input: #2e344a;
+  --color-ring: #818cf8;
+
+  /* ── Dashboard accents — dark ─────────────────────────────────────────────────
+   * 400-tier so they clear 4.5:1 on the #0f111a canvas. `-soft` is a 14% wash of the same
+   * hue rather than a 50-tier tint: a light tint here would punch a bright slab into a dark
+   * page (exactly the bug the raw #fff7ed literals still cause elsewhere).
+   */
+  --sec-orders: #fbbf24;         --sec-orders-soft: rgba(251, 191, 36, 0.14);
+  --sec-tables: #60a5fa;         --sec-tables-soft: rgba(96, 165, 250, 0.14);
+  --sec-walkins: #c084fc;        --sec-walkins-soft: rgba(192, 132, 252, 0.14);
+  --sec-rooms: #2dd4bf;          --sec-rooms-soft: rgba(45, 212, 191, 0.14);
+  --sec-sales: #4ade80;          --sec-sales-soft: rgba(74, 222, 128, 0.14);
+  --sec-credits: #818cf8;        --sec-credits-soft: rgba(129, 140, 248, 0.14);
+  --sec-menu: #34d399;           --sec-menu-soft: rgba(52, 211, 153, 0.14);
+  --sec-notifications: #f87171;  --sec-notifications-soft: rgba(248, 113, 113, 0.14);
+
+  --st-available: #4ade80;    --st-available-soft: rgba(74, 222, 128, 0.14);
+  --st-occupied: #60a5fa;     --st-occupied-soft: rgba(96, 165, 250, 0.14);
+  --st-cleaning: #fbbf24;     --st-cleaning-soft: rgba(251, 191, 36, 0.14);
+  --st-maintenance: #f87171;  --st-maintenance-soft: rgba(248, 113, 113, 0.14);
+
+  --cat-orange: #fb923c;  --cat-orange-soft: rgba(251, 146, 60, 0.14);
+  --cat-green: #4ade80;   --cat-green-soft: rgba(74, 222, 128, 0.14);
+  --cat-yellow: #facc15;  --cat-yellow-soft: rgba(250, 204, 21, 0.14);
+  --cat-blue: #60a5fa;    --cat-blue-soft: rgba(96, 165, 250, 0.14);
+  --cat-pink: #f472b6;    --cat-pink-soft: rgba(244, 114, 182, 0.14);
+  --cat-brown: #d6a06a;   --cat-brown-soft: rgba(214, 160, 106, 0.14);
+  --cat-purple: #c084fc;  --cat-purple-soft: rgba(192, 132, 252, 0.14);
+  --cat-cyan: #22d3ee;    --cat-cyan-soft: rgba(34, 211, 238, 0.14);
+  --cat-red: #f87171;     --cat-red-soft: rgba(248, 113, 113, 0.14);
+  --cat-teal: #2dd4bf;    --cat-teal-soft: rgba(45, 212, 191, 0.14);
+  --cat-indigo: #818cf8;  --cat-indigo-soft: rgba(129, 140, 248, 0.14);
+  --cat-lime: #a3e635;    --cat-lime-soft: rgba(163, 230, 53, 0.14);
+
+  /* Semantic Dark Color Values */
+  --color-success-val: #4ade80;
+  --color-success-bg-val: #064e3b;
+  --color-warning-val: #fbbf24;
+  --color-warning-bg-val: #78350f;
+  --color-danger-val: #f87171;
+  --color-danger-bg-val: #7f1d1d;
+  --color-info-val: #60a5fa;
+  --color-info-bg-val: #1e3a8a;
+}
+
+/* ── Admin surface: crisper light-mode edges ──────────────────────────────────
+ * The admin dashboard is meant to read as a defined, manager-grade surface, so its
+ * borders/dividers step a shade darker than the staff dashboard's. Scoped to the admin
+ * shell (`.admin-surface` on the layout root) so the staff UI is untouched, and gated on
+ * `html:not(.dark)` because a bare `.admin-surface` rule would set the token on a DIV that
+ * out-cascades the `.dark` value for its own descendants — dragging the light hairline into
+ * dark mode. Dark keeps the global hairline (which already reads well on the dark canvas).
+ */
+html:not(.dark) .admin-surface {
+  --color-hairline: #cbd5e3;
+  --color-hairline-input: #7d93b2;
+}
+
+/* ── Customer QR menu surface ──────────────────────────────────────────────────
+ * The customer site has its own TEAL accent (not the app's indigo) and a set of hardcoded
+ * status colours. Both live here as tokens so the site can have a real dark theme (it follows the
+ * device via ThemeSync) WITHOUT touching light: every `:root`-tier value below is the exact literal
+ * the components used before, and only the `.dark` block changes. Applied via
+ * `className="customer-surface"` on the customer menu root.
+ */
+.customer-surface {
+  --color-primary: #0891b2;
+  --color-primary-deep: #0e7490;
+  --color-primary-soft: #22d3ee;
+  --color-brand-dark: #0b3a47;
+
+  --c-glass: rgba(255, 255, 255, 0.82);        /* sticky header glass */
+  --c-glass-strong: rgba(255, 255, 255, 0.86); /* cart bar glass */
+  --c-hover-border: #d7dee8;                   /* card hover edge */
+  --c-accent-soft: rgba(8, 145, 178, 0.1);     /* teal tint behind icons / selected states */
+
+  --c-ok: #0d9488;      --c-ok-bg: rgba(13, 148, 136, 0.082);   /* available / success */
+  --c-warn: #b45309;    --c-warn-bg: #fff7ed;                   /* preparing / popular */
+  --c-danger: #dc2626;  --c-danger-bg: #fef2f2;                 /* sold out / spicy / rejected */
+  --c-served: #64748b;  --c-served-bg: #f1f5f9;                 /* served / neutral */
+}
+
+.dark .customer-surface {
+  /* Lighter cyan so the accent and its gradients read on the dark canvas. */
+  --color-primary: #22d3ee;
+  --color-primary-deep: #0891b2;
+  --color-primary-soft: #67e8f9;
+  --color-brand-dark: #0b3a47;
+
+  --c-glass: rgba(16, 19, 28, 0.82);
+  --c-glass-strong: rgba(16, 19, 28, 0.86);
+  --c-hover-border: #2a3340;
+  --c-accent-soft: rgba(34, 211, 238, 0.16);
+
+  /* Status colours: brighter foregrounds + 14%-wash backgrounds so no light slab survives. */
+  --c-ok: #2dd4bf;      --c-ok-bg: rgba(45, 212, 191, 0.15);
+  --c-warn: #fbbf24;    --c-warn-bg: rgba(251, 191, 36, 0.14);
+  --c-danger: #f87171;  --c-danger-bg: rgba(248, 113, 113, 0.14);
+  --c-served: #94a3b8;  --c-served-bg: rgba(148, 163, 184, 0.14);
 }
 
 /* ── Base ────────────────────────────────────────────────────── */
@@ -82,4 +347,122 @@ body {
 .tabular {
   font-feature-settings: "tnum";
   letter-spacing: -0.42px;
+}
+
+/* ═══ Native feel ═════════════════════════════════════════════════════════════
+   The tells that give a web app away on a phone are small and almost all of them
+   are defaults you have to switch off. These apply in the browser too — none of
+   them make the website worse — but they are what stop the installed app from
+   feeling like a website in a costume.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+html {
+  /* iOS silently inflates text in landscape unless told not to. On a table map,
+     that reflows the grid. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  /* The grey flash Android paints over anything tappable. No native app does this. */
+  -webkit-tap-highlight-color: transparent;
+  /* Rubber-band scrolling past the end of the page exposes a blank strip above the
+     header — in the browser that strip is browser chrome, but in a standalone app
+     it is nothing, and it looks broken. Also stops a downward drag on the body from
+     triggering the browser's own pull-to-refresh, which would fight ours. */
+  overscroll-behavior-y: none;
+}
+
+/* A 300ms wait before every tap, because the browser is holding out for a possible
+   double-tap-to-zoom. It makes every button feel a beat behind the finger.
+   `manipulation` keeps pinch-zoom (an accessibility affordance we deliberately did
+   NOT disable in the viewport) while dropping the double-tap wait. */
+button,
+a,
+[role="button"],
+input,
+select,
+textarea,
+label {
+  touch-action: manipulation;
+}
+
+/* Long-pressing a button on iOS pops the text-selection loupe and a Copy bubble.
+   Chrome on the floor plan, not on a menu item's name — so this is scoped to
+   controls, and body copy stays selectable. */
+button,
+[role="button"],
+nav,
+header {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Safe areas. Only meaningful because the viewport is `viewport-fit: cover`; on a
+   device with no notch every one of these resolves to 0px, so they are free. */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.h-safe-top {
+  height: env(safe-area-inset-top, 0px);
+}
+
+/* The home-indicator bar on a gesture-nav iPhone sits on top of the last ~34px of
+   the page. Anything scrollable needs to be able to scroll clear of it. */
+.scroll-pb-safe {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+}
+
+@media (display-mode: standalone) {
+
+  /* Installed, so there is no address bar to pull down and no browser to go "back"
+     to. Selecting page furniture with a stray drag is pure noise here. */
+  body {
+    overscroll-behavior: none;
+  }
+}
+
+/* ── Page transitions ─────────────────────────────────────────────────────────
+   A native app moves between screens; a website blinks. This is the cheapest
+   honest version of the former: the incoming screen fades and lifts a few pixels.
+   Deliberately fast (180ms) — a transition a staff member has to WAIT through is
+   worse than none, and these people are mid-service.
+
+   fill-mode is `backwards`, NOT `both`, and that distinction is load-bearing. With
+   `both`, the page RETAINS the final keyframe's transform after the animation ends —
+   and Chrome resolves `transform: none` into the identity matrix `matrix(1,0,0,1,0,0)`,
+   which is a value OTHER THAN the keyword `none`. Any such value makes the element a
+   containing block for `position: fixed` descendants. So every in-page modal (the
+   credit account sheet, for one) stopped resolving `fixed inset-0` against the VIEWPORT
+   and started resolving it against this 2000px-tall page instead — anchoring the modal
+   thousands of pixels off-screen while its backdrop dimmed the page and ate every tap.
+   It read as "the Credits section is frozen," and only on mobile, because a short
+   desktop page hid the displacement. `backwards` keeps the fade-in and the no-flash
+   start but lets `transform` fall back to the keyword `none` once the animation is done,
+   so no containing block lingers.
+   ─────────────────────────────────────────────────────────────────────────── */
+@keyframes rs-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rs-page {
+  animation: rs-page-in 180ms cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rs-page {
+    animation: none;
+  }
 }

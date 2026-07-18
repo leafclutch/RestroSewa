@@ -91,8 +91,8 @@ const ORDER_STATUS_META: Record<
   CustomerOrderStatus,
   { label: string; color: string; bg: string; Icon: React.ComponentType<{ size?: number }> }
 > = {
-  pending: { label: "Preparing", color: "#b45309", bg: "#fff7ed", Icon: ChefHat },
-  served:  { label: "Served",    color: "#64748b", bg: "#f1f5f9", Icon: Receipt },
+  pending: { label: "Preparing", color: "var(--c-warn)", bg: "var(--c-warn-bg)", Icon: ChefHat },
+  served:  { label: "Served",    color: "var(--c-served)", bg: "var(--c-served-bg)", Icon: Receipt },
 };
 
 // Category → glyph. Matched loosely on the category name so any menu gets sensible art.
@@ -159,7 +159,7 @@ function AnimationStyles() {
 .rs-elev { box-shadow: 0 1px 2px rgba(13,37,61,.04), 0 8px 24px rgba(13,37,61,.05) }
 .rs-elev-lg { box-shadow: 0 8px 40px rgba(13,37,61,.14) }
 .rs-card { box-shadow: 0 1px 2px rgba(13,37,61,.04); transition: box-shadow .22s ease, transform .22s ease, border-color .22s ease }
-@media (hover:hover) { .rs-card:hover { box-shadow: 0 10px 30px rgba(13,37,61,.09); transform: translateY(-2px); border-color: #d7dee8 } }
+@media (hover:hover) { .rs-card:hover { box-shadow: 0 10px 30px rgba(13,37,61,.09); transform: translateY(-2px); border-color: var(--c-hover-border) } }
 `,
       }}
     />
@@ -374,7 +374,7 @@ function PinEntry({
         <div className="flex flex-col items-center text-center gap-2 pt-2">
           <div
             className="w-14 h-14 rounded-2xl flex items-center justify-center rs-float"
-            style={{ background: "rgba(8,145,178,0.1)", color: "var(--color-primary)" }}
+            style={{ background: "var(--c-accent-soft)", color: "var(--color-primary)" }}
           >
             <Lock size={24} />
           </div>
@@ -458,7 +458,7 @@ function ToastStack({ toasts, onOpen, onClose }: { toasts: Toast[]; onOpen: (t: 
   // Literal colors — portaled out of the page's scoped CSS-var overrides, so we
   // can't rely on var(--color-primary) here (it would resolve to the global brand).
   const TONES: Record<Toast["tone"], string> = {
-    success: "linear-gradient(135deg,#0d9488,#15b981)",
+    success: "linear-gradient(135deg,var(--c-ok),#15b981)",
     primary: "linear-gradient(135deg,#0891b2,#0e7490)",
     info: "linear-gradient(135deg,#334155,#0f172a)",
   };
@@ -519,7 +519,7 @@ const TIMELINE = [
 
 function OrderTimeline({ status }: { status: CustomerOrderStatus }) {
   const activeIndex = status === "served" ? 2 : 1; // "placed" is always done
-  const accent = status === "served" ? "#0d9488" : "#b45309";
+  const accent = status === "served" ? "var(--c-ok)" : "var(--c-warn)";
   return (
     <div className="flex flex-col gap-0 mt-3">
       {TIMELINE.map((step, i) => {
@@ -572,7 +572,7 @@ function OrdersSheet({
         title="Your orders"
         subtitle={orders.length ? `${orders.length} order${orders.length !== 1 ? "s" : ""} · live status` : "Track your kitchen updates here"}
         onClose={onClose}
-        icon={<span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "rgba(8,145,178,0.1)", color: "var(--color-primary)" }}><Receipt size={18} /></span>}
+        icon={<span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "var(--c-accent-soft)", color: "var(--color-primary)" }}><Receipt size={18} /></span>}
       />
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 flex flex-col gap-3 rs-noscroll">
         {orders.length === 0 ? (
@@ -584,7 +584,7 @@ function OrdersSheet({
             return (
               <div key={o.id} className="rounded-2xl border overflow-hidden rs-pop" style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}>
                 <div className="flex items-center gap-3 px-4 py-3" style={{ background: meta.bg }}>
-                  <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#fff", color: meta.color }}>
+                  <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: "var(--color-canvas)", color: meta.color }}>
                     <meta.Icon size={17} />
                   </span>
                   <div className="flex-1 min-w-0">
@@ -621,7 +621,7 @@ function OrdersSheet({
             onClick={onRequestBill}
             disabled={!!billState}
             className="flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-medium rs-press"
-            style={{ background: billState ? "var(--color-canvas-soft)" : "var(--color-ink)", color: billState ? "var(--color-ink-mute)" : "#fff" }}
+            style={{ background: billState ? "var(--color-canvas-soft)" : "var(--color-ink)", color: billState ? "var(--color-ink-mute)" : "var(--color-canvas)" }}
           >
             <Receipt size={16} />
             {billState === "acknowledged" ? "Bill on the way" : billState === "new" ? "Bill requested" : "Request bill"}
@@ -646,8 +646,8 @@ type NotifEntry = {
 function NotificationCenter({ open, entries, onClose }: { open: boolean; entries: NotifEntry[]; onClose: () => void }) {
   const TONE: Record<NotifEntry["tone"], string> = {
     primary: "var(--color-primary)",
-    success: "#0d9488",
-    warning: "#b45309",
+    success: "var(--c-ok)",
+    warning: "var(--c-warn)",
     neutral: "var(--color-ink-mute)",
   };
   return (
@@ -656,7 +656,7 @@ function NotificationCenter({ open, entries, onClose }: { open: boolean; entries
         title="Notifications"
         subtitle="Order & service updates"
         onClose={onClose}
-        icon={<span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "rgba(8,145,178,0.1)", color: "var(--color-primary)" }}><BellRing size={18} /></span>}
+        icon={<span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "var(--c-accent-soft)", color: "var(--color-primary)" }}><BellRing size={18} /></span>}
       />
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 flex flex-col gap-2 rs-noscroll">
         {entries.length === 0 ? (
@@ -708,7 +708,7 @@ function ActionDialog({
       <div className="px-6 pt-3 pb-7 flex flex-col items-center text-center gap-4">
         {state === "success" ? (
           <>
-            <div className="w-16 h-16 rounded-full flex items-center justify-center rs-check" style={{ background: "#0d948815", color: "#0d9488" }}>
+            <div className="w-16 h-16 rounded-full flex items-center justify-center rs-check" style={{ background: "var(--c-ok-bg)", color: "var(--c-ok)" }}>
               <CheckCircle2 size={34} />
             </div>
             <div>
@@ -802,7 +802,7 @@ function InfoSheet({
             className="flex items-center gap-3 px-4 py-3.5 rounded-2xl text-sm font-medium rs-press"
             style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink)" }}
           >
-            <span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "rgba(8,145,178,0.1)", color: "var(--color-primary)" }}><ConciergeBell size={18} /></span>
+            <span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "var(--c-accent-soft)", color: "var(--color-primary)" }}><ConciergeBell size={18} /></span>
             <span className="flex-1 text-left">
               {isRoom ? "Call staff" : "Call waiter"}
               {callState && <span className="block text-xs" style={{ color: "var(--color-ink-mute)" }}>{callState === "acknowledged" ? "On the way ✓" : "Requested…"}</span>}
@@ -817,7 +817,7 @@ function InfoSheet({
             className="flex items-center gap-3 px-4 py-3.5 rounded-2xl text-sm font-medium rs-press"
             style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink)" }}
           >
-            <span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "#0d948815", color: "#0d9488" }}><Receipt size={18} /></span>
+            <span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "var(--c-ok-bg)", color: "var(--c-ok)" }}><Receipt size={18} /></span>
             <span className="flex-1 text-left">
               Request bill
               {billState && <span className="block text-xs" style={{ color: "var(--color-ink-mute)" }}>{billState === "acknowledged" ? "Being prepared ✓" : "Requested…"}</span>}
@@ -892,7 +892,7 @@ function VariantSheet({
         subtitle="Choose an option"
         onClose={onClose}
         icon={
-          <span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "rgba(8,145,178,0.1)" }}>
+          <span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "var(--c-accent-soft)" }}>
             <DietMark type={item.food_type as FoodKey} size={16} />
           </span>
         }
@@ -907,7 +907,7 @@ function VariantSheet({
               key={v.id}
               className="flex items-center gap-3 p-3 rounded-2xl border"
               style={{
-                background: qty > 0 ? "rgba(8,145,178,0.06)" : "var(--color-canvas-soft)",
+                background: qty > 0 ? "var(--c-accent-soft)" : "var(--color-canvas-soft)",
                 borderColor: qty > 0 ? "var(--color-primary)" : "transparent",
               }}
             >
@@ -961,8 +961,13 @@ function VariantSheet({
         <button
           type="button"
           onClick={onClose}
-          className="w-full py-3.5 rounded-2xl text-sm font-semibold text-white rs-press"
-          style={{ background: chosen > 0 ? "linear-gradient(135deg,var(--color-primary),var(--color-primary-deep))" : "var(--color-ink-mute)" }}
+          className="w-full py-3.5 rounded-2xl text-sm font-semibold rs-press"
+          // White on the gradient; on the neutral "Close" the text is `canvas` so it flips with the
+          // theme (dark text on the light-grey ink-mute in dark, white on the dark ink-mute in light).
+          style={{
+            background: chosen > 0 ? "linear-gradient(135deg,var(--color-primary),var(--color-primary-deep))" : "var(--color-ink-mute)",
+            color: chosen > 0 ? "#fff" : "var(--color-canvas)",
+          }}
         >
           {chosen > 0 ? `Done · ${chosen} added` : "Close"}
         </button>
@@ -1003,7 +1008,7 @@ function ItemCard({
 
   return (
     <div
-      className="relative flex flex-col rounded-3xl border bg-white rs-card p-4 sm:p-5 rs-fade-up"
+      className="relative flex flex-col rounded-3xl border bg-canvas rs-card p-4 sm:p-5 rs-fade-up"
       style={{ borderColor: "var(--color-hairline)", opacity: soldOut ? 0.66 : 1 }}
     >
       {/* Header: name (with inline diet mark) · price */}
@@ -1031,24 +1036,24 @@ function ItemCard({
 
       {/* Badge row */}
       <div className="flex flex-wrap items-center gap-1.5 mt-3">
-        {item.is_featured && !soldOut && <Pill color="#b45309" bg="#fff7ed" Icon={Sparkles}>Popular</Pill>}
-        {spicy && <Pill color="#dc2626" bg="#fef2f2" Icon={Flame}>Spicy</Pill>}
+        {item.is_featured && !soldOut && <Pill color="var(--c-warn)" bg="var(--c-warn-bg)" Icon={Sparkles}>Popular</Pill>}
+        {spicy && <Pill color="var(--c-danger)" bg="var(--c-danger-bg)" Icon={Flame}>Spicy</Pill>}
         {extraBadges.slice(0, 2).map((b) => (
           <Pill key={b} color="var(--color-ink-secondary)" bg="var(--color-canvas-soft)">{b}</Pill>
         ))}
-        {categoryName && <Pill color="var(--color-primary)" bg="rgba(8,145,178,0.08)">{categoryName}</Pill>}
+        {categoryName && <Pill color="var(--color-primary)" bg="var(--c-accent-soft)">{categoryName}</Pill>}
         {item.preparation_time ? <Pill color="var(--color-ink-mute)" bg="var(--color-canvas-soft)" Icon={Clock}>{item.preparation_time} min</Pill> : null}
       </div>
 
       {/* Footer: availability · add */}
       <div className="mt-4 pt-3.5 border-t flex items-center justify-between gap-3" style={{ borderColor: "var(--color-hairline)" }}>
         {soldOut ? (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium" style={{ color: "#dc2626" }}>
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#dc2626" }} /> Sold out
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium" style={{ color: "var(--c-danger)" }}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--c-danger)" }} /> Sold out
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium" style={{ color: "#0d9488" }}>
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#0d9488" }} /> Available
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium" style={{ color: "var(--c-ok)" }}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--c-ok)" }} /> Available
           </span>
         )}
 
@@ -1125,7 +1130,7 @@ function CartDrawer({
         title="Your cart"
         subtitle={`${count} item${count !== 1 ? "s" : ""}`}
         onClose={onClose}
-        icon={<span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "rgba(8,145,178,0.1)", color: "var(--color-primary)" }}><ShoppingBag size={18} /></span>}
+        icon={<span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "var(--c-accent-soft)", color: "var(--color-primary)" }}><ShoppingBag size={18} /></span>}
       />
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 flex flex-col gap-2 rs-noscroll">
         {entries.length === 0 ? (
@@ -1150,7 +1155,7 @@ function CartDrawer({
                     {variant && (
                       <span
                         className="mr-1 px-1.5 py-0.5 rounded-md"
-                        style={{ background: "rgba(8,145,178,0.1)", color: "var(--color-primary)" }}
+                        style={{ background: "var(--c-accent-soft)", color: "var(--color-primary)" }}
                       >
                         {variant.name}
                       </span>
@@ -1237,7 +1242,7 @@ function BottomNav({
   return (
     <nav
       className="fixed bottom-0 left-0 right-0 z-40 lg:hidden"
-      style={{ background: "rgba(255,255,255,0.86)", backdropFilter: "blur(14px)", borderTop: "1px solid var(--color-hairline)", paddingBottom: "env(safe-area-inset-bottom)" }}
+      style={{ background: "var(--c-glass-strong)", backdropFilter: "blur(14px)", borderTop: "1px solid var(--color-hairline)", paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <div className="mx-auto max-w-lg h-16 flex items-stretch relative">
         <Item label="Menu" Icon={Home} onClick={onMenu} />
@@ -1282,8 +1287,8 @@ function ActivationSheet({
         <div
           className="w-16 h-16 rounded-2xl flex items-center justify-center rs-float"
           style={{
-            background: pending ? "rgba(8,145,178,0.12)" : "#fef2f2",
-            color: pending ? "var(--color-primary)" : "#dc2626",
+            background: pending ? "var(--c-accent-soft)" : "var(--c-danger-bg)",
+            color: pending ? "var(--color-primary)" : "var(--c-danger)",
           }}
         >
           {pending ? <Hourglass size={30} /> : <XCircle size={30} />}
@@ -1816,16 +1821,11 @@ export function CustomerMenu({
 
   return (
     <div
-      className="min-h-screen overflow-x-hidden"
-      // Green-blue accent scoped to the customer page only — leaves the rest of the
-      // app's indigo brand (--color-primary) untouched. Cyan primary + teal success.
-      style={{
-        background: "var(--color-canvas-soft)",
-        "--color-primary": "#0891b2",
-        "--color-primary-deep": "#0e7490",
-        "--color-primary-soft": "#22d3ee",
-        "--color-brand-dark": "#0b3a47",
-      } as React.CSSProperties}
+      // `customer-surface` scopes the site's teal accent + status palette (globals.css) to the
+      // customer page only — leaving the app's indigo brand untouched — and carries the DARK
+      // overrides, so the menu can follow the device into dark mode without touching light.
+      className="customer-surface min-h-screen overflow-x-hidden"
+      style={{ background: "var(--color-canvas-soft)" }}
     >
       <AnimationStyles />
 
@@ -1863,7 +1863,7 @@ export function CustomerMenu({
       {/* Header */}
       <header
         className="sticky top-0 z-40"
-        style={{ background: "rgba(255,255,255,0.82)", backdropFilter: "blur(16px)", borderBottom: "1px solid var(--color-hairline)" }}
+        style={{ background: "var(--c-glass)", backdropFilter: "blur(16px)", borderBottom: "1px solid var(--color-hairline)" }}
       >
         <div className="mx-auto max-w-6xl px-4 py-3 flex items-center gap-3">
           <RestaurantLogo name={restaurantName} logoUrl={restaurantLogo} size={38} priority />
@@ -1945,16 +1945,16 @@ export function CustomerMenu({
             className="mt-4 w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-left rs-press rs-fade"
             style={
               activationStatus === "pending"
-                ? { background: "rgba(8,145,178,0.08)", border: "1px solid rgba(8,145,178,0.3)" }
-                : { background: "#fef2f2", border: "1px solid #dc262633" }
+                ? { background: "var(--c-accent-soft)", border: "1px solid rgba(8,145,178,0.3)" }
+                : { background: "var(--c-danger-bg)", border: "1px solid color-mix(in srgb, var(--c-danger) 20%, transparent)" }
             }
           >
             <span
               className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
               style={
                 activationStatus === "pending"
-                  ? { background: "rgba(8,145,178,0.14)", color: "var(--color-primary)" }
-                  : { background: "#fee2e2", color: "#dc2626" }
+                  ? { background: "var(--c-accent-soft)", color: "var(--color-primary)" }
+                  : { background: "var(--c-danger-bg)", color: "var(--c-danger)" }
               }
             >
               {activationStatus === "pending" ? <Hourglass size={17} /> : <XCircle size={17} />}
@@ -2047,7 +2047,9 @@ export function CustomerMenu({
                     className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl whitespace-nowrap shrink-0 text-sm rs-press"
                     style={{
                       background: active ? "var(--color-ink)" : "var(--color-canvas)",
-                      color: active ? "#fff" : "var(--color-ink-secondary)",
+                      // #fff → canvas so the chip INVERTS cleanly: dark chip + light text in light,
+                      // light chip + dark text in dark (both flip together with the theme).
+                      color: active ? "var(--color-canvas)" : "var(--color-ink-secondary)",
                       border: `1px solid ${active ? "var(--color-ink)" : "var(--color-hairline)"}`,
                       fontWeight: active ? 500 : 400,
                       boxShadow: active ? "0 6px 16px rgba(13,37,61,0.18)" : "none",
@@ -2055,7 +2057,7 @@ export function CustomerMenu({
                   >
                     <CatIcon size={15} />
                     {c.name}
-                    <span className="text-[11px] px-1.5 rounded-full" style={{ background: active ? "rgba(255,255,255,0.2)" : "var(--color-canvas-soft)", color: active ? "#fff" : "var(--color-ink-mute)" }}>
+                    <span className="text-[11px] px-1.5 rounded-full" style={{ background: active ? "color-mix(in srgb, var(--color-canvas) 22%, transparent)" : "var(--color-canvas-soft)", color: active ? "var(--color-canvas)" : "var(--color-ink-mute)" }}>
                       {count}
                     </span>
                   </button>
@@ -2178,7 +2180,7 @@ export function CustomerMenu({
 
       {orderSuccess && !showCartBar && (
         <div className="fixed left-0 right-0 z-40 px-4 lg:hidden" style={{ bottom: `calc(72px + env(safe-area-inset-bottom))` }}>
-          <div className="mx-auto max-w-lg flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-white rs-slide-up" style={{ background: "linear-gradient(135deg,#0d9488,#15b981)" }}>
+          <div className="mx-auto max-w-lg flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-white rs-slide-up" style={{ background: "linear-gradient(135deg,var(--c-ok),#15b981)" }}>
             <CheckCircle2 size={17} /> <span className="text-sm font-medium">Order placed — we&apos;re on it</span>
           </div>
         </div>
@@ -2262,7 +2264,7 @@ export function CustomerMenu({
           title="Request your bill?"
           message={billDialog === "success" ? "Your bill request has been sent." : `We'll ask ${isRoom ? "the front desk" : "your waiter"} to bring the bill to ${locationLabel ?? "your seat"}.`}
           confirmLabel="Request bill"
-          tone="#0d9488"
+          tone="var(--c-ok)"
           Icon={Receipt}
           state={billDialog}
           onConfirm={() => runServiceRequest("request_bill")}

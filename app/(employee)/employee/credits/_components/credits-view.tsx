@@ -1,5 +1,6 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { useActionState, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import {
   addCreditPayment,
@@ -81,8 +82,8 @@ function CustomerCard({
       onClick={onOpen}
       className="w-full rounded-xl border px-4 py-3 text-left transition-colors"
       style={{
-        background: highlight ? "#fff7ed" : "var(--color-canvas)",
-        borderColor: highlight ? "#f97316" : "var(--color-hairline)",
+        background: highlight ? "var(--color-warning-bg)" : "var(--color-canvas)",
+        borderColor: highlight ? "var(--color-warning)" : "var(--color-hairline)",
         borderWidth: highlight ? 1.5 : 1,
         opacity: settled && !highlight ? 0.7 : 1,
       }}
@@ -145,6 +146,11 @@ function CustomerDetailModal({
   const [method, setMethod] = useState("cash");
   const [state, action, pending] = useActionState<ActionResult, FormData>(addCreditPayment, null);
 
+  // The modal is portaled to <body> (see the return). `document` doesn't exist during
+  // SSR, and createPortal must run only after mount, so gate on this.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const load = useCallback(async () => {
     const res = await getCreditDetail(customerId);
     if ("error" in res) setLoadError(res.error);
@@ -171,7 +177,17 @@ function CustomerDetailModal({
   const amountNum = parseFloat(amount) || 0;
   const amountValid = amountNum > 0 && amountNum <= balance + 0.005;
 
-  return (
+  if (!mounted) return null;
+
+  // Portaled to <body>, NOT rendered inline. A modal that stays in the page tree is a
+  // hostage to every ancestor: any one of them with a `transform` (the .rs-page entry
+  // animation, a pull-to-refresh drag), a `filter`, or `contain` becomes the containing
+  // block for this `position: fixed`, and the modal anchors to THAT box instead of the
+  // viewport — landing off-screen while its backdrop still dims the page. That is exactly
+  // the "only the dimmed overlay shows, the dialog is missing" bug. At <body> there is no
+  // such ancestor, so `fixed inset-0` always means the viewport. The React tree is
+  // unchanged (state, the payment form, onClose all live here); only the DOM host moves.
+  return createPortal(
     <div
       className="fixed inset-0 z-[70] flex items-start sm:items-center justify-center overflow-y-auto"
       style={{ background: "rgba(13,37,61,0.45)" }}
@@ -202,7 +218,7 @@ function CustomerDetailModal({
 
         <div className="px-4 py-4 max-h-[75vh] overflow-y-auto flex flex-col gap-4">
           {loadError && (
-            <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+            <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
               {loadError}
             </p>
           )}
@@ -219,8 +235,8 @@ function CustomerDetailModal({
               <div
                 className="rounded-xl border px-4 py-3 flex flex-col gap-1.5"
                 style={{
-                  background: settled ? "#f0fdf4" : "#fff7ed",
-                  borderColor: settled ? "#1a7a4a44" : "#f9731644",
+                  background: settled ? "var(--color-success-bg)" : "var(--color-warning-bg)",
+                  borderColor: settled ? "color-mix(in srgb, var(--color-success) 27%, transparent)" : "color-mix(in srgb, var(--color-warning) 27%, transparent)",
                 }}
               >
                 <div className="flex items-center justify-between text-sm">
@@ -237,14 +253,14 @@ function CustomerDetailModal({
                 </div>
                 <div
                   className="flex items-center justify-between pt-1.5 border-t"
-                  style={{ borderColor: settled ? "#1a7a4a22" : "#f9731633" }}
+                  style={{ borderColor: settled ? "color-mix(in srgb, var(--color-success) 13%, transparent)" : "color-mix(in srgb, var(--color-warning) 20%, transparent)" }}
                 >
                   <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
                     {settled ? "Settled" : "Outstanding"}
                   </span>
                   <span
                     className="text-lg font-medium tabular-nums"
-                    style={{ color: settled ? "#1a7a4a" : "#9a3412" }}
+                    style={{ color: settled ? "var(--color-success)" : "#9a3412" }}
                   >
                     {money2(detail.balance)}
                   </span>
@@ -367,7 +383,7 @@ function CustomerDetailModal({
                   {state?.error && (
                     <p
                       className="text-sm rounded-md px-3 py-2"
-                      style={{ color: "var(--color-ruby)", background: "#fff0f4" }}
+                      style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}
                     >
                       {state.error}
                     </p>
@@ -473,7 +489,7 @@ function CustomerDetailModal({
                             </p>
                           )}
                         </div>
-                        <p className="text-sm font-medium tabular-nums shrink-0" style={{ color: "#1a7a4a" }}>
+                        <p className="text-sm font-medium tabular-nums shrink-0" style={{ color: "var(--color-success)" }}>
                           {money2(p.amount)}
                         </p>
                       </div>
@@ -487,7 +503,8 @@ function CustomerDetailModal({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -601,9 +618,11 @@ export function CreditsView({
               type="button"
               onClick={() => setStatus(f.key)}
               className="shrink-0 text-sm px-3 py-1.5 rounded-full border transition-colors"
+              // Selected filter → Credits' indigo. Constant indigo FILL (not the flipping accent),
+              // so the white label stays readable in dark where the accent goes light.
               style={{
-                borderColor: active ? "var(--color-primary)" : "var(--color-hairline)",
-                background: active ? "var(--color-primary)" : "var(--color-canvas)",
+                borderColor: active ? "var(--fill-indigo)" : "var(--color-hairline)",
+                background: active ? "var(--fill-indigo)" : "var(--color-canvas)",
                 color: active ? "#fff" : "var(--color-ink)",
               }}
             >

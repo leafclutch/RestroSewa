@@ -1,8 +1,10 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionDetail } from "@/app/actions/pos";
+import { walkInLabel } from "@/lib/walk-ins";
+import { getWorkstations } from "@/app/actions/workstations";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
-import { hasPermission, NAV_ACCESS, PERMISSIONS } from "@/lib/permissions";
+import { hasPermission, hasAnyPermission, NAV_ACCESS, PERMISSIONS } from "@/lib/permissions";
 import { buildVisibilityFilter } from "@/lib/assignments";
 import { createServiceClient } from "@/lib/supabase/service";
 import { SessionClient } from "./_components/session-client";
@@ -53,6 +55,14 @@ export default async function SessionPage({
 
   const canCreateOrders = hasPermission(restaurantUser, PERMISSIONS.CREATE_ORDERS);
   const canCloseBills   = hasPermission(restaurantUser, PERMISSIONS.CLOSE_BILLS);
+  // KOT/BOT printing is a billing/order-management action — Cashier / Receptionist,
+  // NOT a waiter. It used to be gated on CREATE_ORDERS, which waiters hold, so any
+  // waiter could print kitchen tickets. Billing permissions are the ones only
+  // Cashier / Receptionist / Manager carry.
+  const canPrintTickets = hasAnyPermission(restaurantUser, [
+    PERMISSIONS.PROCESS_PAYMENTS,
+    PERMISSIONS.CLOSE_BILLS,
+  ]);
   const canForceClose   =
     hasPermission(restaurantUser, PERMISSIONS.CLOSE_BILLS) ||
     hasPermission(restaurantUser, PERMISSIONS.MANAGE_TABLES);
@@ -66,29 +76,44 @@ export default async function SessionPage({
   // Everyone who can view the session can also see its ordering PIN.
   const canSeePIN = canView;
 
-  // Restaurant header details for the KOT / Bill tickets.
+  // Restaurant header details for the KOT / Bill tickets, plus the station list so a
+  // ticket can sort each item onto the KOT (kitchen) or the BOT (bar).
   const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: rest } = await (service as any)
-    .from("restaurants")
-    .select("name, address, contact_phone, pan_vat_number, settings")
-    .eq("id", restaurantUser.restaurant_id)
-    .maybeSingle();
+  const [{ data: rest }, workstations] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("restaurants")
+      .select("name, address, contact_phone, pan_vat_number, logo_url, settings, discount_pin_hash")
+      .eq("id", restaurantUser.restaurant_id)
+      .maybeSingle(),
+    getWorkstations(restaurantUser.restaurant_id),
+  ]);
 
   const restaurant: RestaurantInfo = {
     name: rest?.name ?? "Restaurant",
     address: rest?.address ?? null,
     contact_phone: rest?.contact_phone ?? null,
     pan_vat_number: rest?.pan_vat_number ?? null,
+    logo_url: rest?.logo_url ?? null,
+    paper_width_mm: rest?.settings?.print_paper_width === "58" ? 58 : 80,
+    bill_number_pad: Number.isFinite(Number(rest?.settings?.bill_number_pad)) ? Number(rest?.settings?.bill_number_pad) : 0,
+    bill_number_label: rest?.settings?.bill_number_label === "order" ? "order" : "bill",
     tax_percent: numFromSettings(rest?.settings, "tax_percent", "tax_rate", "gst_percent"),
     service_charge_percent: numFromSettings(rest?.settings, "service_charge_percent", "service_charge"),
   };
+
+  // Discounts exist only where an admin has set a discount PIN. Collapsed to a boolean here
+  // so the hash never crosses to the client; the PIN itself is still checked server-side at
+  // payment, so this only decides whether the field is worth showing.
+  const discountEnabled = !!rest?.discount_pin_hash;
 
   const label =
     session.type === "table" && session.table_number
       ? `Table ${session.table_number}`
       : session.type === "walk_in"
-      ? "Walk-in"
+      ? session.walk_in_no
+        ? `Walk-in ${walkInLabel(session.walk_in_no)}`
+        : "Walk-in"
       : session.type === "room_service"
       ? "Room service"
       : "Session";
@@ -114,9 +139,9 @@ export default async function SessionPage({
         <span
           className="text-xs px-2 py-0.5 rounded-full border"
           style={{
-            color: session.status === "active" ? "#1a7a4a" : "var(--color-ink-mute)",
-            borderColor: session.status === "active" ? "#1a7a4a44" : "var(--color-hairline)",
-            background: session.status === "active" ? "#f0fdf4" : "transparent",
+            color: session.status === "active" ? "var(--color-success)" : "var(--color-ink-mute)",
+            borderColor: session.status === "active" ? "color-mix(in srgb, var(--color-success) 27%, transparent)" : "var(--color-hairline)",
+            background: session.status === "active" ? "var(--color-success-bg)" : "transparent",
           }}
         >
           {session.status}
@@ -127,12 +152,15 @@ export default async function SessionPage({
         session={session}
         restaurant={restaurant}
         staffName={restaurantUser.display_name}
+        workstations={workstations}
         canCreateOrders={canCreateOrders}
         canCloseBills={canCloseBills}
+        canPrintTickets={canPrintTickets}
         canForceClose={canForceClose}
         canSeePIN={canSeePIN}
         canUseCredit={canUseCredit}
         canCancelOrders={canCancelOrders}
+        discountEnabled={discountEnabled}
       />
     </div>
   );

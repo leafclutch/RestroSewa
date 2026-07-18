@@ -8,7 +8,11 @@ import {
 } from "@/app/actions/notifications";
 import type { NotificationRow } from "@/app/actions/notifications";
 import { approveTableActivation, rejectTableActivation } from "@/app/actions/pos";
+import { getMutedCategories } from "@/app/actions/push";
+import type { NotificationCategory } from "@/lib/push/categories";
 import { useRealtime } from "@/lib/realtime/use-realtime";
+import { PushPrompt } from "@/components/pwa/push-prompt";
+import { NotificationPreferences } from "@/components/pwa/notification-preferences";
 import { formatTime } from "@/lib/format-time";
 import { ArrowDown, Bell, Check, CheckCheck, DoorOpen, Loader2, UtensilsCrossed, X } from "lucide-react";
 
@@ -206,6 +210,17 @@ export function NotificationBell({ initialCount = 0 }: { initialCount?: number }
   const bellRef = useRef<HTMLButtonElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
+  // The per-account mute preferences used to live on the standalone /notifications
+  // page. That page is gone — folded into this dropdown — so the toggles are fetched
+  // here, once, and shown under the push prompt. Null until they load.
+  const [muted, setMuted] = useState<NotificationCategory[] | null>(null);
+
+  // A tapped push deep-links in and opens the panel on purpose. The very first poll
+  // can land a moment later and, finding the backlog empty (the request was already
+  // cleared, or is still propagating), would otherwise slam the panel straight back
+  // shut. This grants that deliberate open a one-time reprieve from the empty-close.
+  const keepOpenOnce = useRef(false);
+
   // Arrivals the staff member has not scrolled down to yet. Held as ids, not a
   // number, so that acting on one (it leaves `items`) also takes it off the
   // counter — a tally would drift.
@@ -270,8 +285,16 @@ export function NotificationBell({ initialCount = 0 }: { initialCount?: number }
         seenIds.current = new Set(freshIds);
       }
 
-      // Nothing left to act on: close the panel rather than leave an empty one.
-      if (next.length === 0) setOpen(false);
+      // Nothing left to act on: close the panel rather than leave an empty one —
+      // unless a deep link just opened it deliberately, which earns one reprieve.
+      if (next.length === 0) {
+        if (keepOpenOnce.current) keepOpenOnce.current = false;
+        else setOpen(false);
+      } else {
+        // Real items arrived: the arrival is over, so the reprieve has served its
+        // purpose and shouldn't linger to block a legitimate close after acting.
+        keepOpenOnce.current = false;
+      }
     } catch {
       // transient network / auth hiccup — keep the last known state
     }
@@ -286,6 +309,26 @@ export function NotificationBell({ initialCount = 0 }: { initialCount?: number }
     const iv = setInterval(poll, FALLBACK_POLL_MS);
     return () => clearInterval(iv);
   }, [poll]);
+
+  // Load the mute preferences once, for the settings strip inside the panel.
+  useEffect(() => {
+    getMutedCategories().then(setMuted).catch(() => {});
+  }, []);
+
+  // A tapped push lands the app on /employee/dashboard?focus=notifications — the
+  // whole point of the deep link is that the request is waiting right here, so open
+  // the panel to it. Then strip the param via the History API (not the router, which
+  // would re-render the server tree) so a pull-to-refresh or a back-tap doesn't keep
+  // springing the panel open again.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("focus") === "notifications") {
+      setOpen(true);
+      keepOpenOnce.current = true;
+      url.searchParams.delete("focus");
+      window.history.replaceState(null, "", url.pathname + url.search);
+    }
+  }, []);
 
   // ── Where a fresh open leaves us ────────────────────────────────────────────
   // Declared BEFORE the arrivals effect on purpose: effects run in order, so this
@@ -468,6 +511,19 @@ export function NotificationBell({ initialCount = 0 }: { initialCount?: number }
               </button>
             </div>
 
+            {/* The switch that decides whether this phone rings when the app is shut.
+                It belongs HERE, and its absence here was the bug: it used to live only
+                on the /employee/notifications page, which staff never open — they tap
+                the bell. So the one control that made the whole push system work sat
+                on a screen nobody visited, and in production not a single device was
+                ever subscribed. It puts itself in front of the person who needs it. */}
+            <PushPrompt />
+
+            {/* Per-account mute preferences — collapsed by default, so it's a single
+                header row until tapped. Also relocated here from the retired settings
+                page, so "what am I alerted about" lives where the alerts do. */}
+            {muted !== null && <NotificationPreferences muted={muted} embedded />}
+
             {/* The scroll viewport. `min-h-0` is what lets a flex child actually be
                 shorter than its content — without it the panel grows past its own
                 max-height and the browser compresses the cards instead. */}
@@ -508,7 +564,7 @@ export function NotificationBell({ initialCount = 0 }: { initialCount?: number }
                   type="button"
                   onClick={jumpToLatest}
                   className="notif-jump absolute left-1/2 bottom-3 -translate-x-1/2 flex items-center gap-1.5 min-h-[36px] px-3.5 rounded-full text-xs font-medium shadow-lg"
-                  style={{ background: "#0d253d", color: "#fff" }}
+                  style={{ background: "var(--color-ink)", color: "var(--color-canvas)" }}
                 >
                   <ArrowDown size={13} />
                   {pendingBelow} new notification{pendingBelow > 1 ? "s" : ""}
@@ -541,11 +597,11 @@ export function NotificationBell({ initialCount = 0 }: { initialCount?: number }
 .notif-scroll {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
-  scrollbar-color: rgba(13,37,61,0.25) transparent;
+  scrollbar-color: rgba(156,163,175,0.25) transparent;
 }
 .notif-scroll::-webkit-scrollbar { width: 6px; }
 .notif-scroll::-webkit-scrollbar-thumb {
-  background: rgba(13,37,61,0.22);
+  background: rgba(156,163,175,0.25);
   border-radius: 999px;
 }
 .notif-scroll::-webkit-scrollbar-track { background: transparent; }

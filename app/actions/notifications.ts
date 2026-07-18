@@ -2,7 +2,7 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
-import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignments";
+import { buildVisibilityFilter, getAssignedWorkstationIds, canSeeNotification } from "@/lib/assignments";
 import type { StaffViewer } from "@/lib/assignments";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 
@@ -55,30 +55,35 @@ export async function getActiveNotifications(
 
   if (!data) return [];
 
-  // Only actionable, staff-facing events belong here. `new_order` is an
-  // operational event surfaced in the Orders queue, and `order_ready` is a
-  // customer-facing alert — both are excluded (defensive filter also drops any
-  // legacy `new_order` rows written before this change).
-  const PANEL_EXCLUDED = new Set(["new_order", "order_ready"]);
+  // The panel is a QUEUE OF THINGS TO ACKNOWLEDGE — a guest is waiting on each one.
+  // Everything below is an FYI instead: it happened, nobody has to accept it, and a
+  // row you can only tick off is a row that wastes the staff member's time.
+  //
+  // They still exist as notification rows, and they still ring phones. That is not a
+  // contradiction: "should this appear in a list?" and "is this worth waking someone
+  // for?" are different questions and are allowed different answers. A chef with
+  // their hands full needs the buzz; nobody needs a list of every order ever placed.
+  const PANEL_EXCLUDED = new Set([
+    "new_order",
+    "order_cancelled",
+    "payment_received",
+    "order_ready", // legacy; nothing writes these any more
+  ]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const staffData = (data as any[]).filter((n) => !PANEL_EXCLUDED.has(n.type));
   if (staffData.length === 0) return [];
 
   const visibility = await buildVisibilityFilter(restaurantId, viewer);
   const myWorkstations = await getAssignedWorkstationIds(viewer.id);
-  const isWorkstationStaff = !visibility.seesAll && myWorkstations.size > 0;
 
-  // Pure workstation staff (kitchen/bar/bakery) work the Orders queue, not
-  // front-of-house service calls / activation requests — so no actionable
-  // notifications route to them. Everyone else gets table-group-routed events.
+  // The routing rule now lives in lib/assignments.ts, because web push needs the
+  // same one read backwards (given a notification, who should be woken?). Two copies
+  // of it would eventually disagree, and the day they did, a push would ring on a
+  // phone whose owner cannot open the screen it points at.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: any[] = isWorkstationStaff
-    ? []
-    : staffData.filter(
-        (n) =>
-          visibility.seesAll ||
-          (visibility.canSeeTable(n.table_id) && visibility.canSeeRoom(n.room_id))
-      );
+  const rows: any[] = staffData.filter((n) =>
+    canSeeNotification(visibility, myWorkstations.size, n)
+  );
 
   // Attach an order summary to activation requests so the staff card can show
   // what's being ordered before they Accept/Reject.

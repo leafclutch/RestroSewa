@@ -100,9 +100,11 @@ function StatTile({
       onClick={onClick}
       disabled={!clickable}
       className="rounded-xl border px-4 py-3 text-left transition-colors disabled:cursor-default"
+      // The selected period wears Sales' green. Constant green FILL (not the flipping accent):
+      // in dark the accent goes light-green and the white text on this tile can't sit on it.
       style={{
-        background: active ? "var(--color-primary)" : "var(--color-canvas)",
-        borderColor: active ? "var(--color-primary)" : "var(--color-hairline)",
+        background: active ? "var(--fill-green)" : "var(--color-canvas)",
+        borderColor: active ? "var(--fill-green)" : "var(--color-hairline)",
       }}
     >
       <p className="text-xs mb-1" style={{ color: active ? "rgba(255,255,255,0.75)" : "var(--color-ink-mute)" }}>
@@ -370,6 +372,11 @@ export function SalesView({ initial, embedded = false }: { initial: SalesReport;
         <StatTile label={`Sales · ${PERIOD_LABEL[report.period]}`} value={money(report.periodTotal)} />
         <StatTile label="Number of Orders" value={String(report.orderCount)} />
         <StatTile label="Avg. Order Value" value={money(report.avgOrderValue)} />
+        {/* Sales above is already net of this — it's shown so a manager can see how much
+            was given away, not so it can be added back on. */}
+        {report.discountsTotal > 0 && (
+          <StatTile label="Discounts Given" value={money(report.discountsTotal)} />
+        )}
       </div>
 
       {/* Payment method breakdown */}

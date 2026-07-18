@@ -116,7 +116,7 @@ export function StockFinanceOverview({ data }: { data: DashboardAnalytics }) {
               hint="Billed, credit included"
               href="/admin/finance"
               icon={TrendingUp}
-              tone="#1a7a4a"
+              tone="var(--color-success)"
             />
             <Card
               label="Today's purchases"
@@ -129,10 +129,10 @@ export function StockFinanceOverview({ data }: { data: DashboardAnalytics }) {
               label="Today's profit (est.)"
               value={money(stats.estimatedProfit)}
               hint={profitHint}
-              hintTone={untracked > 0.5 ? "#9a3412" : undefined}
+              hintTone={untracked > 0.5 ? "var(--color-warning)" : undefined}
               href="/admin/finance"
               icon={Coins}
-              tone={stats.estimatedProfit >= 0 ? "#1a7a4a" : "#dc2626"}
+              tone={stats.estimatedProfit >= 0 ? "var(--color-success)" : "var(--color-danger)"}
             />
             <Card
               label="Customers owe us"
@@ -140,7 +140,7 @@ export function StockFinanceOverview({ data }: { data: DashboardAnalytics }) {
               hint="Outstanding customer credit"
               href="/admin/finance"
               icon={HandCoins}
-              tone={stats.customerCreditOutstanding > 0 ? "#dc2626" : undefined}
+              tone={stats.customerCreditOutstanding > 0 ? "var(--color-danger)" : undefined}
             />
             <Card
               label="We owe vendors"
@@ -148,7 +148,7 @@ export function StockFinanceOverview({ data }: { data: DashboardAnalytics }) {
               hint="Outstanding vendor credit"
               href="/admin/vendors"
               icon={Truck}
-              tone={stats.vendorCreditOutstanding > 0 ? "#dc2626" : undefined}
+              tone={stats.vendorCreditOutstanding > 0 ? "var(--color-danger)" : undefined}
             />
           </>
         )}
@@ -159,7 +159,7 @@ export function StockFinanceOverview({ data }: { data: DashboardAnalytics }) {
           hint={stats.lowCount > 0 ? "Running out soon" : "Nothing running low"}
           href="/admin/stock"
           icon={TriangleAlert}
-          tone={stats.lowCount > 0 ? "#f97316" : undefined}
+          tone={stats.lowCount > 0 ? "var(--color-warning)" : undefined}
         />
         <Card
           label="Out of stock"
@@ -167,7 +167,7 @@ export function StockFinanceOverview({ data }: { data: DashboardAnalytics }) {
           hint={stats.outCount > 0 ? "Reorder now" : "Everything in stock"}
           href="/admin/stock"
           icon={PackageX}
-          tone={stats.outCount > 0 ? "#dc2626" : undefined}
+          tone={stats.outCount > 0 ? "var(--color-danger)" : undefined}
         />
       </div>
 
@@ -205,8 +205,8 @@ export function StockFinanceOverview({ data }: { data: DashboardAnalytics }) {
                 <div className="text-right shrink-0">
                   <p className="text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>{money(p.total_amount)}</p>
                   <p
-                    className="text-[10px] uppercase tracking-wide"
-                    style={{ color: p.credit_amount > 0 ? "#f97316" : "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+                    className="text-xs uppercase tracking-wide font-medium"
+                    style={{ color: p.credit_amount > 0 ? "var(--color-warning)" : "var(--color-ink-mute)", letterSpacing: "0.06em" }}
                   >
                     {p.credit_amount > 0 ? "On credit" : METHOD_LABEL[p.method] ?? p.method}
                   </p>
@@ -248,8 +248,8 @@ export function StockFinanceOverview({ data }: { data: DashboardAnalytics }) {
                   <div className="text-right shrink-0">
                     <p className="text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>{money(s.amount)}</p>
                     <p
-                      className="text-[10px] uppercase tracking-wide"
-                      style={{ color: s.onCredit ? "#f97316" : "#1a7a4a", letterSpacing: "0.06em" }}
+                      className="text-xs uppercase tracking-wide font-medium"
+                      style={{ color: s.onCredit ? "var(--color-warning)" : "var(--color-success)", letterSpacing: "0.06em" }}
                     >
                       {s.onCredit ? "On credit" : METHOD_LABEL[s.method] ?? s.method}
                     </p>

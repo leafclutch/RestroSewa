@@ -15,12 +15,14 @@ import {
   Package,
   ShoppingCart,
   Wallet,
+  Settings,
   LogOut,
   Menu,
   X,
 } from "lucide-react";
 import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import { PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 type NavItem = {
   label: string;
@@ -54,6 +56,9 @@ const stockNavFor = (canSeeStock: boolean, canSeeFinance: boolean) =>
   STOCK_NAV.filter((i) =>
     i.financeOnly ? canSeeFinance : canSeeStock
   );
+
+// Owner-only: billing details (PAN, bill numbering) that print on every bill.
+const SETTINGS_ITEM: NavItem = { label: "Settings", href: "/admin/settings", icon: Settings, exact: false };
 
 const isActive = (pathname: string, item: NavItem) =>
   item.exact ? pathname === item.href : pathname.startsWith(item.href);
@@ -93,7 +98,7 @@ function NavLink({
         fontWeight: active ? 400 : 300,
       }}
     >
-      <Icon size={15} strokeWidth={1.5} />
+      <Icon size={16} strokeWidth={1.75} />
       <span className={rail ? "hidden lg:inline" : undefined}>{item.label}</span>
     </Link>
   );
@@ -103,19 +108,22 @@ function NavLinks({
   pathname,
   showStock,
   showFinance,
+  showSettings,
   rail = false,
   onNavigate,
 }: {
   pathname: string;
   showStock: boolean;
   showFinance: boolean;
+  showSettings: boolean;
   rail?: boolean;
   onNavigate?: () => void;
 }) {
   const stockItems = stockNavFor(showStock, showFinance);
+  const baseItems = showSettings ? [...NAV, SETTINGS_ITEM] : NAV;
   return (
     <>
-      {NAV.map((item) => (
+      {baseItems.map((item) => (
         <NavLink key={item.href} item={item} pathname={pathname} rail={rail} onNavigate={onNavigate} />
       ))}
 
@@ -131,10 +139,10 @@ function NavLinks({
           )}
           <p
             className={
-              "px-3 pt-4 pb-1 text-[10px] uppercase tracking-wide " +
+              "px-3 pt-4 pb-1 text-xs uppercase tracking-wide " +
               (rail ? "hidden lg:block" : "")
             }
-            style={{ color: "rgba(255,255,255,0.3)", letterSpacing: "0.08em" }}
+            style={{ color: "rgba(255,255,255,0.4)", letterSpacing: "0.08em" }}
           >
             Stock &amp; Finance
           </p>
@@ -152,11 +160,13 @@ export function AdminSidebar({
   restaurantLogo = null,
   showStock = false,
   showFinance = false,
+  showSettings = false,
 }: {
   restaurantName: string;
   restaurantLogo?: string | null;
   showStock?: boolean;
   showFinance?: boolean;
+  showSettings?: boolean;
 }) {
   const pathname = usePathname();
   const [logoutPending, startLogout] = useTransition();
@@ -186,9 +196,17 @@ export function AdminSidebar({
           sidebar at lg. */}
       <aside
         className="w-16 lg:w-52 shrink-0 hidden md:flex flex-col sticky top-0 h-screen"
-        style={{ background: "var(--color-brand-dark)" }}
+        // The right edge + soft shadow give the sidebar a plane of its own. In dark the bar
+        // (#090a0f) and the content (#07080d) are almost the same near-black and otherwise blend
+        // into one surface; the hairline and shadow are what tell them apart. In light the blue bar
+        // already separates, and these just firm the seam.
+        style={{
+          background: "var(--color-brand-dark)",
+          borderRight: "1px solid var(--color-hairline)",
+          boxShadow: "1px 0 0 rgba(0,0,0,0.04), 4px 0 16px rgba(0,0,0,0.06)",
+        }}
       >
-        {/* The RESTAURANT leads — this is their dashboard. RestroSewa stays as the
+        {/* The RESTAURANT leads — this is their dashboard. HRestroSewa stays as the
             quiet platform mark beneath it. Both the name and the platform mark are
             dropped on the rail: the logo alone still identifies it, and the
             wordmark would only wrap. */}
@@ -215,20 +233,24 @@ export function AdminSidebar({
         {/* The nav itself scrolls if it ever outgrows the viewport, so Sign out
             can never be pushed off-screen. */}
         <nav className="flex-1 min-h-0 overflow-y-auto px-2 lg:px-3 py-4 flex flex-col gap-0.5">
-          <NavLinks pathname={pathname} showStock={showStock} showFinance={showFinance} rail />
+          <NavLinks pathname={pathname} showStock={showStock} showFinance={showFinance} showSettings={showSettings} rail />
         </nav>
 
         <div
-          className="px-2 lg:px-3 py-4 border-t shrink-0"
+          className="px-2 lg:px-3 py-4 border-t shrink-0 flex flex-col gap-2.5"
           style={{ borderColor: "rgba(255,255,255,0.08)" }}
         >
+          <div className="flex items-center justify-center lg:justify-between px-0 lg:px-3 w-full">
+            <span className="hidden lg:inline text-xs text-white/40 uppercase tracking-wider font-light">Theme</span>
+            <ThemeToggle />
+          </div>
           <button
             type="button"
             disabled={logoutPending}
             onClick={handleLogout}
             aria-label="Sign out"
             title="Sign out"
-            className="flex items-center justify-center lg:justify-start gap-2.5 px-0 lg:px-3 py-2 rounded-lg text-sm w-full"
+            className="flex items-center justify-center lg:justify-start gap-2.5 px-0 lg:px-3 py-2 rounded-lg text-sm w-full transition-colors hover:bg-white/5"
             style={{ color: "rgba(255,255,255,0.4)" }}
           >
             <LogOut size={15} strokeWidth={1.5} />
@@ -236,7 +258,9 @@ export function AdminSidebar({
               {logoutPending ? "Signing out…" : "Sign out"}
             </span>
           </button>
-          <PoweredBy height={14} tone="light" className="hidden lg:block px-3 pt-3" />
+          {/* self-start: the foot is a flex-col, which would otherwise stretch the sticker to a
+              full-width white bar. lg:inline-flex (not lg:block) keeps "Powered by" + logo on one row. */}
+          <PoweredBy height={12} tone="light" className="hidden lg:inline-flex self-start mt-1" />
         </div>
       </aside>
 
@@ -274,6 +298,9 @@ export function AdminSidebar({
             {restaurantName}
           </span>
         </Link>
+        <div className="flex items-center pr-1 shrink-0">
+          <ThemeToggle />
+        </div>
       </header>
 
       {/* ── Mobile drawer overlay ──────────────────────────────────── */}
@@ -311,16 +338,21 @@ export function AdminSidebar({
                 pathname={pathname}
                 showStock={showStock}
                 showFinance={showFinance}
+                showSettings={showSettings}
                 onNavigate={() => setMobileOpen(false)}
               />
             </nav>
 
-            <div className="px-3 py-4 border-t shrink-0" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+            <div className="px-3 py-4 border-t shrink-0 flex flex-col gap-2.5" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+              <div className="flex items-center justify-between px-3 w-full">
+                <span className="text-xs text-white/40 uppercase tracking-wider font-light">Theme</span>
+                <ThemeToggle />
+              </div>
               <button
                 type="button"
                 disabled={logoutPending}
                 onClick={handleLogout}
-                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm w-full"
+                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm w-full transition-colors hover:bg-white/5"
                 style={{ color: "rgba(255,255,255,0.4)" }}
               >
                 <LogOut size={15} strokeWidth={1.5} />

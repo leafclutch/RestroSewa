@@ -16,7 +16,16 @@ import type { EmployeeOption } from "../page";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { QrCode, Trash2, X, Download, Pencil, RefreshCw, UserRound } from "lucide-react";
-import { QRCodeCanvas } from "qrcode.react";
+import dynamic from "next/dynamic";
+
+// The QR canvas only ever renders INSIDE the print dialog — a modal most admins open
+// rarely and many never open at all. Loading its library on the initial page render
+// makes every visit to the table list pay for a feature it is not using. Fetched on
+// demand instead, at the moment the dialog opens.
+const QRCodeCanvas = dynamic(
+  () => import("qrcode.react").then((m) => m.QRCodeCanvas),
+  { ssr: false, loading: () => <div style={{ width: 220, height: 220 }} /> }
+);
 
 // ─── QR Modal ─────────────────────────────────────────────────────────────────
 
@@ -79,6 +88,8 @@ function QrModal({
 
         <div
           className="p-3 rounded-xl"
+          // MUST stay white in both themes — a QR needs a light quiet zone to scan. Do NOT
+          // tokenise this to --color-canvas; a dark background makes the code unscannable.
           style={{ background: "#ffffff", border: "1px solid var(--color-hairline)" }}
         >
           <QRCodeCanvas
@@ -239,7 +250,7 @@ function TablePill({
         <button
           type="button"
           className="text-xs"
-          style={{ color: table.is_active ? "#1a7a4a" : "var(--color-ink-mute)" }}
+          style={{ color: table.is_active ? "var(--color-success)" : "var(--color-ink-mute)" }}
           onClick={() => startToggle(async () => { await toggleTableStatus(table.id, !table.is_active); })}
         >
           {table.is_active ? "●" : "○"}
@@ -546,7 +557,7 @@ export function TablesClient({
           <div>
             <p
               className="text-xs uppercase tracking-wide mb-1 font-medium"
-              style={{ color: "#b45309", letterSpacing: "0.06em" }}
+              style={{ color: "var(--color-warning)", letterSpacing: "0.06em" }}
             >
               Ungrouped — needs a group
             </p>

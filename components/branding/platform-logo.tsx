@@ -1,24 +1,25 @@
 import Image from "next/image";
 
 /**
- * PLATFORM branding — RestroSewa, the application's own identity.
+ * PLATFORM branding — HRestroSewa, the application's own identity (H = Hotel, R = Restaurant).
  *
- * The wordmark was hand-rolled in five places with slightly different sizes and
- * accent colours. It lives here now so every surface renders the same mark; if
- * the brand ever changes, it changes once.
+ * The wordmark was hand-rolled in several places with slightly different sizes and accent colours.
+ * It lives here now so every surface renders the same mark; if the brand ever changes, it changes
+ * once. There is also an emblem image (`public/hrestrosewa-logo.png`, rendered by `<PlatformLogo />`)
+ * used on the login, super-admin and marketing surfaces; this text wordmark is the compact form.
  *
- * RestroSewa is a TEXT wordmark by design — there is no RestroSewa image asset.
- * The logo in `public/logo.png` belongs to Leafclutch Technologies, the company
- * behind the product, and appears only as the `<PoweredBy />` credit below.
+ * `public/logo.png` is a SEPARATE asset — the Leafclutch Technologies mark, the company behind the
+ * product — and appears only as the `<PoweredBy />` credit below.
  */
 
 type Tone = "light" | "dark";
 
-// The accent falls on "Sewa". Light surfaces need the deeper brand colour to
-// stay legible; dark surfaces use the soft tint.
+// The accent falls on "Sewa", in the brand green taken from the logo. On a dark background the light
+// logo green (#76d38b) sits right; on a light one it would be too pale (~1.7:1), so drop to a
+// readable forest green.
 const ACCENT: Record<Tone, string> = {
-  light: "var(--color-primary-soft)", // on a dark background
-  dark: "var(--color-primary)", // on a light background
+  light: "#76d38b", // on a dark background — the logo's own light green
+  dark: "#15803d", // on a light background — legible green
 };
 
 const BASE: Record<Tone, string> = {
@@ -58,9 +59,37 @@ export function PlatformWordmark({
         whiteSpace: "nowrap",
       }}
     >
-      Restro
+      HRestro
       <span style={{ color: accent ?? ACCENT[tone], fontWeight: 500 }}>Sewa</span>
     </span>
+  );
+}
+
+/**
+ * The HRestroSewa emblem — the navy tile with the house-H, cloche and fork/spoon. A self-contained
+ * square badge (it carries its own background), so it reads on any surface; used on the login,
+ * super-admin and marketing pages. `public/hrestrosewa-logo.png` is the one canonical emblem asset
+ * (1024², ~100 KB, space-free name) — shared with the PWA icon generator.
+ */
+export function PlatformLogo({
+  size = 48,
+  className = "",
+  priority = false,
+}: {
+  size?: number;
+  className?: string;
+  priority?: boolean;
+}) {
+  return (
+    <Image
+      src="/hrestrosewa-logo.png"
+      alt="HRestroSewa"
+      width={size}
+      height={size}
+      priority={priority}
+      className={className}
+      style={{ width: size, height: size, objectFit: "contain" }}
+    />
   );
 }
 
@@ -79,12 +108,30 @@ export function PoweredBy({
   className?: string;
 }) {
   const width = Math.round(height * (500 / 138));
+  const onDark = tone === "light";
   return (
     <span
-      className={`inline-flex items-center gap-2 ${className}`}
-      style={{ color: tone === "light" ? "rgba(255,255,255,0.45)" : "var(--color-ink-mute)" }}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap ${className}`}
+      // The Leafclutch lockup is navy text + a green leaf on transparent, designed for a LIGHT
+      // background. On a dark surface it used to be flattened to a white silhouette
+      // (`brightness(0) invert(1)`), which threw its own colours away. Instead the WHOLE credit —
+      // "Powered by" text + logo — becomes one white sticker so the mark keeps its real colours and
+      // reads as a deliberate badge, not a logo floating on a stray white patch. The text colour is
+      // a FIXED slate (not the ink-mute token) because the sticker is always white, even when the
+      // surrounding app is in dark mode (where ink-mute flips light and would wash out on white).
+      style={
+        onDark
+          ? {
+              background: "#fff",
+              color: "#64748b",
+              borderRadius: 9999,
+              padding: "3px 8px",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
+            }
+          : { color: "var(--color-ink-mute)" }
+      }
     >
-      <span style={{ fontSize: 10, letterSpacing: "0.06em" }}>Powered by</span>
+      <span style={{ fontSize: 9, letterSpacing: "0.04em" }}>Powered by</span>
       <Image
         src="/logo.png"
         alt="Leafclutch Technologies Pvt. Ltd."
@@ -93,13 +140,7 @@ export function PoweredBy({
         // The credit is never above the fold on any screen that matters, so it
         // must never compete with the page for bandwidth.
         loading="lazy"
-        style={{
-          height,
-          width: "auto",
-          // The mark is dark navy on transparent; on a dark surface it would
-          // disappear, so lift it.
-          filter: tone === "light" ? "brightness(0) invert(1) opacity(0.55)" : undefined,
-        }}
+        style={{ height, width: "auto" }}
       />
     </span>
   );

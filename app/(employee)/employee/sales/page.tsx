@@ -1,19 +1,9 @@
 import { redirect } from "next/navigation";
-import { requireRestaurantStaff } from "@/lib/auth/guards";
-import { NAV_ACCESS } from "@/lib/permissions";
-import { getSalesReport } from "@/app/actions/pos";
-import { SalesView } from "./_components/sales-view";
 
-export default async function SalesPage() {
-  const { restaurantUser } = await requireRestaurantStaff();
-
-  // Only staff with billing / sales permission (e.g. cashier) may view sales.
-  if (!NAV_ACCESS.canSeeSales(restaurantUser)) {
-    redirect("/employee/dashboard");
-  }
-
-  // Initial view defaults to Today; the client re-queries on filter change.
-  const initial = await getSalesReport({ period: "today" });
-
-  return <SalesView initial={initial} />;
+// Sales is a section of the dashboard now. Kept as a redirect so a "payment
+// received" push, an app shortcut or an old bookmark lands on the dashboard
+// scrolled to Sales rather than on a duplicate page. The dashboard renders the
+// section only for staff with sales permission, so this needs no separate guard.
+export default function SalesPage() {
+  redirect("/employee/dashboard?focus=sales");
 }

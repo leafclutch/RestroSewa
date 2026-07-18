@@ -56,11 +56,11 @@ export function Modal({
           style={{ borderColor: "var(--color-hairline)" }}
         >
           <div className="min-w-0">
-            <p className="text-sm font-medium truncate" style={{ color: "var(--color-ink)" }}>
+            <p className="text-base font-medium truncate" style={{ color: "var(--color-ink)" }}>
               {title}
             </p>
             {subtitle && (
-              <p className="text-xs mt-0.5 truncate" style={{ color: "var(--color-ink-mute)" }}>
+              <p className="text-sm mt-0.5 truncate" style={{ color: "var(--color-ink-mute)" }}>
                 {subtitle}
               </p>
             )}
@@ -113,7 +113,7 @@ export function ConfirmDialog({
       {error && (
         <p
           className="text-sm rounded-md px-3 py-2 mb-3"
-          style={{ color: "var(--color-ruby)", background: "#fff0f4" }}
+          style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}
         >
           {error}
         </p>
@@ -129,7 +129,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={pending}
             className="flex-1 rounded-pill py-2 text-base font-normal transition-colors disabled:opacity-50"
-            style={{ background: "#dc2626", color: "#fff" }}
+            style={{ background: "var(--fill-red)", color: "#fff" }}
           >
             {pending ? "Working…" : confirmLabel}
           </button>

@@ -6,6 +6,7 @@ import {
   updateOrderItemStatus,
   forceCloseSession,
   cancelOrderItem,
+  updateWalkInCustomer,
 } from "@/app/actions/pos";
 import type { ActionResult, OrderItemRow, SessionDetail } from "@/app/actions/pos";
 import { searchCreditCustomers } from "@/app/actions/credits";
@@ -13,10 +14,10 @@ import type { CreditCustomer } from "@/app/actions/credits";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Check, ChevronRight, Plus, Receipt, X } from "lucide-react";
+import { Check, ChevronRight, Plus, Receipt, User, X, Pencil, Lock } from "lucide-react";
 import { OrderItem } from "@/app/(employee)/employee/_components/order-item";
 import { SessionPrintButtons } from "./print-tickets";
-import type { RestaurantInfo } from "./print-tickets";
+import type { RestaurantInfo, PrintStation } from "./print-tickets";
 
 
 type PaymentMethod = "cash" | "online" | "card" | "mixed" | "credit";
@@ -39,9 +40,13 @@ const DOWN_TENDERS: { value: DownTender; label: string }[] = [
 function PaymentForm({
   session,
   canUseCredit,
+  discountEnabled,
 }: {
   session: SessionDetail;
   canUseCredit: boolean;
+  /** Whether the restaurant has a discount PIN configured. No PIN = no discounts at all,
+   *  so the field isn't shown. The PIN is still verified server-side at payment. */
+  discountEnabled: boolean;
 }) {
   const [state, action, pending] = useActionState<ActionResult, FormData>(
     closeSessionWithPayment,
@@ -50,6 +55,11 @@ function PaymentForm({
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [cashAmt, setCashAmt]     = useState("");
   const [onlineAmt, setOnlineAmt] = useState("");
+  // Knocked off at payment ("Rs 1020 → just give me 1000"). Everything below tenders,
+  // validates and submits against the PAYABLE, never the raw order total.
+  const [discountAmt, setDiscountAmt] = useState("");
+  // The admin's discount PIN authorizing that reduction. Held only long enough to submit.
+  const [discountPin, setDiscountPin] = useState("");
 
   // Credit — WHICH customer's account, and what (if anything) they're paying now.
   const [custQuery, setCustQuery]     = useState("");
@@ -92,7 +102,16 @@ function PaymentForm({
     return () => { alive = false; clearTimeout(t); };
   }, [custQuery, method, picked, creatingNew]);
 
-  const total = session.total;
+  const orderTotal = session.total;
+  // Capped at the order total so the payable can never go negative — the server
+  // refuses that anyway, but the cashier should see it clamp as they type. With no PIN
+  // configured there is no discount to speak of, so it's pinned to 0.
+  const discount = discountEnabled
+    ? Math.min(Math.max(parseFloat(discountAmt) || 0, 0), orderTotal)
+    : 0;
+  const payable = Math.max(0, orderTotal - discount);
+  // The server is the real gate; this just stops an obviously-incomplete submit.
+  const discountPinValid = discount === 0 || /^\d{4}$/.test(discountPin);
 
   const methods = canUseCredit
     ? PAYMENT_METHODS
@@ -101,23 +120,31 @@ function PaymentForm({
   function handleCashChange(val: string) {
     setCashAmt(val);
     const cash = parseFloat(val);
-    setOnlineAmt(!isNaN(cash) && cash >= 0 ? Math.max(0, total - cash).toFixed(2) : "");
+    setOnlineAmt(!isNaN(cash) && cash >= 0 ? Math.max(0, payable - cash).toFixed(2) : "");
   }
 
   function handleOnlineChange(val: string) {
     setOnlineAmt(val);
     const online = parseFloat(val);
-    setCashAmt(!isNaN(online) && online >= 0 ? Math.max(0, total - online).toFixed(2) : "");
+    setCashAmt(!isNaN(online) && online >= 0 ? Math.max(0, payable - online).toFixed(2) : "");
+  }
+
+  // A new discount moves the payable, which strands any split already typed against
+  // the old one — clear it rather than submit a split that no longer adds up.
+  function handleDiscountChange(val: string) {
+    setDiscountAmt(val);
+    setCashAmt("");
+    setOnlineAmt("");
   }
 
   const bothFilled = cashAmt !== "" && onlineAmt !== "";
   const mixedSum   = (parseFloat(cashAmt) || 0) + (parseFloat(onlineAmt) || 0);
-  const mixedValid = method !== "mixed" || (bothFilled && Math.abs(mixedSum - total) < 0.01);
+  const mixedValid = method !== "mixed" || (bothFilled && Math.abs(mixedSum - payable) < 0.01);
 
   // Credit: blank "paid now" means the whole bill goes on credit.
   const paidNowNum   = parseFloat(paidNow) || 0;
-  const creditAmount = Math.max(0, total - paidNowNum);
-  const paidNowValid = paidNowNum >= 0 && paidNowNum < total;
+  const creditAmount = Math.max(0, payable - paidNowNum);
+  const paidNowValid = paidNowNum >= 0 && paidNowNum < payable;
   // Either an existing account is selected, or a new one is being named.
   const customerChosen = !!picked || (creatingNew && custName.trim().length > 0);
   const creditValid = method !== "credit" || (customerChosen && paidNowValid);
@@ -126,6 +153,7 @@ function PaymentForm({
     !pending &&
     mixedValid &&
     creditValid &&
+    discountPinValid &&
     (method !== "mixed" || bothFilled);
 
   const errorMsg = state?.error;
@@ -133,9 +161,9 @@ function PaymentForm({
   // What the server records as tendered. On a credit bill this is the down
   // payment only — the rest is the credit.
   const tender = {
-    cash:   method === "cash"  ? total : method === "credit" && downTender === "cash"   ? paidNowNum : 0,
-    online: method === "online" ? total : method === "credit" && downTender === "online" ? paidNowNum : 0,
-    card:   method === "card"  ? total : method === "credit" && downTender === "card"   ? paidNowNum : 0,
+    cash:   method === "cash"  ? payable : method === "credit" && downTender === "cash"   ? paidNowNum : 0,
+    online: method === "online" ? payable : method === "credit" && downTender === "online" ? paidNowNum : 0,
+    card:   method === "card"  ? payable : method === "credit" && downTender === "card"   ? paidNowNum : 0,
   };
 
   return (
@@ -145,7 +173,10 @@ function PaymentForm({
       style={{ background: "var(--color-canvas)", borderColor: "var(--color-primary)", borderWidth: 1.5 }}
     >
       <input type="hidden" name="session_id"   value={session.id} />
-      <input type="hidden" name="total_amount" value={total.toFixed(2)} />
+      {/* `total_amount` is the NET sale — the payable, not the order total. That's the
+          figure Sales, Finance and the reports all sum. */}
+      <input type="hidden" name="total_amount"    value={payable.toFixed(2)} />
+      <input type="hidden" name="discount_amount" value={discount.toFixed(2)} />
 
       {/* Tender split. Mixed drives cash/online from its own inputs, so it opts
           out of these pre-computed values. */}
@@ -171,6 +202,82 @@ function PaymentForm({
       <p className="text-base font-medium" style={{ color: "var(--color-ink)" }}>
         Close &amp; collect payment
       </p>
+
+      {/* Order Total → Discount → Final Payable. Everything below collects against the
+          payable, so the cashier sees what they're about to take before choosing how. */}
+      <div
+        className="rounded-lg px-4 py-3 flex flex-col gap-2"
+        style={{ background: "var(--color-canvas-soft)", border: "1px solid var(--color-hairline)" }}
+      >
+        <div className="flex items-center justify-between text-sm">
+          <span style={{ color: "var(--color-ink-mute)" }}>Order total</span>
+          <span className="tabular" style={{ color: "var(--color-ink)" }}>₹{orderTotal.toFixed(2)}</span>
+        </div>
+
+        {discountEnabled ? (
+          <>
+            <div className="flex items-center justify-between gap-3">
+              <label htmlFor="discount_input" className="text-sm shrink-0" style={{ color: "var(--color-ink-mute)" }}>
+                Discount (₹)
+              </label>
+              <Input
+                id="discount_input"
+                type="number"
+                min="0"
+                max={orderTotal}
+                step="0.01"
+                placeholder="0.00"
+                value={discountAmt}
+                onChange={(e) => handleDiscountChange(e.target.value)}
+                className="max-w-[140px] text-right"
+              />
+            </div>
+
+            {/* Only asked for once there's actually something to authorize. */}
+            {discount > 0 && (
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor="discount_pin" className="text-sm shrink-0" style={{ color: "var(--color-ink-mute)" }}>
+                  Discount PIN
+                </label>
+                <Input
+                  id="discount_pin"
+                  name="discount_pin"
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  maxLength={4}
+                  placeholder="••••"
+                  value={discountPin}
+                  onChange={(e) => setDiscountPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  className="max-w-[140px] text-right tracking-[0.4em]"
+                />
+              </div>
+            )}
+            {discount > 0 && !discountPinValid && (
+              <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                Enter the 4-digit discount PIN to authorize this reduction.
+              </p>
+            )}
+          </>
+        ) : (
+          <div className="flex items-start gap-2">
+            <Lock size={13} className="mt-0.5 shrink-0" style={{ color: "var(--color-ink-mute)" }} />
+            <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+              Discounts are turned off. Ask your admin to set a discount PIN in Settings.
+            </p>
+          </div>
+        )}
+
+        <div
+          className="flex items-center justify-between pt-2 border-t"
+          style={{ borderColor: "var(--color-hairline)" }}
+        >
+          <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Final payable</span>
+          <span className="text-lg font-medium tabular" style={{ color: "var(--color-primary)" }}>
+            ₹{payable.toFixed(2)}
+          </span>
+        </div>
+      </div>
 
       {/* Method selector */}
       <div className="flex flex-col gap-2">
@@ -210,30 +317,12 @@ function PaymentForm({
         </div>
       </div>
 
-      {/* Paid in full (cash / online / card): the amount is simply the total. */}
-      {(method === "cash" || method === "online" || method === "card") && (
-        <div
-          className="flex items-center justify-between px-4 py-3 rounded-lg"
-          style={{ background: "var(--color-canvas-soft)", border: "1px solid var(--color-hairline)" }}
-        >
-          <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>Amount</span>
-          <span className="text-lg font-medium tabular" style={{ color: "var(--color-ink)" }}>
-            ₹{total.toFixed(0)}
-          </span>
-        </div>
-      )}
+      {/* Cash / online / card collect the payable in full — the Final payable line above
+          already states it, so there's nothing more to show or ask for. */}
 
       {/* Mixed: two inputs with auto-calculation */}
       {method === "mixed" && (
         <div className="flex flex-col gap-3">
-          <div
-            className="flex items-center justify-between px-4 py-2 rounded-lg text-xs"
-            style={{ background: "var(--color-canvas-soft)", border: "1px solid var(--color-hairline)", color: "var(--color-ink-mute)" }}
-          >
-            <span>Total bill</span>
-            <span className="font-medium tabular" style={{ color: "var(--color-ink)" }}>₹{total.toFixed(0)}</span>
-          </div>
-
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor="cash_amount"
@@ -249,7 +338,7 @@ function PaymentForm({
                 name="cash_amount"
                 type="number"
                 min="0"
-                max={total}
+                max={payable}
                 step="0.01"
                 placeholder="0.00"
                 value={cashAmt}
@@ -274,7 +363,7 @@ function PaymentForm({
                 name="online_amount"
                 type="number"
                 min="0"
-                max={total}
+                max={payable}
                 step="0.01"
                 placeholder="0.00"
                 value={onlineAmt}
@@ -286,11 +375,11 @@ function PaymentForm({
 
           {bothFilled && !mixedValid && (
             <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
-              The combined Cash and Online amounts must equal the total payable amount (₹{total.toFixed(0)}).
+              The combined Cash and Online amounts must equal the total payable amount (₹{payable.toFixed(0)}).
             </p>
           )}
           {bothFilled && mixedValid && (
-            <p className="text-xs" style={{ color: "#1a7a4a" }}>
+            <p className="text-xs" style={{ color: "var(--color-success)" }}>
               ✓ Amounts match
             </p>
           )}
@@ -310,7 +399,7 @@ function PaymentForm({
           {picked ? (
             <div
               className="rounded-lg border px-4 py-3 flex items-start gap-3"
-              style={{ background: "#f0fdf4", borderColor: "#1a7a4a44" }}
+              style={{ background: "var(--color-success-bg)", borderColor: "color-mix(in srgb, var(--color-success) 27%, transparent)" }}
             >
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate" style={{ color: "var(--color-ink)" }}>
@@ -321,7 +410,7 @@ function PaymentForm({
                   {picked.phone ? ` · ${picked.phone}` : ""}
                 </p>
                 {picked.balance > 0 && (
-                  <p className="text-xs mt-1" style={{ color: "#9a3412" }}>
+                  <p className="text-xs mt-1" style={{ color: "var(--color-warning)" }}>
                     Already owes ₹{picked.balance.toFixed(2)} — this bill will be added to it.
                   </p>
                 )}
@@ -389,7 +478,7 @@ function PaymentForm({
                       </span>
                       <span
                         className="text-sm tabular-nums shrink-0"
-                        style={{ color: m.balance > 0 ? "#dc2626" : "var(--color-ink-mute)" }}
+                        style={{ color: m.balance > 0 ? "var(--color-danger)" : "var(--color-ink-mute)" }}
                       >
                         {m.balance > 0 ? `₹${m.balance.toFixed(0)}` : "settled"}
                       </span>
@@ -488,7 +577,7 @@ function PaymentForm({
                 id="paid_now"
                 type="number"
                 min="0"
-                max={total}
+                max={payable}
                 step="0.01"
                 placeholder="0.00"
                 value={paidNow}
@@ -550,19 +639,19 @@ function PaymentForm({
               in their hand before committing. */}
           <div
             className="rounded-lg border px-4 py-3 flex flex-col gap-1.5"
-            style={{ background: "#fff7ed", borderColor: "#f9731644" }}
+            style={{ background: "var(--color-warning-bg)", borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)" }}
           >
             <div className="flex items-center justify-between text-sm">
-              <span style={{ color: "#9a3412" }}>Bill total</span>
-              <span className="tabular" style={{ color: "#9a3412" }}>₹{total.toFixed(2)}</span>
+              <span style={{ color: "var(--color-warning)" }}>Payable</span>
+              <span className="tabular" style={{ color: "var(--color-warning)" }}>₹{payable.toFixed(2)}</span>
             </div>
             <div className="flex items-center justify-between text-sm">
-              <span style={{ color: "#9a3412" }}>Paying now</span>
-              <span className="tabular" style={{ color: "#9a3412" }}>− ₹{paidNowNum.toFixed(2)}</span>
+              <span style={{ color: "var(--color-warning)" }}>Paying now</span>
+              <span className="tabular" style={{ color: "var(--color-warning)" }}>− ₹{paidNowNum.toFixed(2)}</span>
             </div>
-            <div className="flex items-center justify-between pt-1.5 border-t" style={{ borderColor: "#f9731633" }}>
-              <span className="text-sm font-medium" style={{ color: "#9a3412" }}>Goes on credit</span>
-              <span className="text-lg font-medium tabular" style={{ color: "#9a3412" }}>
+            <div className="flex items-center justify-between pt-1.5 border-t" style={{ borderColor: "color-mix(in srgb, var(--color-warning) 20%, transparent)" }}>
+              <span className="text-sm font-medium" style={{ color: "var(--color-warning)" }}>Goes on credit</span>
+              <span className="text-lg font-medium tabular" style={{ color: "var(--color-warning)" }}>
                 ₹{creditAmount.toFixed(2)}
               </span>
             </div>
@@ -570,16 +659,16 @@ function PaymentForm({
 
           {paidNow !== "" && !paidNowValid && (
             <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
-              {paidNowNum >= total
+              {paidNowNum >= payable
                 ? `That settles the whole bill — use Cash, Online or Card instead.`
-                : `Enter an amount between ₹0 and ₹${total.toFixed(2)}.`}
+                : `Enter an amount between ₹0 and ₹${payable.toFixed(2)}.`}
             </p>
           )}
         </div>
       )}
 
       {errorMsg && (
-        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
           {errorMsg}
         </p>
       )}
@@ -595,25 +684,108 @@ function PaymentForm({
   );
 }
 
+// Optional customer details for a walk-in (takeaway / phone / online delivery). Collapsed
+// to a summary once filled; editable any time before the bill is closed.
+function WalkInCustomerPanel({
+  session,
+  canEdit,
+}: {
+  session: SessionDetail;
+  canEdit: boolean;
+}) {
+  const has = !!(session.customer_name || session.customer_phone || session.customer_address);
+  const [editing, setEditing] = useState(!has);
+  const [state, action, pending] = useActionState<ActionResult, FormData>(updateWalkInCustomer, null);
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => { if (pending) setSubmitted(true); }, [pending]);
+  useEffect(() => {
+    if (submitted && !pending && state === null) { setSubmitted(false); setEditing(false); }
+  }, [submitted, pending, state]);
+
+  return (
+    <div
+      className="rounded-xl border overflow-hidden"
+      style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+    >
+      <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: "var(--color-canvas-soft)" }}>
+        <User size={14} style={{ color: "var(--color-ink-mute)" }} />
+        <span className="text-xs font-medium flex-1" style={{ color: "var(--color-ink)" }}>
+          Customer details <span style={{ color: "var(--color-ink-mute)" }}>· optional</span>
+        </span>
+        {canEdit && !editing && (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="text-xs inline-flex items-center gap-1"
+            style={{ color: "var(--color-primary)" }}
+          >
+            <Pencil size={12} /> Edit
+          </button>
+        )}
+      </div>
+
+      {editing && canEdit ? (
+        <form action={action} className="px-4 py-3 flex flex-col gap-2">
+          <input type="hidden" name="session_id" value={session.id} />
+          <Input name="customer_name" defaultValue={session.customer_name ?? ""} placeholder="Customer name" />
+          <Input name="customer_phone" defaultValue={session.customer_phone ?? ""} placeholder="Phone number" inputMode="tel" />
+          <Input name="customer_address" defaultValue={session.customer_address ?? ""} placeholder="Delivery address" />
+          <div className="flex items-center gap-2 mt-1">
+            <Button type="submit" variant="primary" disabled={pending} className="text-xs px-3 h-9">
+              {pending ? "Saving…" : "Save"}
+            </Button>
+            {has && (
+              <Button type="button" variant="secondary" onClick={() => setEditing(false)} className="text-xs px-3 h-9">
+                Cancel
+              </Button>
+            )}
+            {state?.error && <span className="text-xs" style={{ color: "var(--color-ruby)" }}>{state.error}</span>}
+          </div>
+        </form>
+      ) : (
+        <div className="px-4 py-3 text-sm" style={{ color: "var(--color-ink)" }}>
+          {has ? (
+            <div className="flex flex-col gap-0.5">
+              {session.customer_name && <span>{session.customer_name}</span>}
+              {session.customer_phone && <span style={{ color: "var(--color-ink-mute)" }}>{session.customer_phone}</span>}
+              {session.customer_address && <span style={{ color: "var(--color-ink-mute)" }}>{session.customer_address}</span>}
+            </div>
+          ) : (
+            <span style={{ color: "var(--color-ink-mute)" }}>No customer details.</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SessionClient({
   session,
   restaurant,
   staffName = "",
+  workstations = [],
   canCreateOrders = false,
   canCloseBills = false,
+  canPrintTickets = false,
   canForceClose = false,
   canSeePIN = true,
   canUseCredit = false,
+  discountEnabled = false,
   canCancelOrders = false,
 }: {
   session: SessionDetail;
   restaurant: RestaurantInfo;
   staffName?: string;
+  workstations?: PrintStation[];
   canCreateOrders?: boolean;
   canCloseBills?: boolean;
+  /** KOT/BOT printing — a billing/order-management action, not any waiter's. */
+  canPrintTickets?: boolean;
   canForceClose?: boolean;
   canSeePIN?: boolean;
   canUseCredit?: boolean;
+  discountEnabled?: boolean;
   canCancelOrders?: boolean;
 }) {
   const [forceClosing, startForceClose] = useTransition();
@@ -641,10 +813,10 @@ export function SessionClient({
       {!isClosed && canSeePIN && session.customer_pin && (
         <div
           className="flex items-center gap-3 px-4 py-3 rounded-xl border"
-          style={{ background: "#fef9c3", borderColor: "#ca8a0444" }}
+          style={{ background: "var(--color-warning-bg)", borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)" }}
         >
           <div className="flex-1">
-            <p className="text-xs font-medium" style={{ color: "#854d0e" }}>
+            <p className="text-xs font-medium" style={{ color: "var(--color-warning)" }}>
               Customer ordering PIN — share with seated customer
             </p>
           </div>
@@ -653,7 +825,7 @@ export function SessionClient({
               <div
                 key={i}
                 className="w-8 h-8 rounded-lg flex items-center justify-center text-base font-bold"
-                style={{ background: "#fff", color: "#854d0e", border: "1px solid #ca8a0444" }}
+                style={{ background: "var(--color-warning-bg)", color: "var(--color-warning)", border: "1px solid color-mix(in srgb, var(--color-warning) 27%, transparent)" }}
               >
                 {d}
               </div>
@@ -661,6 +833,13 @@ export function SessionClient({
           </div>
         </div>
       )}
+
+      {/* Walk-in customer details — takeaway / phone / delivery. Optional, editable
+          until the bill is closed. */}
+      {session.type === "walk_in" && (
+        <WalkInCustomerPanel session={session} canEdit={canCreateOrders && !isClosed} />
+      )}
+
       {/* Items */}
       {session.items.length === 0 ? (
         <div
@@ -714,14 +893,16 @@ export function SessionClient({
             </Link>
           )}
 
-          {/* KOT / Bill printing — for staff with order/billing permissions,
-              once the table has at least one order. */}
+          {/* KOT / BOT / Bill printing — a billing/order-management action (Cashier /
+              Receptionist), NOT any waiter, once the table has at least one order.
+              KOT lists kitchen-station items, BOT lists bar-station items. */}
           {hasOrders && (
             <SessionPrintButtons
               session={session}
               restaurant={restaurant}
               staffName={staffName}
-              canPrintKot={canCreateOrders}
+              workstations={workstations}
+              canPrintTickets={canPrintTickets}
               canPrintBill={canCloseBills}
             />
           )}
@@ -731,7 +912,9 @@ export function SessionClient({
               room branch to handle: the room's orders, KOT and folio all live in
               one place. `closeSessionWithPayment` still refuses a room stay
               server-side, in case anyone posts to it directly. */}
-          {canCloseBills && <PaymentForm session={session} canUseCredit={canUseCredit} />}
+          {canCloseBills && (
+            <PaymentForm session={session} canUseCredit={canUseCredit} discountEnabled={discountEnabled} />
+          )}
 
           {!canCreateOrders && !canCloseBills && (
             <p className="text-sm text-center py-2" style={{ color: "var(--color-ink-mute)" }}>
@@ -756,7 +939,7 @@ export function SessionClient({
                 type="button"
                 disabled={forceClosing}
                 className="w-full rounded-xl border py-3 text-sm font-medium transition-colors disabled:opacity-60"
-                style={{ borderColor: "#ef444444", color: "#dc2626", background: "#fff0f0" }}
+                style={{ borderColor: "color-mix(in srgb, var(--color-danger) 27%, transparent)", color: "var(--color-danger)", background: "var(--color-danger-bg)" }}
                 onClick={() => {
                   const msg = !hasOrders
                     ? "Deactivate this table? It has no orders and will return to Available immediately."
@@ -773,7 +956,7 @@ export function SessionClient({
                 {forceClosing ? "Closing…" : !hasOrders ? "Deactivate table" : "Force close session"}
               </button>
               {forceError && (
-                <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+                <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
                   {forceError}
                 </p>
               )}
@@ -785,7 +968,7 @@ export function SessionClient({
       {isClosed && (
         <div
           className="rounded-xl border px-4 py-3 text-center text-sm"
-          style={{ borderColor: "#1a7a4a44", background: "#f0fdf4", color: "#1a7a4a" }}
+          style={{ borderColor: "color-mix(in srgb, var(--color-success) 27%, transparent)", background: "var(--color-success-bg)", color: "var(--color-success)" }}
         >
           Session closed
         </div>

@@ -13,7 +13,8 @@ import { Button } from "@/components/ui/button";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { OrderItem } from "@/app/(employee)/employee/_components/order-item";
 import { SessionPrintButtons } from "@/app/(employee)/employee/session/[id]/_components/print-tickets";
-import type { RestaurantInfo } from "@/app/(employee)/employee/session/[id]/_components/print-tickets";
+import type { RestaurantInfo, PrintStation } from "@/app/(employee)/employee/session/[id]/_components/print-tickets";
+import { PrintModal, Divider, Line as TicketLine, PoweredBy } from "@/app/(employee)/employee/_components/bill-ticket";
 import {
   ArrowLeft, BedDouble, Plus, Printer, Trash2, User, UtensilsCrossed, X,
 } from "lucide-react";
@@ -377,10 +378,10 @@ function CheckOutForm({
 
           <div
             className="flex items-baseline justify-between rounded-lg border px-3 py-2"
-            style={{ borderColor: "#b4530944", background: "#fff7ed" }}
+            style={{ borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)", background: "var(--color-warning-bg)" }}
           >
-            <span className="text-sm" style={{ color: "#9a3412" }}>Left on credit</span>
-            <span className="text-sm tabular font-medium" style={{ color: "#9a3412" }}>{rupee(owed)}</span>
+            <span className="text-sm" style={{ color: "var(--color-warning)" }}>Left on credit</span>
+            <span className="text-sm tabular font-medium" style={{ color: "var(--color-warning)" }}>{rupee(owed)}</span>
           </div>
         </div>
       )}
@@ -404,15 +405,16 @@ function CheckOutForm({
 // ─── The folio ───────────────────────────────────────────────────────────────
 
 export function FolioClient({
-  view, session, restaurant, staffName,
+  view, session, restaurant, staffName, workstations = [],
   canAddCharges, canCreateOrders, canManageOrders, canCancelOrders,
-  canCheckOut, canDiscount, canUseCredit,
+  canCheckOut, canDiscount, canUseCredit, canPrintTickets = false, canPrintBill = false,
 }: {
   view: RoomFolioView;
   /** The stay's session, in the same shape a table's screen uses. */
   session: SessionDetail | null;
   restaurant: RestaurantInfo;
   staffName: string;
+  workstations?: PrintStation[];
   canAddCharges: boolean;
   canCreateOrders: boolean;
   canManageOrders: boolean;
@@ -420,8 +422,13 @@ export function FolioClient({
   canCheckOut: boolean;
   canDiscount: boolean;
   canUseCredit: boolean;
+  /** KOT/BOT printing — billing/order-management staff only (not waiters). */
+  canPrintTickets?: boolean;
+  /** Room folio bill printing — billing staff only. */
+  canPrintBill?: boolean;
 }) {
   const [adding, setAdding] = useState(false);
+  const [billOpen, setBillOpen] = useState(false);
   const [removing, startRemove] = useTransition();
   const f = view.folio;
   const open = view.status === "active";
@@ -556,7 +563,10 @@ export function FolioClient({
                     session={session}
                     restaurant={restaurant}
                     staffName={staffName}
-                    canPrintKot={canManageOrders || canCreateOrders}
+                    workstations={workstations}
+                    // KOT/BOT is billing/order-management only now — a waiter (who has
+                    // create/manage orders) must NOT be able to print kitchen tickets.
+                    canPrintTickets={canPrintTickets}
                     // The bill for a room is the FOLIO — room nights, extras and
                     // food together — not the session's food-only total. It prints
                     // from the folio below, so the session's bill ticket is off.
@@ -678,10 +688,15 @@ export function FolioClient({
         </div>
       )}
 
-      {!open && (
+      {/* Room folio bill — billing staff only, and printed through the SAME shared
+          PrintModal as every other ticket. It used to be a raw window.print() over a
+          `hidden print:block` block with no chrome-hiding, so it printed the whole
+          screen; and its button was ungated, so anyone could print it. Now it previews
+          then prints only the bill. */}
+      {canPrintBill && (
         <button
           type="button"
-          onClick={() => window.print()}
+          onClick={() => setBillOpen(true)}
           className="inline-flex items-center justify-center gap-1.5 text-sm px-4 py-2 rounded-pill border"
           style={{ borderColor: "var(--color-hairline)", color: "var(--color-ink)" }}
         >
@@ -689,32 +704,39 @@ export function FolioClient({
         </button>
       )}
 
-      {/* Printed bill — the same numbers, on paper. */}
-      <div className="hidden print:block" style={{ fontFamily: "monospace", fontSize: 12 }}>
-        <div style={{ textAlign: "center", marginBottom: 8 }}>
-          <div style={{ fontWeight: 700 }}>{restaurant.name}</div>
-          {restaurant.address && <div>{restaurant.address}</div>}
-          {restaurant.contact_phone && <div>{restaurant.contact_phone}</div>}
-          {restaurant.pan_vat_number && <div>PAN/VAT: {restaurant.pan_vat_number}</div>}
+      <PrintModal open={billOpen} onClose={() => setBillOpen(false)} title="Room bill — preview" paperWidthMm={restaurant.paper_width_mm ?? 80}>
+        <div style={{ textAlign: "center" }}>
+          {restaurant.logo_url && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={restaurant.logo_url} alt="" style={{ maxHeight: 48, maxWidth: "100%", margin: "0 auto 4px", display: "block", objectFit: "contain" }} />
+          )}
+          <div style={{ fontWeight: 700, fontSize: 15 }}>{restaurant.name}</div>
+          {restaurant.address && <div style={{ fontSize: 11 }}>{restaurant.address}</div>}
+          {restaurant.contact_phone && <div style={{ fontSize: 11 }}>Ph: {restaurant.contact_phone}</div>}
+          {restaurant.pan_vat_number && <div style={{ fontSize: 11 }}>PAN/VAT: {restaurant.pan_vat_number}</div>}
           <div style={{ fontWeight: 700, letterSpacing: 1, marginTop: 4 }}>ROOM BILL</div>
         </div>
-        <div>Room {view.room_number} · {view.type_name}</div>
-        <div>Guest: {view.guest_name}</div>
-        <div>In:  {when(f.checkIn)}</div>
-        <div>Out: {when(f.checkOut)}</div>
-        <div>Stay: {f.duration} · {f.nights} night(s)</div>
-        <div style={{ borderTop: "1px dashed #000", margin: "6px 0" }} />
-        <div>{f.room.label} — {f.room.detail}: {rupee(f.roomTotal)}</div>
-        {f.extras.map((l) => <div key={l.key}>{l.label}: {rupee(l.amount)}</div>)}
-        {f.food.map((l) => <div key={l.key}>{l.detail} {l.label}: {rupee(l.amount)}</div>)}
-        <div style={{ borderTop: "1px dashed #000", margin: "6px 0" }} />
-        <div>Subtotal: {rupee(f.subtotal)}</div>
-        {f.discount > 0 && <div>Discount: -{rupee(f.discount)}</div>}
-        {f.tax > 0 && <div>Tax ({f.taxPercent}%): {rupee(f.tax)}</div>}
-        {f.service > 0 && <div>Service ({f.servicePercent}%): {rupee(f.service)}</div>}
-        <div style={{ fontWeight: 700 }}>TOTAL: {rupee(f.grandTotal)}</div>
-        <div style={{ marginTop: 8, textAlign: "center" }}>Served by {staffName}</div>
-      </div>
+        <Divider />
+        <TicketLine label="Room" value={`${view.room_number} · ${view.type_name}`} />
+        <TicketLine label="Guest" value={view.guest_name} />
+        <TicketLine label="In" value={when(f.checkIn)} />
+        <TicketLine label="Out" value={when(f.checkOut)} />
+        <TicketLine label="Stay" value={`${f.duration} · ${f.nights} night(s)`} />
+        <Divider />
+        <TicketLine label={`${f.room.label} (${f.room.detail})`} value={rupee(f.roomTotal)} />
+        {f.extras.map((l) => <TicketLine key={l.key} label={l.label} value={rupee(l.amount)} />)}
+        {f.food.map((l) => <TicketLine key={l.key} label={`${l.detail} ${l.label}`.trim()} value={rupee(l.amount)} />)}
+        <Divider />
+        <TicketLine label="Subtotal" value={rupee(f.subtotal)} />
+        {f.discount > 0 && <TicketLine label="Discount" value={`-${rupee(f.discount)}`} />}
+        {f.tax > 0 && <TicketLine label={`Tax (${f.taxPercent}%)`} value={rupee(f.tax)} />}
+        {f.service > 0 && <TicketLine label={`Service (${f.servicePercent}%)`} value={rupee(f.service)} />}
+        <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
+        <TicketLine label="TOTAL" value={rupee(f.grandTotal)} bold />
+        <Divider />
+        <div style={{ textAlign: "center", fontSize: 11 }}>Served by {staffName}</div>
+        <PoweredBy />
+      </PrintModal>
     </div>
   );
 }

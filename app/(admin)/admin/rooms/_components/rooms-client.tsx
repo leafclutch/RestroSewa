@@ -14,28 +14,40 @@ import {
   setRoomTypeWaiters,
 } from "@/app/actions/rooms-admin";
 import type { ActionResult, RoomRow, RoomTypeWithRooms } from "@/app/actions/rooms-admin";
+import { STATUS_STYLE } from "@/lib/status-colors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { QrCode, Trash2, X, Download, Pencil, RefreshCw, UserRound } from "lucide-react";
 
 export type EmployeeOption = { id: string; display_name: string };
-import { QRCodeCanvas } from "qrcode.react";
+import dynamic from "next/dynamic";
+
+// The QR canvas only ever renders INSIDE the print dialog — a modal most admins open
+// rarely and many never open at all. Loading its library on the initial page render
+// makes every visit to the table list pay for a feature it is not using. Fetched on
+// demand instead, at the moment the dialog opens.
+const QRCodeCanvas = dynamic(
+  () => import("qrcode.react").then((m) => m.QRCodeCanvas),
+  { ssr: false, loading: () => <div style={{ width: 220, height: 220 }} /> }
+);
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 
 type RoomStatus = RoomRow["status"];
 
+// One shared palette across the staff grids and here — this page used to paint Maintenance
+// red while the staff rooms grid painted it grey, for the same status. See lib/status-colors.
 const STATUS_LABEL: Record<RoomStatus, string> = {
-  available:   "Available",
-  occupied:    "Occupied",
-  cleaning:    "Cleaning",
-  maintenance: "Maintenance",
+  available:   STATUS_STYLE.available.label,
+  occupied:    STATUS_STYLE.occupied.label,
+  cleaning:    STATUS_STYLE.cleaning.label,
+  maintenance: STATUS_STYLE.maintenance.label,
 };
 const STATUS_COLOR: Record<RoomStatus, string> = {
-  available:   "#1a7a4a",
-  occupied:    "var(--color-primary)",
-  cleaning:    "#b45309",
-  maintenance: "var(--color-ruby)",
+  available:   STATUS_STYLE.available.color,
+  occupied:    STATUS_STYLE.occupied.color,
+  cleaning:    STATUS_STYLE.cleaning.color,
+  maintenance: STATUS_STYLE.maintenance.color,
 };
 
 // ─── QR Modal ─────────────────────────────────────────────────────────────────
@@ -96,6 +108,8 @@ function QrModal({
         </div>
         <div
           className="p-3 rounded-xl"
+          // MUST stay white in both themes — a QR needs a light quiet zone to scan. Do NOT
+          // tokenise this to --color-canvas; a dark background makes the code unscannable.
           style={{ background: "#ffffff", border: "1px solid var(--color-hairline)" }}
         >
           <QRCodeCanvas ref={canvasRef} value={target.url} size={220} level="M" marginSize={2} />

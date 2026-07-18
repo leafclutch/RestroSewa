@@ -7,6 +7,7 @@ import { logout } from "@/app/actions/auth";
 import { Home, LogOut } from "lucide-react";
 import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import { NotificationBell } from "./notification-bell";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 // The staff top bar. STICKY: it stays pinned while the dashboard scrolls, so
 // Notifications and Logout are always one tap away — which matters when a waiter
@@ -37,11 +38,17 @@ export function StaffNav({
       style={{
         background: "var(--color-brand-dark)",
         borderColor: "rgba(255,255,255,0.08)",
-        height: 56,
+        // The viewport is `viewport-fit: cover`, so on a notched phone the page
+        // starts at the physical top of the screen — under the clock. Padding the
+        // bar by the inset makes it grow UP into that strip and paint it brand-dark,
+        // which is what puts the status bar on the header instead of in front of it.
+        // On a device with no notch the inset is 0px and this is exactly the old 56.
+        height: "calc(56px + env(safe-area-inset-top, 0px))",
+        paddingTop: "env(safe-area-inset-top, 0px)",
       }}
     >
       {/* Brand / user — tapping it returns to the dashboard. Staff work for the
-          RESTAURANT, so its logo leads here; RestroSewa is the platform underneath
+          RESTAURANT, so its logo leads here; HRestroSewa is the platform underneath
           and doesn't compete for the space. */}
       <Link href="/employee/dashboard" className="flex-1 min-w-0 flex items-center gap-2.5">
         <RestaurantLogo
@@ -82,11 +89,13 @@ export function StaffNav({
       {/* Notifications — the bell owns the dropdown, the badge and the stream. */}
       <NotificationBell initialCount={notificationCount} />
 
+      <ThemeToggle />
+
       <button
         type="button"
         disabled={pending}
         onClick={() => startTransition(async () => { await logout(); })}
-        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-sm"
+        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-sm transition-colors hover:bg-white/5 active:bg-white/10"
         style={{ color: "rgba(255,255,255,0.4)" }}
       >
         <LogOut size={14} strokeWidth={1.5} />

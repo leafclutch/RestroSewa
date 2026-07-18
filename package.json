@@ -7,31 +7,37 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "lint:fix": "eslint --fix"
+    "lint:fix": "eslint --fix",
+    "pwa:assets": "node scripts/generate-pwa-assets.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "latest",
     "@supabase/supabase-js": "latest",
+    "@types/pg": "^8.11.10",
+    "@types/web-push": "^3.6.4",
     "class-variance-authority": "latest",
     "clsx": "latest",
     "lucide-react": "latest",
     "next": "latest",
+    "pg": "^8.21.0",
     "qrcode.react": "^4.2.0",
     "radix-ui": "latest",
     "react": "latest",
     "react-dom": "latest",
+    "server-only": "^0.0.1",
     "tailwind-merge": "latest",
-    "pg": "^8.21.0",
-    "@types/pg": "^8.11.10"
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@next/eslint-plugin-next": "latest",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "latest",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "eslint": "latest",
     "tailwindcss": "latest",
+    "tsx": "^4.23.1",
     "typescript": "latest"
   }
 }

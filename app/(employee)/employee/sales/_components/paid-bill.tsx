@@ -4,6 +4,7 @@ import { useState } from "react";
 import { getPaidBill } from "@/app/actions/pos";
 import type { PaidBill } from "@/app/actions/pos";
 import { PrintModal, BillTicket } from "@/app/(employee)/employee/_components/bill-ticket";
+import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
 import { Printer, Loader2 } from "lucide-react";
 
 const METHOD_LABEL: Record<string, string> = {
@@ -55,14 +56,21 @@ export function PaidBillButton({ paymentId }: { paymentId: string }) {
       </button>
 
       {bill && (
-        <PrintModal open={open} onClose={() => setOpen(false)} title="Bill — preview">
+        <PrintModal open={open} onClose={() => setOpen(false)} title="Bill — preview" paperWidthMm={bill.restaurant.paper_width_mm ?? 80}>
           <BillTicket
             restaurant={bill.restaurant}
-            billNo={`BILL-${bill.payment_id.slice(0, 8).toUpperCase()}`}
-            orders={bill.order_ids}
+            // The restaurant's own sequential number when configured; else the legacy ref.
+            billNo={
+              bill.bill_number != null
+                ? formatBillNumber(bill.bill_number, bill.bill_number_pad)
+                : `BILL-${bill.payment_id.slice(0, 8).toUpperCase()}`
+            }
+            billLabel={bill.bill_number != null ? billNumberLabel(bill.bill_number_label) : undefined}
             location={bill.location}
+            customer={bill.customer}
             at={new Date(bill.created_at)}
             items={bill.items}
+            discount={bill.discount}
             payment={{
               method: METHOD_LABEL[bill.method] ?? bill.method,
               cashier: bill.cashier_name,
