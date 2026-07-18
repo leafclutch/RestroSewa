@@ -46,7 +46,7 @@ function RestaurantCard({ r }: { r: RestaurantRow }) {
           {r.name}
         </p>
         <p className="text-xs truncate" style={{ color: "var(--color-ink-mute)" }}>
-          restrosewa.com/c/{r.slug}
+          hrestrosewa.com/c/{r.slug}
         </p>
       </div>
 

@@ -103,7 +103,7 @@ export function InstallPrompt() {
 
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
-            Install RestroSewa
+            Install HRestroSewa
           </p>
 
           {deferred ? (

@@ -5,7 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { AdminLoginForm } from "./_components/admin-form";
 import { StaffLogin } from "./_components/staff-login";
 import { getRestaurantStaff } from "@/app/actions/auth";
-import { PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
+import { PlatformLogo, PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
 import { InstallPrompt } from "@/components/pwa/install-prompt";
 
 export default async function LoginPage({
@@ -49,9 +49,10 @@ export default async function LoginPage({
 
   return (
     <div className="w-full max-w-[420px] mx-auto">
-      {/* Logo / wordmark */}
-      <div className="mb-6 sm:mb-8 text-center">
-        <PlatformWordmark size={24} tone="dark" accent="var(--color-lemon)" letterSpacing="-0.5px" />
+      {/* Logo / wordmark — the dark auth background is exactly what the emblem is designed for. */}
+      <div className="mb-6 sm:mb-8 flex flex-col items-center gap-3">
+        <PlatformLogo size={68} priority />
+        <PlatformWordmark size={22} tone="light" letterSpacing="-0.4px" />
       </div>
 
       {/* Offered here and nowhere else: it is the one screen a staff member is

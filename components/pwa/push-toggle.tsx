@@ -115,7 +115,7 @@ export function PushToggle() {
       Smartphone,
       "Add to Home Screen to get alerts",
       "On iPhone and iPad, Safari only delivers notifications to an installed app. " +
-        "Tap Share → Add to Home Screen, then open RestroSewa from your home screen."
+        "Tap Share → Add to Home Screen, then open HRestroSewa from your home screen."
     );
   }
 

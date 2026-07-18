@@ -295,7 +295,7 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
               </Link>
             </div>
             <p className="text-xs mb-3" style={{ color: "var(--color-ink-mute)" }}>
-              {detail.restaurant.name} · restrosewa.com/c/{detail.restaurant.slug}
+              {detail.restaurant.name} · hrestrosewa.com/c/{detail.restaurant.slug}
             </p>
 
             <div

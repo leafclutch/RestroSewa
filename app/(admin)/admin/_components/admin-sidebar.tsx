@@ -206,7 +206,7 @@ export function AdminSidebar({
           boxShadow: "1px 0 0 rgba(0,0,0,0.04), 4px 0 16px rgba(0,0,0,0.06)",
         }}
       >
-        {/* The RESTAURANT leads — this is their dashboard. RestroSewa stays as the
+        {/* The RESTAURANT leads — this is their dashboard. HRestroSewa stays as the
             quiet platform mark beneath it. Both the name and the platform mark are
             dropped on the rail: the logo alone still identifies it, and the
             wordmark would only wrap. */}

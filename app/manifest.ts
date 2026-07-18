@@ -4,8 +4,8 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
-    name: "RestroSewa — Hospitality Management",
-    short_name: "RestroSewa",
+    name: "HRestroSewa — Hospitality Management",
+    short_name: "HRestroSewa",
     description:
       "Run the floor from your pocket: tables, rooms, orders, billing and live service alerts.",
 

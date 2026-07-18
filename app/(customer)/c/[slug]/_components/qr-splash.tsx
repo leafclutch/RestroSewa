@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
+import { PlatformLogo, PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
 
 const HOLD_MS = 1200; // the branded beat
 const FADE_MS = 400; // …then it dissolves into the menu
@@ -80,7 +80,11 @@ export function QrSplash({ slug }: { slug: string }) {
         }}
       />
 
-      <div className="rs-splash-mark" style={{ animation: "rs-splash-in .5s cubic-bezier(.2,.8,.2,1) both" }}>
+      <div
+        className="rs-splash-mark flex flex-col items-center gap-4"
+        style={{ animation: "rs-splash-in .5s cubic-bezier(.2,.8,.2,1) both" }}
+      >
+        <PlatformLogo size={84} priority />
         <PlatformWordmark size="clamp(30px, 9vw, 44px)" letterSpacing="-0.8px" />
       </div>
 

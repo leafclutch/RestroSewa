@@ -48,7 +48,7 @@ export function StaffNav({
       }}
     >
       {/* Brand / user — tapping it returns to the dashboard. Staff work for the
-          RESTAURANT, so its logo leads here; RestroSewa is the platform underneath
+          RESTAURANT, so its logo leads here; HRestroSewa is the platform underneath
           and doesn't compete for the space. */}
       <Link href="/employee/dashboard" className="flex-1 min-w-0 flex items-center gap-2.5">
         <RestaurantLogo

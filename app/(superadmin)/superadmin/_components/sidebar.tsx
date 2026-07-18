@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useTransition } from "react";
 import { logoutSuperAdmin } from "@/app/actions/auth";
 import { Store, LogOut, Settings } from "lucide-react";
-import { PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
+import { PlatformLogo, PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
 
 const NAV = [
   { label: "Restaurants", href: "/superadmin/dashboard", icon: Store, exact: true },
@@ -29,11 +29,14 @@ export function SuperAdminSidebar() {
     >
       {/* Logo */}
       <div className="px-5 py-6 border-b" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-        {/* Super Admin is PLATFORM territory — RestroSewa is the only brand here. */}
+        {/* Super Admin is PLATFORM territory — HRestroSewa is the only brand here. */}
         <Link href="/superadmin/dashboard" className="block">
-          <PlatformWordmark size={16} className="block" />
+          <span className="flex items-center gap-2">
+            <PlatformLogo size={28} priority />
+            <PlatformWordmark size={16} />
+          </span>
           <p
-            className="text-xs mt-0.5"
+            className="text-xs mt-1.5"
             style={{ color: "rgba(255,255,255,0.35)", fontSize: 10 }}
           >
             Super Admin

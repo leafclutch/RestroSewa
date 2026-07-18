@@ -17,20 +17,23 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "RestroSewa",
+  title: "HRestroSewa",
   description: "Hospitality Management Platform",
-  applicationName: "RestroSewa",
+  applicationName: "HRestroSewa",
   manifest: "/manifest.webmanifest",
   icons: {
+    // `?v=2` cache-busts the HRestroSewa rebrand. Browsers cache favicons by URL and won't
+    // re-fetch an unchanged path even after the file's bytes change — so the old cloche icon
+    // lingered in tabs. Bumping the query forces a fresh fetch. Bump again if the icon changes.
     icon: [
-      { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
-      { url: "/icons/favicon-16.png", sizes: "16x16", type: "image/png" },
+      { url: "/icons/favicon-32.png?v=2", sizes: "32x32", type: "image/png" },
+      { url: "/icons/favicon-16.png?v=2", sizes: "16x16", type: "image/png" },
     ],
-    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
+    apple: [{ url: "/icons/apple-touch-icon.png?v=2", sizes: "180x180" }],
   },
   appleWebApp: {
     capable: true,
-    title: "RestroSewa",
+    title: "HRestroSewa",
     // `default` gives black text on our own background. `black-translucent` would
     // slide the page up UNDER the clock and battery — a header rendered behind the
     // status bar, which is a thing you have to then fight with padding.

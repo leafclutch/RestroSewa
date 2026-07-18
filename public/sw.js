@@ -1,6 +1,6 @@
 /* eslint-disable no-undef */
 //
-// RestroSewa service worker.
+// HRestroSewa service worker.
 //
 // Hand-written on purpose. The usual move is Workbox (via next-pwa / Serwist), and
 // its default posture is "precache everything and serve it from cache first" —
@@ -26,8 +26,8 @@
 //
 // Bump VERSION to retire the old caches on the next activation.
 
-const VERSION = "v1";
-const STATIC_CACHE = `restrosewa-static-${VERSION}`;
+const VERSION = "v2";
+const STATIC_CACHE = `hrestrosewa-static-${VERSION}`;
 const OFFLINE_URL = "/offline";
 
 self.addEventListener("install", (event) => {
@@ -81,7 +81,9 @@ self.addEventListener("activate", (event) => {
         const keys = await caches.keys();
         await Promise.all(
           keys
-            .filter((k) => k.startsWith("restrosewa-") && k !== STATIC_CACHE)
+            // Both prefixes: purge the pre-rebrand `restrosewa-` caches AND any older
+            // `hrestrosewa-` ones, leaving only the current STATIC_CACHE.
+            .filter((k) => (k.startsWith("restrosewa-") || k.startsWith("hrestrosewa-")) && k !== STATIC_CACHE)
             .map((k) => caches.delete(k))
         );
       } catch (err) {
@@ -140,7 +142,7 @@ async function networkOnlyWithOfflinePage(request) {
     }
 
     return new Response(
-      "You are offline. RestroSewa needs a connection — reopen once you are back.",
+      "You are offline. HRestroSewa needs a connection — reopen once you are back.",
       { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } }
     );
   }
@@ -201,7 +203,7 @@ self.addEventListener("push", (event) => {
     // Malformed or non-JSON payload. We still have to show SOMETHING — see above.
   }
 
-  const title = payload.title || "RestroSewa";
+  const title = payload.title || "HRestroSewa";
   const body = payload.body || "You have a new alert.";
 
   event.waitUntil(
@@ -212,7 +214,7 @@ self.addEventListener("push", (event) => {
       // get a grey square.
       badge: "/icons/maskable-192.png",
       // Same tag ⇒ replaces the previous alert instead of stacking a duplicate.
-      tag: payload.tag || "restrosewa",
+      tag: payload.tag || "hrestrosewa",
       renotify: Boolean(payload.tag),
       // Service calls stay on screen until dealt with, rather than fading out while
       // the waiter's hands are full.
@@ -305,7 +307,7 @@ self.addEventListener("notificationclick", (event) => {
         // guest is waiting on it — so silence here is the worst possible outcome.
         // Put it back in front of them, honestly, with a way to finish the job.
         await self.registration.showNotification("Couldn't complete that", {
-          body: result.error || "Open RestroSewa to deal with this request.",
+          body: result.error || "Open HRestroSewa to deal with this request.",
           icon: "/icons/icon-192.png",
           badge: "/icons/maskable-192.png",
           tag: `failed-${notificationId}`,
@@ -316,7 +318,7 @@ self.addEventListener("notificationclick", (event) => {
         // Offline, or the session expired. Same reasoning as above: never let a
         // failed action look like a successful one.
         await self.registration.showNotification("You're offline", {
-          body: "That action didn't go through. Open RestroSewa to try again.",
+          body: "That action didn't go through. Open HRestroSewa to try again.",
           icon: "/icons/icon-192.png",
           badge: "/icons/maskable-192.png",
           tag: `offline-${notificationId}`,

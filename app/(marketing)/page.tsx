@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
+import { PlatformLogo, PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
 
 const FEATURES = [
   {
@@ -28,7 +28,10 @@ export default function LandingPage() {
           backdropFilter: "blur(10px)",
         }}
       >
-        <PlatformWordmark size={18} accent="var(--color-lemon)" />
+        <span className="flex items-center gap-2">
+          <PlatformLogo size={30} priority />
+          <PlatformWordmark size={18} />
+        </span>
         <Link
           href="/login"
           className="text-sm px-4 py-1.5 rounded-full transition-all"
@@ -52,10 +55,10 @@ export default function LandingPage() {
       >
         {/* The hero mark scales with the viewport, so it stays the loudest thing
             on the page on a phone as well as a desktop. */}
-        <div className="mb-5 sm:mb-6">
+        <div className="mb-5 sm:mb-6 flex flex-col items-center gap-4">
+          <PlatformLogo size={104} priority />
           <PlatformWordmark
             size="clamp(30px, 8vw, 48px)"
-            accent="var(--color-lemon)"
             letterSpacing="-0.8px"
           />
         </div>
@@ -135,7 +138,7 @@ export default function LandingPage() {
         style={{ borderColor: "var(--color-hairline)" }}
       >
         <p className="text-xs text-center" style={{ color: "var(--color-ink-mute)" }}>
-          &copy; {new Date().getFullYear()} RestroSewa &mdash; Hospitality Management Platform
+          &copy; {new Date().getFullYear()} HRestroSewa &mdash; Hospitality Management Platform
         </p>
         <PoweredBy height={18} />
       </footer>

@@ -1,75 +1,107 @@
-// Generates every PWA raster asset from one vector source.
+// Generates every PWA raster asset from the HRestroSewa logo.
 //
-// RestroSewa's brand is a TEXT wordmark — there has never been an app icon, and a
-// wordmark is illegible at 48px anyway. So the mark drawn here is a serving cloche
-// on the brand purple: it survives being shrunk to a launcher icon, and it needs no
-// font, which matters because rasterising text through libvips depends on fontconfig
-// and would not render the same on every machine that runs this script.
+// The brand mark is `public/hrestrosewa-logo.png` (1024², the one canonical emblem asset, shared
+// with in-app <PlatformLogo>) — a square emblem on its OWN rounded navy tile (a white "H" house, a
+// serving cloche and a fork/spoon, on navy #19204f). 1024² is ample: the largest output is a ~512px
+// icon / ~860px splash mark. Because the tile is
+// baked into the art, the launcher icons are essentially the logo itself; the only field we ever
+// add is the SAME navy, bled to the edge for the surfaces that must be full-bleed (maskable +
+// apple-touch, which the platform crops or squircle-masks and which do not honour transparency).
+// Wrapping it in any OTHER colour would read as a tile-inside-a-tile.
 //
-// Everything is committed to public/, so this is a one-shot generator, not part of
-// the build. Re-run it only when the mark or the device list changes:
+// Everything is committed to public/, so this is a one-shot generator, not part of the build.
+// Re-run only when the logo or the device list changes:
 //
 //     node scripts/generate-pwa-assets.mjs
 //
 // sharp comes in with Next (it powers next/image), so there is no new dependency.
 
-import sharp from "sharp";
+import { createRequire } from "node:module";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// sharp is a CJS/native module; import it through a require rooted at the project so this runs the
+// same whether invoked directly or with a stray NODE_PATH set.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(join(ROOT, "package.json"));
+const sharp = require("sharp");
+
 const PUBLIC = join(ROOT, "public");
+const LOGO = join(PUBLIC, "hrestrosewa-logo.png");
 
-const BRAND = "#533afd"; // --color-primary
-const CANVAS = "#f6f9fc"; // --color-canvas-soft — the app's own background
+const NAVY = "#19204f"; // the logo tile's own navy — the ONLY field colour we add
+const CANVAS = "#f6f9fc"; // --color-canvas-soft, the app's own background (splash, matches the app)
+const TRANSPARENT = { r: 0, g: 0, b: 0, alpha: 0 };
 
-// The mark, authored in a 512×512 box. Deliberately drawn as paths rather than
-// text so it rasterises identically everywhere.
-const glyph = (color) => `
-  <g fill="${color}">
-    <rect x="112" y="310" width="288" height="26" rx="13"/>
-    <path d="M150 310 A106 106 0 0 1 362 310 Z"/>
-    <rect x="250" y="196" width="12" height="16" rx="6"/>
-    <circle cx="256" cy="190" r="15"/>
-  </g>`;
+// The logo carries ~7% transparent margin around its tile. Trim it ONCE so the navy tile fills its
+// own buffer edge-to-edge; every icon then scales this tight tile down (scale <= 1), which keeps the
+// composite input no larger than the canvas (sharp refuses a larger overlay).
+const TILE = await sharp(LOGO).trim({ threshold: 10 }).png().toBuffer();
 
-// The drawing above is inset within its 512 box — the art itself only spans
-// x 112–400, y 176–336 — so `scale` is relative to the BOX, not to the ink. A
-// scale above 1 is therefore normal and still leaves the mark inside the field;
-// it just stops the cloche from swimming in a sea of purple.
-const ART_W = 288 / 512; // 0.5625 — how much of the box the ink actually covers
-// Furthest the ink reaches from the centre of the box, as a fraction of the edge.
-// This is what has to stay inside a maskable icon's safe circle.
-const ART_R = Math.hypot(144, 80) / 512; // 0.3216
+async function logoBuf(px) {
+  return sharp(TILE)
+    .resize(px, px, { fit: "contain", background: TRANSPARENT })
+    .png()
+    .toBuffer();
+}
+
+const roundedField = (size, bg, radius) =>
+  Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">
+       <rect width="${size}" height="${size}" rx="${size * radius}" ry="${size * radius}" fill="${bg}"/>
+     </svg>`
+  );
 
 /**
  * @param size    edge length in px
- * @param bg      field colour, or null for a transparent field
- * @param fg      glyph colour
- * @param scale   fraction of the edge the 512-box is mapped onto
- * @param radius  corner radius as a fraction of the edge (0 = square)
+ * @param bg      field colour, or null for a transparent field (logo's own tile IS the icon)
+ * @param scale   fraction of the edge the LOGO spans (scale>1 bleeds the tile past the margin)
+ * @param radius  field corner radius as a fraction of the edge (only used when bg is set)
+ * @param out     output path under public/
  */
-function icon({ size, bg, fg, scale, radius }) {
-  const s = (size * scale) / 512;
-  const off = (size * (1 - scale)) / 2;
-  const field = bg
-    ? `<rect width="${size}" height="${size}" rx="${size * radius}" fill="${bg}"/>`
-    : "";
-  return Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-       ${field}
-       <g transform="translate(${off} ${off}) scale(${s})">${glyph(fg)}</g>
-     </svg>`
-  );
+async function makeIcon({ size, bg, scale, radius = 0, out }) {
+  const inner = Math.round(size * scale);
+  const logo = await logoBuf(inner);
+  const layers = [];
+  if (bg) layers.push({ input: roundedField(size, bg, radius) });
+  layers.push({ input: logo, gravity: "centre" });
+  await sharp({ create: { width: size, height: size, channels: 4, background: TRANSPARENT } })
+    .composite(layers)
+    .png()
+    .toFile(join(PUBLIC, out));
 }
 
-const png = (buf, path) => sharp(buf).png().toFile(join(PUBLIC, path));
+await mkdir(join(PUBLIC, "icons"), { recursive: true });
+await mkdir(join(PUBLIC, "splash"), { recursive: true });
+
+// ── Launcher icons ────────────────────────────────────────────────────────────
+// `any` icons are shown as-authored, so the logo's OWN rounded navy tile is the icon (tile filled
+// edge-to-edge; its rounded corners are the icon's corners, transparent outside them).
+for (const size of [192, 256, 384, 512]) {
+  await makeIcon({ size, bg: null, scale: 1.0, out: `icons/icon-${size}.png` });
+}
+
+// `maskable` icons are CROPPED by the platform (a circle on Pixel, a squircle on Samsung). Bleed the
+// SAME navy to the edge (radius 0) so the crop only ever eats navy, and keep the emblem well inside
+// the spec's safe circle (radius 40% of the edge). 0.72 keeps the widest points — the fork and spoon
+// tips — comfortably clear of any platform crop (the extra padding is navy, so it's invisible).
+for (const size of [192, 512]) {
+  await makeIcon({ size, bg: NAVY, scale: 0.72, radius: 0, out: `icons/maskable-${size}.png` });
+}
+
+// iOS squircle-masks its icon and does NOT honour transparency (a transparent corner comes out
+// black), so this is full-bleed navy too.
+await makeIcon({ size: 180, bg: NAVY, scale: 0.92, radius: 0, out: "icons/apple-touch-icon.png" });
+
+// A favicon is read at 16px in a tab strip — the tile fills the frame.
+for (const size of [32, 16]) {
+  await makeIcon({ size, bg: null, scale: 1.0, out: `icons/favicon-${size}.png` });
+}
 
 // ── Apple splash screens ──────────────────────────────────────────────────────
-// iOS will not show a launch image unless a <link> matches the device EXACTLY —
-// width, height, pixel ratio and orientation. Miss by one and you get a blank
-// white screen instead. Hence the device table; there is no wildcard.
+// iOS will not show a launch image unless a <link> matches the device EXACTLY — width, height,
+// pixel ratio and orientation. Miss by one and you get a blank white screen. Hence the device table.
 const DEVICES = [
   { w: 430,  h: 932,  dpr: 3 }, // iPhone 15/16 Pro Max
   { w: 393,  h: 852,  dpr: 3 }, // iPhone 14/15/16 Pro
@@ -87,86 +119,26 @@ const DEVICES = [
   { w: 768,  h: 1024, dpr: 2 }, // iPad 9.7"
 ];
 
+// The mark (the logo tile) sits centred on the app's own LIGHT background, so the launch screen is
+// the same surface as the app that follows it — no dark→light flash. The navy tile reads cleanly on
+// the light field. Fixed fraction of the SHORT edge, so it's the same size on a phone and an iPad.
 async function splash(pxW, pxH, file) {
-  // The mark sits at a fixed fraction of the SHORT edge, so it looks the same
-  // size on a phone and on a 12.9" iPad.
   const markPx = Math.round(Math.min(pxW, pxH) * 0.42);
-  const mark = await sharp(
-    icon({ size: markPx, bg: null, fg: BRAND, scale: 1, radius: 0 })
-  )
-    .png()
-    .toBuffer();
-
-  await sharp({
-    create: {
-      width: pxW,
-      height: pxH,
-      channels: 4,
-      background: CANVAS,
-    },
-  })
+  const mark = await logoBuf(markPx);
+  await sharp({ create: { width: pxW, height: pxH, channels: 4, background: CANVAS } })
     .composite([{ input: mark, gravity: "centre" }])
     .png()
     .toFile(join(PUBLIC, file));
 }
 
-await mkdir(join(PUBLIC, "icons"), { recursive: true });
-await mkdir(join(PUBLIC, "splash"), { recursive: true });
-
-// ── Launcher icons ────────────────────────────────────────────────────────────
-// `any` icons are shown as-authored, so they carry their own rounded corners.
-// Ink ends up ~62% of the edge, which is the usual weight for a launcher icon.
-const ANY = 1.1;
-for (const size of [192, 256, 384, 512]) {
-  await png(
-    icon({ size, bg: BRAND, fg: "#ffffff", scale: ANY, radius: 0.22 }),
-    `icons/icon-${size}.png`
-  );
-}
-
-// `maskable` icons are CROPPED by the platform to whatever shape it likes — a
-// circle on Pixel, a squircle on Samsung. So: bleed the field to the very edge
-// (no rounded corners of our own, or they show up as notches), and keep the ink
-// inside the safe circle (radius 40% of the edge) that the spec guarantees will
-// survive any mask.
-const MASKABLE = 1.0;
-if (ART_R * MASKABLE > 0.4) throw new Error("maskable ink escapes the safe circle");
-for (const size of [192, 512]) {
-  await png(
-    icon({ size, bg: BRAND, fg: "#ffffff", scale: MASKABLE, radius: 0 }),
-    `icons/maskable-${size}.png`
-  );
-}
-
-// iOS applies its own squircle mask and does NOT honour transparency — a
-// transparent corner comes out black — so this one is a full-bleed square too.
-await png(
-  icon({ size: 180, bg: BRAND, fg: "#ffffff", scale: 1.05, radius: 0 }),
-  "icons/apple-touch-icon.png"
-);
-
-// A favicon is read at 16px in a tab strip, so the ink is pushed as large as the
-// field allows.
-for (const size of [32, 16]) {
-  await png(
-    icon({ size, bg: BRAND, fg: "#ffffff", scale: 1.25, radius: 0.2 }),
-    `icons/favicon-${size}.png`
-  );
-}
-console.log(`ink covers ${(ART_W * ANY * 100).toFixed(0)}% of an "any" icon`);
-
-// ── Splash screens, both orientations ─────────────────────────────────────────
 const entries = [];
 for (const d of DEVICES) {
   const pw = d.w * d.dpr;
   const ph = d.h * d.dpr;
-
   const portrait = `splash/${d.w}x${d.h}@${d.dpr}x-portrait.png`;
   const landscape = `splash/${d.w}x${d.h}@${d.dpr}x-landscape.png`;
-
   await splash(pw, ph, portrait);
   await splash(ph, pw, landscape);
-
   entries.push(
     {
       href: `/${portrait}`,
@@ -179,23 +151,15 @@ for (const d of DEVICES) {
   );
 }
 
-// Emit the <link> table rather than hand-maintaining 28 tags next to a 14-row
-// device list that would drift apart the first time a phone is added.
+// Emit the <link> table rather than hand-maintaining 28 tags next to a 14-row device list.
 await writeFile(
   join(ROOT, "lib", "pwa", "apple-splash.ts"),
   `// GENERATED by scripts/generate-pwa-assets.mjs — do not edit by hand.
-// iOS matches a launch image on an exact device-width/height/DPR/orientation
-// query; anything unmatched simply gets a blank screen.
-export const APPLE_SPLASH: { href: string; media: string }[] = ${JSON.stringify(
-    entries,
-    null,
-    2
-  )};
+// iOS matches a launch image on an exact device-width/height/DPR/orientation query; anything
+// unmatched simply gets a blank screen.
+export const APPLE_SPLASH: { href: string; media: string }[] = ${JSON.stringify(entries, null, 2)};
 `,
   "utf8"
 );
 
-console.log(
-  `Wrote ${4 + 2 + 1 + 2} icons and ${entries.length} splash screens, ` +
-    `plus lib/pwa/apple-splash.ts`
-);
+console.log(`Wrote ${4 + 2 + 1 + 2} icons and ${entries.length} splash screens, plus lib/pwa/apple-splash.ts`);

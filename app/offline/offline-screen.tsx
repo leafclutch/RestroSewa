@@ -57,7 +57,7 @@ export function OfflineScreen() {
         <p className="text-sm leading-relaxed mb-8" style={{ color: "var(--color-ink-mute)" }}>
           {online
             ? "Reconnecting you now…"
-            : "RestroSewa needs a connection to show live tables, orders and billing. " +
+            : "HRestroSewa needs a connection to show live tables, orders and billing. " +
               "Rather than show you a stale floor plan, it waits."}
         </p>
 

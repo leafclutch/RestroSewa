@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ListOrdered, Banknote, LayoutGrid, BedDouble, BookOpen, ChevronDown, HandCoins, ShoppingBag } from "lucide-react";
 import { accentOf } from "@/lib/section-colors";
+import { PlatformLogo, PlatformWordmark } from "@/components/branding/platform-logo";
 
 export type SectionKey = "orders" | "tables" | "walkins" | "rooms" | "sales" | "credits" | "menu";
 
@@ -233,6 +234,15 @@ export function StaffDashboard({
           )}
         </div>
       )}
+
+      {/* A quiet platform mark at the very bottom. The RESTAURANT leads the top bar; HRestroSewa
+          sits underneath here so the app is still signed without competing for the header. Theme
+          -aware: the emblem carries its own background, and the wordmark's base tracks --color-ink
+          (tone="dark") so it flips with the dashboard's light/dark. */}
+      <div className="mt-10 pt-6 flex flex-col items-center gap-2">
+        <PlatformLogo size={30} />
+        <PlatformWordmark size={14} tone="dark" letterSpacing="-0.2px" />
+      </div>
     </div>
   );
 }

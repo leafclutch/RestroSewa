@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { OfflineScreen } from "./offline-screen";
 
-export const metadata: Metadata = { title: "Offline — RestroSewa" };
+export const metadata: Metadata = { title: "Offline — HRestroSewa" };
 
 // Precached by the service worker at install, and served whenever a navigation
 // can't reach the network.
