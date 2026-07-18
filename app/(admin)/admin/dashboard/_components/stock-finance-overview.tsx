@@ -205,7 +205,7 @@ export function StockFinanceOverview({ data }: { data: DashboardAnalytics }) {
                 <div className="text-right shrink-0">
                   <p className="text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>{money(p.total_amount)}</p>
                   <p
-                    className="text-[10px] uppercase tracking-wide font-medium"
+                    className="text-xs uppercase tracking-wide font-medium"
                     style={{ color: p.credit_amount > 0 ? "var(--color-warning)" : "var(--color-ink-mute)", letterSpacing: "0.06em" }}
                   >
                     {p.credit_amount > 0 ? "On credit" : METHOD_LABEL[p.method] ?? p.method}
@@ -248,7 +248,7 @@ export function StockFinanceOverview({ data }: { data: DashboardAnalytics }) {
                   <div className="text-right shrink-0">
                     <p className="text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>{money(s.amount)}</p>
                     <p
-                      className="text-[10px] uppercase tracking-wide font-medium"
+                      className="text-xs uppercase tracking-wide font-medium"
                       style={{ color: s.onCredit ? "var(--color-warning)" : "var(--color-success)", letterSpacing: "0.06em" }}
                     >
                       {s.onCredit ? "On credit" : METHOD_LABEL[s.method] ?? s.method}

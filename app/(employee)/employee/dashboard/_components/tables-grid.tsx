@@ -107,10 +107,11 @@ const TableCard = memo(function TableCard({
     );
   }
 
-  // Free. Green, but only as a tinted panel and a dot — a floor is mostly free, so filling 55
-  // cards with saturated green would drown the handful that actually need attention. The
-  // number stays ink so it's the most legible thing on the card.
-  const s = STATUS_STYLE.available;
+  // Free. The section's own blue, but only as a tinted panel and a dot — a floor is mostly
+  // free, so filling 55 cards with a saturated fill would drown the handful that actually need
+  // attention. A free table stays in the Tables blue (just lighter); activating it deepens the
+  // same blue to the solid fill above. Only the INTENSITY changes — the colour family holds.
+  const a = SECTION_ACCENT.tables;
   return (
     <button
       type="button"
@@ -128,16 +129,16 @@ const TableCard = memo(function TableCard({
       className={`${CARD} hover:brightness-95`}
       style={{
         minHeight: 88,
-        background: s.soft,
-        borderColor: s.color,
+        background: a.soft,
+        borderColor: a.color,
         opacity: opening ? 0.5 : 1,
       }}
     >
       <span className={NUMBER} style={{ ...NUMBER_STYLE, color: "var(--color-ink)" }}>
         {table.number}
       </span>
-      <span className="text-xs mt-1 inline-flex items-center gap-1" style={{ color: s.color }}>
-        <span aria-hidden className="w-1.5 h-1.5 rounded-full" style={{ background: s.color }} />
+      <span className="text-xs mt-1 inline-flex items-center gap-1" style={{ color: a.color }}>
+        <span aria-hidden className="w-1.5 h-1.5 rounded-full" style={{ background: a.color }} />
         Free
       </span>
     </button>
@@ -184,12 +185,12 @@ export function TablesGrid({
     <div>
       <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
         <p className="text-base font-medium" style={{ color: SECTION_ACCENT.tables.color }}>Tables</p>
-        {/* Counts as status-coloured pills: the same green/blue/orange the cards use, so the
-            summary and the grid teach each other. Zero-count states are dropped rather than
-            shown as "0", which is noise on a small screen. */}
+        {/* Counts echo the cards: free = the section's tinted blue (outline), active = the same
+            blue solid, cleaning = the cross-cutting orange. Summary and grid teach each other.
+            Zero-count states are dropped rather than shown as "0", which is noise on a small screen. */}
         <span className="inline-flex items-center gap-1.5 flex-wrap">
-          {free > 0 && <CountPill n={free} label="free" tone={STATUS_STYLE.available} />}
-          {active > 0 && <CountPill n={active} label="active" tone={STATUS_STYLE.active} />}
+          {free > 0 && <CountPill n={free} label="free" tone={SECTION_ACCENT.tables} />}
+          {active > 0 && <CountPill n={active} label="active" tone={STATUS_STYLE.active} fill="var(--fill-blue)" />}
           {dirty > 0 && <CountPill n={dirty} label="cleaning" tone={STATUS_STYLE.cleaning} />}
           <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>{tables.length} total</span>
         </span>

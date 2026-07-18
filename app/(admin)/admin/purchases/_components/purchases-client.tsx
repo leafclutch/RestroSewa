@@ -550,7 +550,7 @@ export function PurchasesClient({
     <div className="p-4 sm:p-6 max-w-6xl mx-auto">
       <div className="flex items-start justify-between gap-3 mb-1">
         <div>
-          <h1 className="text-xl" style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}>
+          <h1 className="text-2xl" style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}>
             Purchases
           </h1>
           <p className="text-sm mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
@@ -670,7 +670,7 @@ export function PurchasesClient({
                     <td className="px-4 py-3" style={{ color: "var(--color-ink)" }}>{p.vendor_name}</td>
                     <td className="px-4 py-3">
                       <span
-                        className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full border"
+                        className="text-xs uppercase tracking-wide px-2 py-0.5 rounded-full border"
                         style={{
                           color: METHOD_COLOR[p.method],
                           borderColor: `${METHOD_COLOR[p.method]}44`,
@@ -718,7 +718,7 @@ export function PurchasesClient({
                     <p className="text-sm font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>
                       {money(p.total_amount)}
                     </p>
-                    <p className="text-[10px] uppercase tracking-wide" style={{ color: METHOD_COLOR[p.method], letterSpacing: "0.06em" }}>
+                    <p className="text-xs uppercase tracking-wide" style={{ color: METHOD_COLOR[p.method], letterSpacing: "0.06em" }}>
                       {METHOD_LABEL[p.method]}
                     </p>
                   </div>

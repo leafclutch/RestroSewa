@@ -6,7 +6,8 @@ import type { ActionResult, CartItem } from "@/app/actions/pos";
 import type { CategoryRow, MenuItemRow, VariantRow } from "@/app/actions/menu";
 import { Button } from "@/components/ui/button";
 import { FoodMark } from "@/components/ui/food-mark";
-import { Minus, Plus, ShoppingBag, X } from "lucide-react";
+import { assignCategoryHues, styleOf } from "@/lib/category-colors";
+import { Minus, Plus, Search, ShoppingBag, X } from "lucide-react";
 
 // A cart line is an item AND the variant chosen for it: a Large Coffee and a
 // Small Coffee are two lines, not one line of quantity 2. The map is therefore
@@ -34,6 +35,7 @@ export function MenuBrowser({
   variants: VariantRow[];
 }) {
   const [activeCategoryId, setActiveCategoryId] = useState<string>(categories[0]?.id ?? "");
+  const [query, setQuery] = useState("");
   const [cart, setCart] = useState<Map<LineKey, number>>(new Map());
   const [picking, setPicking] = useState<MenuItemRow | null>(null);
   const [state, dispatch, pending] = useActionState<ActionResult, FormData>(submitOrder, null);
@@ -49,9 +51,19 @@ export function MenuBrowser({
     return m;
   }, [variants]);
 
-  const visibleItems = items.filter(
-    (i) => i.category_id === activeCategoryId && i.availability_status === "available"
-  );
+  // One hue per category, resolved over the whole list at once (distinct up to 12) — see
+  // lib/category-colors.ts. Drives the tab colours and each item card's category accent.
+  const hueMap = useMemo(() => assignCategoryHues(categories), [categories]);
+  const catStyleOf = (categoryId: string) => styleOf(hueMap.get(categoryId) ?? "orange");
+
+  // While searching, the active category is set aside and every available item whose name matches
+  // is shown as a flat list — the fastest way to find a dish is to type it, not to hunt for its
+  // tab. The input is a plain controlled field, so it never remounts and never loses focus.
+  const q = query.trim().toLowerCase();
+  const searching = q.length > 0;
+  const visibleItems = searching
+    ? items.filter((i) => i.availability_status === "available" && i.name.toLowerCase().includes(q))
+    : items.filter((i) => i.category_id === activeCategoryId && i.availability_status === "available");
 
   function adjust(key: LineKey, delta: number) {
     setCart((prev) => {
@@ -128,33 +140,80 @@ export function MenuBrowser({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Category tabs */}
-      <div
-        className="flex gap-1 overflow-x-auto px-4 py-2 border-b shrink-0"
-        style={{ borderColor: "var(--color-hairline)" }}
-      >
-        {categories.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            onClick={() => setActiveCategoryId(c.id)}
-            className="px-3 py-1.5 rounded-lg text-sm whitespace-nowrap shrink-0"
-            style={{
-              background: activeCategoryId === c.id ? "var(--color-primary)" : "transparent",
-              color: activeCategoryId === c.id ? "#fff" : "var(--color-ink-mute)",
-              fontWeight: activeCategoryId === c.id ? 400 : 300,
-            }}
-          >
-            {c.name}
-          </button>
-        ))}
+      {/* Search — the fastest path to a dish. Non-empty query hides the tabs and searches every
+          category at once. */}
+      <div className={`px-4 pt-3 pb-2.5 shrink-0 ${searching ? "border-b" : ""}`} style={{ borderColor: "var(--color-hairline)" }}>
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--color-ink-mute)" }} />
+          <input
+            type="text"
+            inputMode="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search menu…"
+            aria-label="Search menu"
+            className="w-full h-11 rounded-xl border pl-9 pr-9 text-base"
+            style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-full"
+              style={{ color: "var(--color-ink-mute)" }}
+            >
+              <X size={15} />
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Category tabs — EVERY tab wears its category colour by default (tinted chip + coloured
+          text), so the whole row is colourful at rest and a category is recognisable before it's
+          read. Tapping one makes it *harder*, not merely colourful: a solid colour border, a ring
+          and bold weight. Tints/text, never a white-on-fill pill (--cat-* are foreground tokens
+          that invert behind white text in dark). Hidden while searching. */}
+      {!searching && (
+        <div
+          className="flex gap-1.5 overflow-x-auto px-4 py-2.5 border-b shrink-0"
+          style={{ borderColor: "var(--color-hairline)" }}
+        >
+          {categories.map((c) => {
+            const active = activeCategoryId === c.id;
+            const cat = catStyleOf(c.id);
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setActiveCategoryId(c.id)}
+                className="px-3.5 py-2 rounded-lg text-sm whitespace-nowrap shrink-0 border transition-all"
+                style={{
+                  // Every tab is a coloured OUTLINE chip at rest — the border+text carry the colour
+                  // and read cleanly on the near-white light canvas (a bare soft tint had no edge
+                  // and vanished into the background). Tapping FILLS it with a stronger mid-tint of
+                  // the same hue + bold weight + a doubled border, so selected is clearly harder in
+                  // both themes. Mid-tint via color-mix, never a white-on-fill pill (--cat-* invert
+                  // behind white text in dark).
+                  background: active ? `color-mix(in srgb, ${cat.color} 18%, var(--color-canvas))` : "transparent",
+                  color: cat.color,
+                  borderColor: cat.color,
+                  boxShadow: active ? `inset 0 0 0 1px ${cat.color}` : "none",
+                  fontWeight: active ? 600 : 400,
+                }}
+              >
+                {c.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Items grid */}
       <div className="flex-1 overflow-y-auto p-4">
         {visibleItems.length === 0 ? (
           <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
-            No items in this category.
+            {searching ? `No items match “${query.trim()}”.` : "No items in this category."}
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
@@ -168,13 +227,21 @@ export function MenuBrowser({
                 ? Math.min(...opts.map((v) => Number(v.price)))
                 : Number(item.price);
 
+              // Each card wears its category's hue on a 3px left edge, so a dish is tied to its
+              // category at a glance — the cue that matters most in search results, where items
+              // from different categories sit side by side. A card in the cart deepens to the full
+              // category border + tint; the Add/±/quantity controls stay brand purple (the "this is
+              // the action" colour, consistent app-wide).
+              const cat = catStyleOf(item.category_id);
               return (
                 <div
                   key={item.id}
-                  className="rounded-xl border p-3 flex flex-col gap-2"
+                  className="rounded-xl border p-3.5 flex flex-col gap-2"
                   style={{
-                    background: qty > 0 ? "var(--color-canvas-soft)" : "var(--color-canvas)",
-                    borderColor: qty > 0 ? "var(--color-primary)" : "var(--color-hairline)",
+                    background: qty > 0 ? cat.soft : "var(--color-canvas)",
+                    borderColor: qty > 0 ? cat.color : "var(--color-hairline)",
+                    borderLeftColor: cat.color,
+                    borderLeftWidth: 3,
                   }}
                 >
                   <div className="flex items-start gap-1.5">
@@ -197,34 +264,36 @@ export function MenuBrowser({
                       <button
                         type="button"
                         onClick={() => handleAdd(item)}
-                        className="flex-1 h-8 rounded-lg text-sm flex items-center justify-center gap-1"
+                        className="flex-1 h-9 rounded-lg text-sm flex items-center justify-center gap-1"
                         style={{ background: "var(--color-primary)", color: "#fff" }}
                       >
-                        <Plus size={14} /> {hasVariants ? (qty > 0 ? `Add · ${qty}` : "Choose") : "Add"}
+                        <Plus size={15} /> {hasVariants ? (qty > 0 ? `Add · ${qty}` : "Choose") : "Add"}
                       </button>
                     ) : (
-                      <div className="flex items-center gap-1 flex-1">
+                      <div className="flex items-center gap-1.5 flex-1">
                         <button
                           type="button"
+                          aria-label={`One less ${item.name}`}
                           onClick={() => adjust(keyOf(item.id, null), -1)}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center"
-                          style={{ background: "var(--color-canvas-soft)" }}
+                          className="w-9 h-9 rounded-lg flex items-center justify-center border"
+                          style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline-input)" }}
                         >
-                          <Minus size={14} style={{ color: "var(--color-ink)" }} />
+                          <Minus size={15} style={{ color: "var(--color-ink)" }} />
                         </button>
                         <span
-                          className="flex-1 text-center text-sm font-medium tabular"
+                          className="flex-1 text-center text-base font-medium tabular"
                           style={{ color: "var(--color-ink)" }}
                         >
                           {qty}
                         </span>
                         <button
                           type="button"
+                          aria-label={`One more ${item.name}`}
                           onClick={() => adjust(keyOf(item.id, null), 1)}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center"
+                          className="w-9 h-9 rounded-lg flex items-center justify-center"
                           style={{ background: "var(--color-primary)" }}
                         >
-                          <Plus size={14} style={{ color: "#fff" }} />
+                          <Plus size={15} style={{ color: "#fff" }} />
                         </button>
                       </div>
                     )}

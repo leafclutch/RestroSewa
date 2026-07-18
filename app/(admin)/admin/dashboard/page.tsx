@@ -31,12 +31,12 @@ function StatCard({ label, value, href, icon: Icon }: StatCard) {
       </div>
       <div>
         <p
-          className="text-2xl tabular-nums"
+          className="text-3xl tabular-nums"
           style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.5px" }}
         >
           {value}
         </p>
-        <p className="text-xs mt-0.5 font-light" style={{ color: "var(--color-ink-mute)" }}>
+        <p className="text-sm mt-0.5 font-light" style={{ color: "var(--color-ink-mute)" }}>
           {label}
         </p>
       </div>
@@ -128,12 +128,12 @@ export default async function AdminDashboardPage() {
       />
 
       <h1
-        className="text-xl mb-1"
+        className="text-2xl mb-1"
         style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}
       >
         Overview
       </h1>
-      <p className="text-sm mb-8" style={{ color: "var(--color-ink-mute)" }}>
+      <p className="text-sm mb-8" style={{ color: "var(--color-ink-secondary)" }}>
         {restaurantUser.display_name} · Restaurant Admin
       </p>
 
@@ -151,7 +151,7 @@ export default async function AdminDashboardPage() {
       <div className="mt-10 max-w-xl">
         <p
           className="text-xs uppercase tracking-wide mb-3"
-          style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+          style={{ color: "var(--color-ink-secondary)", letterSpacing: "0.06em" }}
         >
           Quick setup
         </p>

@@ -117,6 +117,8 @@
   --fill-blue: #1d4ed8;
   --fill-indigo: #4338ca;
   --fill-purple: #7e22ce;
+  --fill-teal: #0f766e;
+  --fill-red: #b91c1c;
 
   /* ── Dashboard accents ────────────────────────────────────────────────────────
    * Deliberately NOT in @theme. These are applied dynamically — the section a card
@@ -259,6 +261,19 @@
   --color-danger-bg-val: #7f1d1d;
   --color-info-val: #60a5fa;
   --color-info-bg-val: #1e3a8a;
+}
+
+/* ── Admin surface: crisper light-mode edges ──────────────────────────────────
+ * The admin dashboard is meant to read as a defined, manager-grade surface, so its
+ * borders/dividers step a shade darker than the staff dashboard's. Scoped to the admin
+ * shell (`.admin-surface` on the layout root) so the staff UI is untouched, and gated on
+ * `html:not(.dark)` because a bare `.admin-surface` rule would set the token on a DIV that
+ * out-cascades the `.dark` value for its own descendants — dragging the light hairline into
+ * dark mode. Dark keeps the global hairline (which already reads well on the dark canvas).
+ */
+html:not(.dark) .admin-surface {
+  --color-hairline: #cbd5e3;
+  --color-hairline-input: #7d93b2;
 }
 
 /* ── Base ────────────────────────────────────────────────────── */

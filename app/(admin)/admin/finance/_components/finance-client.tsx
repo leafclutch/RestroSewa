@@ -361,7 +361,7 @@ export function FinanceClient({
     <div className="p-4 sm:p-6 max-w-4xl mx-auto">
       <div className="flex items-start justify-between gap-3 mb-1 flex-wrap">
         <div>
-          <h1 className="text-xl" style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}>
+          <h1 className="text-2xl" style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}>
             Daily Finance
           </h1>
           <p className="text-sm mt-0.5" style={{ color: "var(--color-ink-mute)" }}>

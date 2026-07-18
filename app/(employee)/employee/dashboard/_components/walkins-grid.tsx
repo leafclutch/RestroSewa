@@ -5,7 +5,6 @@ import { memo, useCallback, useState, useTransition } from "react";
 import { getMyWalkIns, openWalkInSlot } from "@/app/actions/pos";
 import type { WalkInStatus } from "@/app/actions/pos";
 import { walkInLabel } from "@/lib/walk-ins";
-import { STATUS_STYLE } from "@/lib/status-colors";
 import { SECTION_ACCENT } from "@/lib/section-colors";
 import { CountPill } from "@/components/ui/count-pill";
 import { useRealtime } from "@/lib/realtime/use-realtime";
@@ -28,19 +27,18 @@ const WalkInCard = memo(function WalkInCard({
   const [opening, startOpen] = useTransition();
   const label = walkInLabel(slot.no);
 
-  // In use — same blue fill a busy table gets, because it means the same thing. What makes a
-  // walk-in unmistakable is the bag mark and the purple chrome around the grid, not a
-  // different status colour.
+  // In use — the section's own purple, deepened to a solid fill. A free slot is a light purple
+  // tint; taking an order fills it solid. Only the intensity changes, so Walk-ins keep their
+  // purple identity end to end (an active walk-in is NOT the same blue as an active table).
   if (slot.session_id) {
-    const s = STATUS_STYLE.active;
     return (
       <Link
         href={`/employee/session/${slot.session_id}`}
         title={`Walk-in ${label} — active`}
         className={`${CARD} hover:brightness-110`}
-        // Constant blue FILL (see tables-grid): the flipping status token goes light in dark and
-        // white text can't sit on it. In-use walk-ins and tables share the same solid blue.
-        style={{ minHeight: 88, background: "var(--fill-blue)", borderColor: "var(--fill-blue)" }}
+        // Constant purple FILL (see the --fill-* block): the flipping --sec-walkins token goes
+        // light in dark and white text can't sit on it, so the solid card uses the fixed fill.
+        style={{ minHeight: 88, background: "var(--fill-purple)", borderColor: "var(--fill-purple)" }}
       >
         <ShoppingBag aria-hidden size={13} className="mb-0.5" style={{ color: "rgba(255,255,255,0.75)" }} />
         <span className={NUMBER} style={{ ...NUMBER_STYLE, color: "#fff" }}>{label}</span>
@@ -106,7 +104,7 @@ export function WalkInsGrid({ initial }: { initial: WalkInStatus[] }) {
         <p className="text-base font-medium" style={{ color: SECTION_ACCENT.walkins.color }}>Walk-ins</p>
         <span className="inline-flex items-center gap-1.5 flex-wrap">
           {free > 0 && <CountPill n={free} label="free" tone={SECTION_ACCENT.walkins} />}
-          {active > 0 && <CountPill n={active} label="active" tone={STATUS_STYLE.active} />}
+          {active > 0 && <CountPill n={active} label="active" tone={SECTION_ACCENT.walkins} fill="var(--fill-purple)" />}
           <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>{walkIns.length} total</span>
         </span>
       </div>

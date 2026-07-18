@@ -68,7 +68,7 @@ export default async function AdminStaffPage() {
   return (
     <div className="p-4 md:p-8 max-w-3xl">
       <h1
-        className="text-xl mb-1"
+        className="text-2xl mb-1"
         style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}
       >
         Staff

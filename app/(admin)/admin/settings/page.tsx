@@ -15,7 +15,7 @@ export default async function SettingsPage() {
   return (
     <div className="p-4 md:p-8">
       <h1
-        className="text-xl mb-1"
+        className="text-2xl mb-1"
         style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}
       >
         Settings

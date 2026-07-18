@@ -98,7 +98,7 @@ function NavLink({
         fontWeight: active ? 400 : 300,
       }}
     >
-      <Icon size={15} strokeWidth={1.5} />
+      <Icon size={16} strokeWidth={1.75} />
       <span className={rail ? "hidden lg:inline" : undefined}>{item.label}</span>
     </Link>
   );
@@ -139,10 +139,10 @@ function NavLinks({
           )}
           <p
             className={
-              "px-3 pt-4 pb-1 text-[10px] uppercase tracking-wide " +
+              "px-3 pt-4 pb-1 text-xs uppercase tracking-wide " +
               (rail ? "hidden lg:block" : "")
             }
-            style={{ color: "rgba(255,255,255,0.3)", letterSpacing: "0.08em" }}
+            style={{ color: "rgba(255,255,255,0.4)", letterSpacing: "0.08em" }}
           >
             Stock &amp; Finance
           </p>
@@ -196,7 +196,15 @@ export function AdminSidebar({
           sidebar at lg. */}
       <aside
         className="w-16 lg:w-52 shrink-0 hidden md:flex flex-col sticky top-0 h-screen"
-        style={{ background: "var(--color-brand-dark)" }}
+        // The right edge + soft shadow give the sidebar a plane of its own. In dark the bar
+        // (#090a0f) and the content (#07080d) are almost the same near-black and otherwise blend
+        // into one surface; the hairline and shadow are what tell them apart. In light the blue bar
+        // already separates, and these just firm the seam.
+        style={{
+          background: "var(--color-brand-dark)",
+          borderRight: "1px solid var(--color-hairline)",
+          boxShadow: "1px 0 0 rgba(0,0,0,0.04), 4px 0 16px rgba(0,0,0,0.06)",
+        }}
       >
         {/* The RESTAURANT leads — this is their dashboard. RestroSewa stays as the
             quiet platform mark beneath it. Both the name and the platform mark are

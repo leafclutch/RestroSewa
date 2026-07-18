@@ -102,7 +102,7 @@ function StatusPill({ status }: { status: StockRow["status"] }) {
   const color = STOCK_STATUS_COLOR[status];
   return (
     <span
-      className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full border whitespace-nowrap"
+      className="text-xs uppercase tracking-wide px-2 py-0.5 rounded-full border whitespace-nowrap"
       style={{ color, borderColor: `${color}44`, background: `${color}11`, letterSpacing: "0.06em" }}
     >
       {STOCK_STATUS_LABEL[status]}
@@ -1024,7 +1024,7 @@ export function StockClient({
     <div className="p-4 sm:p-6 max-w-6xl mx-auto">
       <div className="flex items-start justify-between gap-3 mb-1 flex-wrap">
         <div>
-          <h1 className="text-xl" style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}>
+          <h1 className="text-2xl" style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}>
             Stock
           </h1>
           <p className="text-sm mt-0.5" style={{ color: "var(--color-ink-mute)" }}>

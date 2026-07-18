@@ -184,28 +184,57 @@ const RoomCard = memo(function RoomCard({ room, canCheckIn, onCheckIn, onError }
   const now = useNow();
   const [cleaning, startClean] = useTransition();
 
+  // The header strip carries the room's identity; the info body stays on the plain canvas so
+  // the guest/bill/buttons remain legible (chosen over a full solid-teal card). Rooms keep their
+  // teal accent through the available→occupied change — only the intensity moves: occupied fills
+  // the strip solid teal, available tints it. Cleaning (orange) and maintenance (red) are the two
+  // cross-cutting status exceptions and win over the section colour when they apply.
+  const rooms = SECTION_ACCENT.rooms;
+  const h = stay
+    ? {
+        // Occupied — solid teal, white text; the status pill is a translucent white chip.
+        bar: "var(--fill-teal)", fg: "#fff", sub: "rgba(255,255,255,0.85)",
+        border: rooms.color, rule: "rgba(255,255,255,0.18)", bed: "#fff",
+        pill: { background: "rgba(255,255,255,0.18)", color: "#fff", borderColor: "rgba(255,255,255,0.55)" },
+      }
+    : room.status === "cleaning"
+    ? {
+        bar: STATUS_STYLE.cleaning.soft, fg: "var(--color-ink)", sub: "var(--color-ink-mute)",
+        border: STATUS_STYLE.cleaning.color, rule: "var(--color-hairline)", bed: rooms.color,
+        pill: { background: STATUS_STYLE.cleaning.soft, color: STATUS_STYLE.cleaning.color, borderColor: STATUS_STYLE.cleaning.color },
+      }
+    : room.status === "maintenance"
+    ? {
+        bar: STATUS_STYLE.maintenance.soft, fg: "var(--color-ink)", sub: "var(--color-ink-mute)",
+        border: STATUS_STYLE.maintenance.color, rule: "var(--color-hairline)", bed: rooms.color,
+        pill: { background: STATUS_STYLE.maintenance.soft, color: STATUS_STYLE.maintenance.color, borderColor: STATUS_STYLE.maintenance.color },
+      }
+    : {
+        // Available (or an old session with no stay) — teal identity, light.
+        bar: rooms.soft, fg: "var(--color-ink)", sub: "var(--color-ink-mute)",
+        border: rooms.color, rule: "var(--color-hairline)", bed: rooms.color,
+        pill: { background: rooms.soft, color: rooms.color, borderColor: rooms.color },
+      };
+
   return (
     <div
       className="rounded-xl border flex flex-col overflow-hidden"
-      // Was `s.color + "55"` — a hex-alpha suffix. STATUS_STYLE colours are var() references
-      // now (so they flip in dark mode), and "var(--st-occupied)55" is not a colour. The
-      // status tint on the header row carries the meaning; the border just needs to agree.
-      style={{ background: "var(--color-canvas)", borderColor: stay ? s.color : "var(--color-hairline)" }}
+      style={{ background: "var(--color-canvas)", borderColor: h.border }}
     >
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b" style={{ borderColor: "var(--color-hairline)" }}>
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b" style={{ background: h.bar, borderColor: h.rule }}>
         {/* The teal bed mark is what separates a room card from a table card at a glance —
-            the status pill to its right stays on the shared palette. */}
-        <BedDouble aria-hidden size={15} strokeWidth={1.9} style={{ color: SECTION_ACCENT.rooms.color }} />
-        <span className="text-lg font-medium" style={{ color: "var(--color-ink)" }}>
+            white on the solid occupied strip, teal on the lighter states. */}
+        <BedDouble aria-hidden size={15} strokeWidth={1.9} style={{ color: h.bed }} />
+        <span className="text-lg font-medium" style={{ color: h.fg }}>
           {room.number}
         </span>
-        <span className="text-sm truncate flex-1" style={{ color: "var(--color-ink-mute)" }}>
+        <span className="text-sm truncate flex-1" style={{ color: h.sub }}>
           {room.type_name}
         </span>
         <span
           // Bordered, like CountPill — a bare tint had no edge on the white canvas.
           className="text-sm px-2 py-0.5 rounded-full shrink-0 border"
-          style={{ background: s.soft, color: s.color, borderColor: s.color }}
+          style={h.pill}
         >
           {s.label}
         </span>
@@ -425,8 +454,8 @@ export function RoomsGrid({
       <div className="flex items-center justify-between mb-4">
         <p className="text-base font-medium" style={{ color: SECTION_ACCENT.rooms.color }}>Rooms</p>
         <span className="inline-flex items-center gap-1.5 flex-wrap">
-          {free > 0 && <CountPill n={free} label="free" tone={STATUS_STYLE.available} />}
-          {occupied > 0 && <CountPill n={occupied} label="occupied" tone={STATUS_STYLE.occupied} />}
+          {free > 0 && <CountPill n={free} label="free" tone={SECTION_ACCENT.rooms} />}
+          {occupied > 0 && <CountPill n={occupied} label="occupied" tone={SECTION_ACCENT.rooms} fill="var(--fill-teal)" />}
           {dirty > 0 && <CountPill n={dirty} label="cleaning" tone={STATUS_STYLE.cleaning} />}
           <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>{rooms.length} total</span>
         </span>

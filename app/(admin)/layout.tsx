@@ -17,7 +17,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     .single();
 
   return (
-    <div className="flex min-h-screen" style={{ background: "var(--color-canvas-soft)" }}>
+    <div className="admin-surface flex min-h-screen" style={{ background: "var(--color-canvas-soft)" }}>
       <AdminSidebar
         restaurantName={restaurant?.name ?? "Restaurant"}
         restaurantLogo={restaurant?.logo_url ?? null}

@@ -95,7 +95,7 @@ function WorkstationCard({
           <span className="truncate">{w.name}</span>
           {/* The code its items print under — its own dedicated Order Ticket. */}
           <span
-            className="shrink-0 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full border"
+            className="shrink-0 inline-flex items-center gap-1 text-xs uppercase tracking-wide px-1.5 py-0.5 rounded-full border"
             style={{
               color: currentColor,
               borderColor: currentColor + "44",
