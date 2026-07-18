@@ -105,7 +105,7 @@ export function QrSplash({ slug }: { slug: string }) {
       </div>
 
       <div className="absolute bottom-8">
-        <PoweredBy height={16} tone="light" />
+        <PoweredBy height={13} tone="light" />
       </div>
     </div>
   );

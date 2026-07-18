@@ -111,35 +111,37 @@ export function PoweredBy({
   const onDark = tone === "light";
   return (
     <span
-      className={`inline-flex items-center gap-2 ${className}`}
-      style={{ color: onDark ? "rgba(255,255,255,0.6)" : "var(--color-ink-mute)" }}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap ${className}`}
+      // The Leafclutch lockup is navy text + a green leaf on transparent, designed for a LIGHT
+      // background. On a dark surface it used to be flattened to a white silhouette
+      // (`brightness(0) invert(1)`), which threw its own colours away. Instead the WHOLE credit —
+      // "Powered by" text + logo — becomes one white sticker so the mark keeps its real colours and
+      // reads as a deliberate badge, not a logo floating on a stray white patch. The text colour is
+      // a FIXED slate (not the ink-mute token) because the sticker is always white, even when the
+      // surrounding app is in dark mode (where ink-mute flips light and would wash out on white).
+      style={
+        onDark
+          ? {
+              background: "#fff",
+              color: "#64748b",
+              borderRadius: 9999,
+              padding: "3px 8px",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
+            }
+          : { color: "var(--color-ink-mute)" }
+      }
     >
-      <span style={{ fontSize: 10, letterSpacing: "0.06em" }}>Powered by</span>
-      {/* The Leafclutch lockup is navy text + a green leaf on transparent, designed for a light
-          background. On a dark surface it used to be flattened to a white silhouette
-          (`brightness(0) invert(1)`) — which threw away the brand's own colours. Instead, sit the
-          real colour logo on a small white plate so its navy + green read as intended. */}
-      <span
-        style={
-          onDark
-            ? { background: "#fff", borderRadius: 6, padding: "3px 7px", display: "inline-flex", alignItems: "center" }
-            : { display: "inline-flex", alignItems: "center" }
-        }
-      >
-        <Image
-          src="/logo.png"
-          alt="Leafclutch Technologies Pvt. Ltd."
-          width={width}
-          height={height}
-          // The credit is never above the fold on any screen that matters, so it
-          // must never compete with the page for bandwidth.
-          loading="lazy"
-          style={{
-            height,
-            width: "auto",
-          }}
-        />
-      </span>
+      <span style={{ fontSize: 9, letterSpacing: "0.04em" }}>Powered by</span>
+      <Image
+        src="/logo.png"
+        alt="Leafclutch Technologies Pvt. Ltd."
+        width={width}
+        height={height}
+        // The credit is never above the fold on any screen that matters, so it
+        // must never compete with the page for bandwidth.
+        loading="lazy"
+        style={{ height, width: "auto" }}
+      />
     </span>
   );
 }

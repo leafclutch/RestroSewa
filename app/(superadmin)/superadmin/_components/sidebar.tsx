@@ -24,15 +24,24 @@ export function SuperAdminSidebar() {
 
   return (
     <aside
-      className="w-52 shrink-0 flex flex-col min-h-screen"
+      // sticky top-0 h-screen pins it to the viewport while the main column scrolls past — it stays
+      // in the flex row (unlike `fixed`), so the content keeps its width. It used to be
+      // `min-h-screen`, which grew with the page and scrolled away with it.
+      className="w-52 shrink-0 flex flex-col sticky top-0 h-screen"
       style={{ background: "var(--color-brand-dark)" }}
     >
       {/* Logo */}
       <div className="px-5 py-6 border-b" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
         {/* Super Admin is PLATFORM territory — HRestroSewa is the only brand here. */}
         <Link href="/superadmin/dashboard" className="block">
-          <span className="flex items-center gap-2">
-            <PlatformLogo size={28} priority />
+          <span className="flex items-center gap-2.5">
+            {/* White plate: this sidebar is brand-dark indigo (#1c1e54), almost the emblem tile's
+                own navy (#19204f), so the badge would blend right in. A small white plate lifts it
+                off the background as a crisp app-icon badge. (Login/marketing sit on near-black, so
+                the emblem pops there without a plate.) */}
+            <span className="inline-flex shrink-0" style={{ background: "#fff", borderRadius: 8, padding: 3 }}>
+              <PlatformLogo size={26} priority />
+            </span>
             <PlatformWordmark size={16} />
           </span>
           <p
@@ -45,7 +54,7 @@ export function SuperAdminSidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 flex flex-col gap-0.5">
+      <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-4 flex flex-col gap-0.5">
         {NAV.map(({ label, href, icon: Icon, exact }) => {
           const active = exact ? pathname === href : pathname.startsWith(href);
           return (
@@ -78,7 +87,7 @@ export function SuperAdminSidebar() {
           <LogOut size={15} strokeWidth={1.5} />
           {pending ? "Signing out…" : "Sign out"}
         </button>
-        <PoweredBy height={14} tone="light" className="px-3 pt-3" />
+        <PoweredBy height={12} tone="light" className="px-3 pt-3" />
       </div>
     </aside>
   );

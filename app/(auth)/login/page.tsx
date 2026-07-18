@@ -120,7 +120,7 @@ export default async function LoginPage({
       )}
 
       <div className="flex justify-center mt-6">
-        <PoweredBy height={16} tone="light" />
+        <PoweredBy height={13} tone="light" />
       </div>
     </div>
   );

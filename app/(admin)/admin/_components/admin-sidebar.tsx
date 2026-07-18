@@ -258,7 +258,9 @@ export function AdminSidebar({
               {logoutPending ? "Signing out…" : "Sign out"}
             </span>
           </button>
-          <PoweredBy height={14} tone="light" className="hidden lg:block px-3 pt-3" />
+          {/* self-start: the foot is a flex-col, which would otherwise stretch the sticker to a
+              full-width white bar. lg:inline-flex (not lg:block) keeps "Powered by" + logo on one row. */}
+          <PoweredBy height={12} tone="light" className="hidden lg:inline-flex self-start mt-1" />
         </div>
       </aside>
 
