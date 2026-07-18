@@ -90,6 +90,15 @@
 }
 
 :root {
+  /* Declare the page's colour scheme so a dark-mode phone's browser does NOT algorithmically
+   * "force-dark" it. `only light` opts the light surfaces (customer menu, marketing, and the app
+   * whenever `.dark` is off) OUT of Chrome/Android Auto-Dark — which otherwise re-tinted the
+   * customer site and turned the variant picker into an unreadable blurry sheet. The dashboards keep
+   * their OWN dark mode via the `.dark` class below (which sets `color-scheme: dark`), so their theme
+   * is controlled by the app's toggle, never by the browser. Also makes native controls/scrollbars
+   * match the surface. See [[theme-inline-dark-mode-trap]] for the related token machinery. */
+  color-scheme: only light;
+
   /* The --ds-spacing-* scale that used to live here was removed: it sat outside @theme, so it
      generated no utilities, and nothing referenced it in four months. Tailwind's own spacing
      scale (p-2, gap-3, …) is the source of truth for spacing. */
@@ -170,6 +179,10 @@
 }
 
 .dark {
+  /* The app's own dark mode owns the scheme here (native controls/scrollbars go dark, and the
+   * browser won't try to re-tint an already-dark page). Only the dashboards ever get `.dark`. */
+  color-scheme: dark;
+
   /* ── Dark Mode Variable Overrides ────────────────────────── */
   --color-primary: #818cf8;
   --color-primary-deep: #6366f1;
