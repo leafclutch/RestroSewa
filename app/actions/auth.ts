@@ -141,8 +141,37 @@ export async function loginWithPin(
 
 export async function logout() {
   const supabase = await createClient();
+
+  // Work out WHICH restaurant this person belongs to *before* signing out (afterwards there's no
+  // session to read), so we can drop them back on that restaurant's own staff sign-in — the name
+  // picker + PIN pad — rather than the generic admin login. That keeps the flow unbroken: they can
+  // sign straight back in, or pick a different name to switch accounts, without hunting for the
+  // manager's link again. Falls back to /login if the slug can't be resolved.
+  let slug: string | null = null;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (user) {
+    const service = createServiceClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: ru } = await (service as any)
+      .from("restaurant_users")
+      .select("restaurant_id")
+      .eq("auth_user_id", user.id)
+      .maybeSingle();
+    if (ru?.restaurant_id) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: r } = await (service as any)
+        .from("restaurants")
+        .select("slug")
+        .eq("id", ru.restaurant_id)
+        .maybeSingle();
+      slug = r?.slug ?? null;
+    }
+  }
+
   await supabase.auth.signOut();
-  redirect("/login");
+  redirect(slug ? `/login?mode=staff&slug=${encodeURIComponent(slug)}` : "/login");
 }
 
 export async function logoutSuperAdmin() {
