@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { PAYROLL_ACCESS, STOCK_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
+import { resolveSplit } from "@/lib/payment-split";
 import { periodBounds } from "@/lib/finance";
 import type { FinancePeriod } from "@/lib/finance";
 import {
@@ -305,9 +306,17 @@ export async function recordSalaryPayment(
   if (!["advance", "salary"].includes(kind)) {
     return { error: "Choose whether this is an advance or a salary payment." };
   }
-  if (!["cash", "online"].includes(method)) {
-    return { error: "Choose how the money was paid — cash or online." };
+  if (!["cash", "online", "mixed"].includes(method)) {
+    return { error: "Choose how the money was paid — cash, online, or both." };
   }
+
+  const split = resolveSplit(
+    method,
+    amount,
+    formData.get("cash_amount") as string | null,
+    formData.get("online_amount") as string | null
+  );
+  if (!split.ok) return { error: split.error };
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -320,6 +329,8 @@ export async function recordSalaryPayment(
     p_method: method,
     p_notes: notes || null,
     p_by: ru.id,
+    p_cash: split.cash,
+    p_online: split.online,
   });
 
   if (error) {

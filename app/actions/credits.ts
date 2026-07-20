@@ -2,9 +2,10 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
-import { NAV_ACCESS } from "@/lib/permissions";
+import { NAV_ACCESS, STOCK_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { computeCreditStats } from "@/lib/credits";
+import { resolveSplit } from "@/lib/payment-split";
 import { businessPeriodBounds } from "@/lib/business-day";
 import type { CreditStats, CreditStatus } from "@/lib/credits";
 
@@ -79,6 +80,9 @@ const RPC_ERRORS: Record<string, string> = {
   NOTHING_OWED: "This customer is already fully settled — nothing is owed.",
   AMOUNT_EXCEEDS_BALANCE:
     "That's more than the outstanding balance. Enter the balance or less.",
+  ALREADY_IMPORTED:
+    "This customer already has an imported opening balance. Record a repayment instead, or edit the existing account.",
+  FUTURE_DATE: "The credit date can't be in the future.",
 };
 
 function rpcError(message: string, fallback: string): string {
@@ -333,7 +337,7 @@ export async function getCreditDetail(
 // bills all happen inside `record_credit_payment`, so two cashiers taking money
 // from the same customer at once can't both write from a stale balance.
 
-const REPAYMENT_METHODS = new Set(["cash", "online", "card"]);
+const REPAYMENT_METHODS = new Set(["cash", "online", "card", "mixed"]);
 
 export async function addCreditPayment(
   _prevState: ActionResult,
@@ -355,6 +359,14 @@ export async function addCreditPayment(
   }
   if (!REPAYMENT_METHODS.has(method)) return { error: "Invalid payment method." };
 
+  const split = resolveSplit(
+    method,
+    amount,
+    formData.get("cash_amount") as string | null,
+    formData.get("online_amount") as string | null
+  );
+  if (!split.ok) return { error: split.error };
+
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any).rpc("record_credit_payment", {
@@ -364,6 +376,8 @@ export async function addCreditPayment(
     p_method: method,
     p_notes: notes || null,
     p_received_by: ru.id,
+    p_cash: split.cash,
+    p_online: split.online,
   });
 
   if (error) {
@@ -416,4 +430,70 @@ export async function getCreditReceipt(
       pan_vat_number: rest?.pan_vat_number ?? null,
     },
   };
+}
+
+// ─── Import a credit that predates this system ────────────────────────────────
+// A restaurant arrives with a paper book of who owes what. Those debts must be
+// chaseable here, but they are NOT sales this system made — so the import writes
+// ONE credit account with an opening balance and no bill, leaving Sales
+// untouched. See supabase/migrations/20260721200000_import_credit_customer.sql.
+//
+// Gated like the opening-balance seed on the same screen rather than like an
+// ordinary credit action: this conjures a receivable out of nothing, which is a
+// books-opening decision, not day-to-day cashiering.
+
+export async function importCreditCustomer(
+  _prevState: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canManageStock(ru) || !STOCK_ACCESS.canViewFinance(ru)) {
+    return { error: "You don't have permission to import customer credits." };
+  }
+
+  const name = ((formData.get("name") as string) || "").trim();
+  const phone = ((formData.get("phone") as string) || "").trim();
+  const notes = ((formData.get("notes") as string) || "").trim();
+  const amountRaw = ((formData.get("amount") as string) || "").trim();
+  const dateRaw = ((formData.get("credit_date") as string) || "").trim();
+
+  if (!name) return { error: "Enter the customer's name." };
+
+  const amount = amountRaw === "" ? NaN : parseFloat(amountRaw);
+  if (isNaN(amount) || amount <= 0) {
+    return { error: "Enter the amount they owe — greater than zero." };
+  }
+  if (!dateRaw) return { error: "Choose the date the credit was given." };
+
+  // Parsed as LOCAL midnight: `new Date("YYYY-MM-DD")` is UTC and would shift
+  // the debt to the previous day for anyone east of Greenwich.
+  const when = new Date(`${dateRaw}T00:00:00`);
+  if (isNaN(when.getTime())) return { error: "Invalid date." };
+  if (when.getTime() > Date.now()) return { error: "The credit date can't be in the future." };
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).rpc("import_credit_customer", {
+    p_restaurant_id: ru.restaurant_id, // tenant scope re-checked inside the RPC
+    p_name: name,
+    p_phone: phone || null,
+    p_amount: amount,
+    p_created_at: when.toISOString(),
+    p_notes: notes || null,
+    p_created_by: ru.id,
+  });
+
+  if (error) {
+    return {
+      error: rpcError(
+        error.message ?? "",
+        "Could not import the credit. Please try again."
+      ),
+    };
+  }
+
+  revalidatePath("/admin/finance");
+  revalidatePath("/employee/credits");
+  revalidatePath("/employee/dashboard");
+  return null;
 }

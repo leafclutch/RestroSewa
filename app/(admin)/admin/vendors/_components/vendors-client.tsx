@@ -28,6 +28,7 @@ import type {
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PaymentMethodPicker, splitIsValid, type PaymentMethod } from "@/components/ui/payment-method-picker";
 import { Modal, ConfirmDialog } from "../../_components/modal";
 import {
   ChevronLeft,
@@ -178,7 +179,8 @@ function VendorAccount({
   const [detail, setDetail] = useState<VendorDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
-  const [method, setMethod] = useState("cash");
+  const [method, setMethod] = useState<PaymentMethod>("cash");
+  const [split, setSplit] = useState({ cash: "", online: "" });
   const [state, action, pending] = useActionState<ActionResult, FormData>(payVendor, null);
 
   const load = useCallback(async () => {
@@ -217,7 +219,10 @@ function VendorAccount({
   const owed = detail.credit_balance;
   const settled = owed <= 0;
   const amountNum = parseFloat(amount) || 0;
-  const amountValid = amountNum > 0 && amountNum <= owed + 0.005;
+  // A mixed payment is only submittable once the two halves reconcile — the DB
+  // enforces this too, but the button shouldn't offer a doomed submit.
+  const amountValid =
+    amountNum > 0 && amountNum <= owed + 0.005 && splitIsValid(method, amountNum, split.cash, split.online);
 
   return (
     <div className="flex flex-col gap-4">
@@ -327,27 +332,21 @@ function VendorAccount({
 
           <div className="flex flex-col gap-1.5">
             <p className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>Paid by</p>
-            <div className="grid grid-cols-2 gap-1">
-              {["cash", "online"].map((m) => {
-                const active = method === m;
-                return (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setMethod(m)}
-                    className="py-1.5 rounded-lg border text-sm transition-colors"
-                    style={{
-                      borderColor: active ? "var(--color-primary)" : "var(--color-hairline-input)",
-                      background: active ? "rgba(99,102,241,0.06)" : "var(--color-canvas)",
-                      color: "var(--color-ink)",
-                    }}
-                  >
-                    {METHOD_LABEL[m]}
-                  </button>
-                );
-              })}
-            </div>
+            {/* The split must add up to the AMOUNT being paid, not the full
+                outstanding balance — a part payment can itself be part cash. */}
+            <PaymentMethodPicker
+              methods={["cash", "online", "mixed"]}
+              value={method}
+              onChange={(m) => { setMethod(m); setSplit({ cash: "", online: "" }); }}
+              total={amountNum}
+              cash={split.cash}
+              online={split.online}
+              onSplitChange={setSplit}
+              disabled={pending}
+            />
           </div>
+          <input type="hidden" name="cash_amount" value={method === "mixed" ? split.cash : ""} />
+          <input type="hidden" name="online_amount" value={method === "mixed" ? split.online : ""} />
 
           <Input name="notes" placeholder="Note (optional)" autoComplete="off" />
 

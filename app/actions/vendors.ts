@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { STOCK_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
+import { resolveSplit, WITH_MIXED } from "@/lib/payment-split";
 
 export type ActionResult = { error: string } | null;
 
@@ -437,7 +438,7 @@ export async function setVendorActive(
 
 // ─── Pay a vendor ─────────────────────────────────────────────────────────────
 
-const PAYMENT_METHODS = new Set(["cash", "online"]);
+const PAYMENT_METHODS = new Set(WITH_MIXED);
 
 export async function payVendor(
   _prevState: ActionResult,
@@ -457,7 +458,17 @@ export async function payVendor(
   if (isNaN(amount) || amount <= 0) {
     return { error: "Enter a payment amount greater than zero." };
   }
-  if (!PAYMENT_METHODS.has(method)) return { error: "Invalid payment method." };
+  if (!PAYMENT_METHODS.has(method as (typeof WITH_MIXED)[number])) {
+    return { error: "Invalid payment method." };
+  }
+
+  const split = resolveSplit(
+    method,
+    amount,
+    formData.get("cash_amount") as string | null,
+    formData.get("online_amount") as string | null
+  );
+  if (!split.ok) return { error: split.error };
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -468,6 +479,8 @@ export async function payVendor(
     p_method: method,
     p_notes: notes || null,
     p_paid_by: ru.id,
+    p_cash: split.cash,
+    p_online: split.online,
   });
 
   if (error) {

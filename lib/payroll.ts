@@ -37,11 +37,12 @@ export const PAYMENT_KIND_LABEL: Record<PaymentKind, string> = {
 };
 
 /** Only the two ways money can actually leave the business. */
-export type PayMethod = "cash" | "online";
+export type PayMethod = "cash" | "online" | "mixed";
 
 export const PAY_METHOD_LABEL: Record<PayMethod, string> = {
   cash: "Cash",
   online: "Online",
+  mixed: "Cash + Online",
 };
 
 // ─── Months ───────────────────────────────────────────────────────────────────
