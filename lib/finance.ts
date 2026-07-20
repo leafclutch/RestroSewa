@@ -71,6 +71,13 @@ export type FinanceReport = {
 
   openingCash: number;
   openingOnline: number;
+  /**
+   * The two credit positions AS OF the period's start — money customers owed us
+   * and money we owed vendors. Derived from the same ledgers as the closing
+   * figures, so one period's closing credit IS the next period's opening credit.
+   */
+  openingCreditToUs: number;
+  openingCreditByUs: number;
 
   salesCash: number;
   salesOnline: number;
@@ -108,8 +115,79 @@ export type FinanceReport = {
 
   closingCash: number;
   closingOnline: number;
-  /** Cash + bank. */
+  /**
+   * The credit positions AS OF the period's end. For the current period these
+   * equal the live outstanding totals above; for a past period they are what was
+   * owed back THEN, which is what belongs on that period's balance sheet.
+   */
+  closingCreditToUs: number;
+  closingCreditByUs: number;
+  /** Cash + bank. Deliberately EXCLUDES credit — it is money, not a promise. */
   closingNet: number;
+};
+
+/**
+ * One movement on the finance ledger.
+ *
+ * Each row carries what it did to all four balances and what they stood at
+ * afterwards. "Balance before" is not stored — it is the previous row's `after`,
+ * i.e. `after − delta` — so the two can never drift apart.
+ */
+export type FinanceTxKind =
+  | "sale"
+  | "credit_repayment"
+  | "purchase"
+  | "vendor_payment"
+  | "salary"
+  | "salary_advance"
+  | "vendor_opening"
+  | "customer_opening";
+
+export const TX_LABEL: Record<FinanceTxKind, string> = {
+  sale: "Sale",
+  credit_repayment: "Customer Credit Payment",
+  purchase: "Purchase",
+  vendor_payment: "Vendor Credit Repayment",
+  salary: "Salary Payment",
+  salary_advance: "Salary Advance",
+  // Not a movement of money — an account opened carrying a debt from paper
+  // books. It still belongs on the ledger: it is why the credit balance jumped.
+  vendor_opening: "Vendor Opening Balance",
+  customer_opening: "Customer Opening Balance",
+};
+
+/** Money in reads green, money out red — the same language as the rest of the sheet. */
+export const TX_TONE: Record<FinanceTxKind, string> = {
+  sale: "#1a7a4a",
+  credit_repayment: "#1a7a4a",
+  purchase: "#dc2626",
+  vendor_payment: "#dc2626",
+  salary: "#dc2626",
+  salary_advance: "#f97316",
+  // Amber: a balance appearing, not money changing hands.
+  vendor_opening: "#f97316",
+  customer_opening: "#f97316",
+};
+
+export type FinanceTransaction = {
+  at: string;
+  kind: FinanceTxKind;
+  /** Customer, vendor or staff name — null for an ordinary walk-in bill. */
+  party: string | null;
+  /** cash | online | card | credit | partial | mixed */
+  method: string;
+  /** The headline value of the transaction, always positive. */
+  amount: number;
+  /** Bill number, purchase code, credit ID or salary month. */
+  reference: string | null;
+  cashDelta: number;
+  onlineDelta: number;
+  creditToUsDelta: number;
+  creditByUsDelta: number;
+  cashAfter: number;
+  onlineAfter: number;
+  creditToUsAfter: number;
+  creditByUsAfter: number;
 };
 
 /** How a supplier bill was settled — drives the badge on the purchases list. */

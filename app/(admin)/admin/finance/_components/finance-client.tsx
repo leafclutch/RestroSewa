@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   exportFinanceCsv,
   getFinanceReport,
+  getFinanceTransactions,
   getOpeningBalance,
   getPeriodPurchases,
   setOpeningBalance,
@@ -15,8 +16,15 @@ import {
   PERIOD_LABEL,
   PURCHASE_STATUS_COLOR,
   PURCHASE_STATUS_LABEL,
+  TX_LABEL,
+  TX_TONE,
 } from "@/lib/finance";
-import type { FinancePeriod, FinancePurchase, FinanceReport } from "@/lib/finance";
+import type {
+  FinancePeriod,
+  FinancePurchase,
+  FinanceReport,
+  FinanceTransaction,
+} from "@/lib/finance";
 import type { PayrollSummary } from "@/lib/payroll";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
@@ -33,10 +41,15 @@ const money2 = (n: number) =>
 
 const PERIODS: FinancePeriod[] = ["today", "yesterday", "week", "month", "year"];
 
+// Covers purchase methods and the ledger's derived ones ("partial" = part
+// tendered part credit, "mixed" = cash and bank on the same bill).
 const METHOD_LABEL: Record<string, string> = {
   cash: "Cash",
   online: "Online",
+  card: "Card",
   credit: "Credit",
+  partial: "Part paid / part credit",
+  mixed: "Cash + online",
 };
 
 // Used only on the outstanding figures, so a receivable never reads as a
@@ -164,6 +177,117 @@ function PurchaseLine({ p }: { p: FinancePurchase }) {
   );
 }
 
+// ── Transaction history ───────────────────────────────────────────────────────
+
+/**
+ * One movement, and what it did to the balances.
+ *
+ * Only the buckets a transaction actually touched are shown. A cash sale prints
+ * one "Cash 1,200 → 2,200" line; a credit repayment prints two, because it moves
+ * money in AND writes the receivable down — which is exactly the thing the old
+ * report could not show.
+ */
+function LedgerRow({ t }: { t: FinanceTransaction }) {
+  const tone = TX_TONE[t.kind] ?? "var(--color-ink)";
+  const when = new Date(t.at);
+
+  const legs: { label: string; before: number; after: number; delta: number }[] = [];
+  const leg = (label: string, delta: number, after: number) => {
+    // 0.005 keeps a rounding crumb from printing an untouched bucket.
+    if (Math.abs(delta) > 0.005) legs.push({ label, before: after - delta, after, delta });
+  };
+  leg("Cash", t.cashDelta, t.cashAfter);
+  leg("Online", t.onlineDelta, t.onlineAfter);
+  leg("Credit to us", t.creditToUsDelta, t.creditToUsAfter);
+  leg("Credit by us", t.creditByUsDelta, t.creditByUsAfter);
+
+  return (
+    <div className="px-4 py-3" style={{ borderTop: "1px solid var(--color-hairline)" }}>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="min-w-0">
+          <span className="block text-sm" style={{ color: "var(--color-ink)" }}>
+            {TX_LABEL[t.kind] ?? t.kind}
+            {t.party && <span style={{ color: "var(--color-ink-mute)" }}> · {t.party}</span>}
+          </span>
+          <span className="block text-xs" style={{ color: "var(--color-ink-mute)" }}>
+            {when.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}{" "}
+            {when.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}
+            {" · "}
+            {METHOD_LABEL[t.method] ?? t.method}
+            {t.reference && <span> · {t.reference}</span>}
+          </span>
+        </span>
+        <span className="text-sm tabular-nums shrink-0" style={{ color: tone }}>
+          {money2(t.amount)}
+        </span>
+      </div>
+
+      {legs.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5">
+          {legs.map((l) => (
+            <span key={l.label} className="text-xs tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
+              {l.label}{" "}
+              <span style={{ opacity: 0.8 }}>{money2(l.before)}</span>
+              {" → "}
+              <span style={{ color: "var(--color-ink)" }}>{money2(l.after)}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LedgerSection({ rows, periodLabel }: { rows: FinanceTransaction[]; periodLabel: string }) {
+  // A busy month can run to thousands of movements; rendering them all would
+  // stall the page for a number nobody reads to the end of.
+  const [limit, setLimit] = useState(40);
+  const shown = rows.slice(0, limit);
+
+  return (
+    <section
+      className="rounded-xl border overflow-hidden"
+      style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+    >
+      <div
+        className="px-4 py-2.5 border-b"
+        style={{ background: "var(--color-canvas-soft)", borderColor: "var(--color-hairline)" }}
+      >
+        <p
+          className="text-xs uppercase tracking-wide font-medium"
+          style={{ color: "var(--color-ink)", letterSpacing: "0.06em" }}
+        >
+          Transaction history · {periodLabel}
+        </p>
+        <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
+          {rows.length === 0
+            ? "No money moved in this period"
+            : `${rows.length} movement${rows.length !== 1 ? "s" : ""} — newest first, with the balance after each`}
+        </p>
+      </div>
+
+      {shown.map((t, i) => (
+        <LedgerRow key={`${t.at}-${t.kind}-${t.reference ?? i}`} t={t} />
+      ))}
+
+      {rows.length > shown.length && (
+        <button
+          type="button"
+          onClick={() => setLimit((n) => n + 100)}
+          className="w-full text-sm px-4 py-3"
+          style={{
+            borderTop: "1px solid var(--color-hairline)",
+            background: "var(--color-canvas-soft)",
+            color: "var(--color-primary)",
+          }}
+        >
+          Show more · {rows.length - shown.length} remaining
+        </button>
+      )}
+    </section>
+  );
+}
+
 // ── Opening balance ───────────────────────────────────────────────────────────
 
 function OpeningForm({ current, onDone }: { current: OpeningBalance; onDone: () => void }) {
@@ -253,18 +377,21 @@ export function FinanceClient({
   initialOpening,
   initialPurchases,
   initialPayroll,
+  initialLedger,
   canManage,
 }: {
   initial: FinanceReport;
   initialOpening: OpeningBalance;
   initialPurchases: FinancePurchase[];
   initialPayroll: PayrollSummary;
+  initialLedger: FinanceTransaction[];
   canManage: boolean;
 }) {
   const [report, setReport] = useState(initial);
   const [opening, setOpening] = useState(initialOpening);
   const [purchases, setPurchases] = useState(initialPurchases);
   const [payroll, setPayroll] = useState(initialPayroll);
+  const [ledger, setLedger] = useState(initialLedger);
   const [period, setPeriod] = useState<FinancePeriod>(initial.period);
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -276,14 +403,16 @@ export function FinanceClient({
     startTransition(async () => {
       try {
         const args = { period: p, from: from ?? null, to: to ?? null };
-        const [next, list, pay] = await Promise.all([
+        const [next, list, pay, tx] = await Promise.all([
           getFinanceReport(args),
           getPeriodPurchases(args),
           getPayrollSummary(args),
+          getFinanceTransactions(args),
         ]);
         setReport(next);
         setPurchases(list);
         setPayroll(pay);
+        setLedger(tx);
       } catch {
         // keep the last known report on a transient failure
       }
@@ -331,12 +460,18 @@ export function FinanceClient({
 
   // Re-seeding the opening balance re-bases every figure, so pull both back.
   const refreshAll = useCallback(async () => {
-    const [rep, op] = await Promise.all([
-      getFinanceReport({ period, from: customFrom || null, to: customTo || null }),
+    const args = { period, from: customFrom || null, to: customTo || null };
+    // The ledger's running balances start from the opening figures, so re-seeding
+    // moves every row in it — it has to come back too, or the history would
+    // still be reconciling to the old opening balance.
+    const [rep, op, tx] = await Promise.all([
+      getFinanceReport(args),
       getOpeningBalance(),
+      getFinanceTransactions(args),
     ]);
     setReport(rep);
     setOpening(op);
+    setLedger(tx);
   }, [period, customFrom, customTo]);
 
   // Sales, purchases, credit, vendor payments and payroll all move these figures.
@@ -470,6 +605,23 @@ export function FinanceClient({
           <p className="text-xs mb-1" style={{ color: "var(--color-ink-mute)" }}>Closing online / bank</p>
           <p className="text-lg font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>{money(report.closingOnline)}</p>
         </div>
+        {/* The two credit positions sit alongside cash, not buried further down:
+            an owner reading "Net balance ₹5,000" needs to see in the same glance
+            that ₹20,000 is owed out. Colour separates asset from liability. */}
+        <div className="rounded-xl border px-4 py-3" style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}>
+          <p className="text-xs mb-1" style={{ color: "var(--color-ink-mute)" }}>Credit to us</p>
+          <p className="text-lg font-medium tabular-nums" style={{ color: report.closingCreditToUs > 0 ? OWED_TO_US : "var(--color-ink)" }}>
+            {money(report.closingCreditToUs)}
+          </p>
+          <p className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>Customers owe us</p>
+        </div>
+        <div className="rounded-xl border px-4 py-3" style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}>
+          <p className="text-xs mb-1" style={{ color: "var(--color-ink-mute)" }}>Credit by us</p>
+          <p className="text-lg font-medium tabular-nums" style={{ color: report.closingCreditByUs > 0 ? WE_OWE : "var(--color-ink)" }}>
+            {money(report.closingCreditByUs)}
+          </p>
+          <p className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>We owe vendors</p>
+        </div>
         <div className="rounded-xl border px-4 py-3" style={{ background: "var(--color-primary)", borderColor: "var(--color-primary)" }}>
           <p className="text-xs mb-1" style={{ color: "rgba(255,255,255,0.75)" }}>Net balance</p>
           <p className="text-lg font-medium tabular-nums" style={{ color: "#fff" }}>{money(report.closingNet)}</p>
@@ -481,14 +633,29 @@ export function FinanceClient({
 
       {/* Opening → Sales → Purchases → Credit → Closing, as one sheet. */}
       <div className="flex flex-col gap-4">
+        {/* Four components, not two. Cash and bank are money; the two credit
+            lines are promises — shown on the same sheet because an owner needs
+            both to know where they stand, but never added into the money total. */}
         <Section
           title="Opening balance"
           note="Carried forward from the previous period"
           rows={[
             { label: "Cash", value: report.openingCash },
             { label: "Online / bank", value: report.openingOnline },
+            {
+              label: "Credit to us",
+              hint: "Owed by customers at the start",
+              value: report.openingCreditToUs,
+              tone: report.openingCreditToUs > 0 ? OWED_TO_US : undefined,
+            },
+            {
+              label: "Credit by us",
+              hint: "Owed to vendors at the start",
+              value: report.openingCreditByUs,
+              tone: report.openingCreditByUs > 0 ? WE_OWE : undefined,
+            },
           ]}
-          total={{ label: "Total", value: report.openingCash + report.openingOnline }}
+          total={{ label: "Cash + bank", value: report.openingCash + report.openingOnline }}
         />
 
         <Section
@@ -644,7 +811,11 @@ export function FinanceClient({
               },
             ]}
             total={{
-              label: "Total outstanding",
+              // "Right now", not "at the end of the period" — this figure and
+              // the count beside it are for chasing people today, so they stay
+              // live even when a past period is selected. The period-accurate
+              // number is in the closing balance above.
+              label: "Outstanding right now",
               value: report.customerCreditOutstanding,
               tone: report.customerCreditOutstanding > 0 ? OWED_TO_US : undefined,
             }}
@@ -671,7 +842,11 @@ export function FinanceClient({
               },
             ]}
             total={{
-              label: "Total outstanding",
+              // "Right now", not "at the end of the period" — this figure and
+              // the count beside it are for chasing people today, so they stay
+              // live even when a past period is selected. The period-accurate
+              // number is in the closing balance above.
+              label: "Outstanding right now",
               value: report.vendorCreditOutstanding,
               tone: report.vendorCreditOutstanding > 0 ? WE_OWE : undefined,
             }}
@@ -680,7 +855,7 @@ export function FinanceClient({
 
         {/* The receivable / payable pair, as one more row of the sheet. */}
         <Section
-          title="Credit position"
+          title="Credit position right now"
           note="Credit moves no cash until it is collected or paid"
           rows={[
             {
@@ -715,9 +890,25 @@ export function FinanceClient({
           rows={[
             { label: "Cash balance", value: report.closingCash },
             { label: "Online / bank balance", value: report.closingOnline },
+            {
+              label: "Credit to us",
+              hint: "Still owed by customers",
+              value: report.closingCreditToUs,
+              tone: report.closingCreditToUs > 0 ? OWED_TO_US : undefined,
+            },
+            {
+              label: "Credit by us",
+              hint: "Still owed to vendors",
+              value: report.closingCreditByUs,
+              tone: report.closingCreditByUs > 0 ? WE_OWE : undefined,
+            },
           ]}
-          total={{ label: "Net balance", value: report.closingNet, tone: "var(--color-primary)" }}
+          total={{ label: "Net balance (cash + bank)", value: report.closingNet, tone: "var(--color-primary)" }}
         />
+
+        {/* The ledger behind every figure above. Deliberately last: the summary
+            answers "where do I stand", this answers "why". */}
+        <LedgerSection rows={ledger} periodLabel={periodLabel} />
       </div>
 
       <Modal
