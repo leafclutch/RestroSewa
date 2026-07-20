@@ -9,8 +9,15 @@ import {
   PERIOD_LABEL,
   purchaseStatus,
   PURCHASE_STATUS_LABEL,
+  TX_LABEL,
 } from "@/lib/finance";
-import type { FinancePeriod, FinancePurchase, FinanceReport } from "@/lib/finance";
+import type {
+  FinancePeriod,
+  FinancePurchase,
+  FinanceReport,
+  FinanceTransaction,
+  FinanceTxKind,
+} from "@/lib/finance";
 
 export type ActionResult = { error: string } | null;
 
@@ -21,6 +28,8 @@ const EMPTY = (period: FinancePeriod, from: string, to: string): FinanceReport =
   hasOpening: false,
   openingCash: 0,
   openingOnline: 0,
+  openingCreditToUs: 0,
+  openingCreditByUs: 0,
   salesCash: 0,
   salesOnline: 0,
   salesCard: 0,
@@ -45,6 +54,8 @@ const EMPTY = (period: FinancePeriod, from: string, to: string): FinanceReport =
   salaryOutstanding: 0,
   closingCash: 0,
   closingOnline: 0,
+  closingCreditToUs: 0,
+  closingCreditByUs: 0,
   closingNet: 0,
 });
 
@@ -92,6 +103,8 @@ export async function getFinanceReport(params?: {
 
     openingCash: num(row.opening_cash),
     openingOnline: num(row.opening_online),
+    openingCreditToUs: num(row.opening_credit_to_us),
+    openingCreditByUs: num(row.opening_credit_by_us),
 
     salesCash: num(row.sales_cash),
     salesOnline: num(row.sales_online),
@@ -121,8 +134,56 @@ export async function getFinanceReport(params?: {
 
     closingCash,
     closingOnline,
+    closingCreditToUs: num(row.closing_credit_to_us),
+    closingCreditByUs: num(row.closing_credit_by_us),
     closingNet: closingCash + closingOnline,
   };
+}
+
+// ─── The transaction ledger ───────────────────────────────────────────────────
+// Every movement in the period with a running balance on all four buckets. The
+// last row's running balances land exactly on the report's closing figures —
+// that is what makes the ledger an explanation of the balance rather than a
+// second, independently-drifting version of it.
+
+export async function getFinanceTransactions(params?: {
+  period?: FinancePeriod;
+  from?: string | null;
+  to?: string | null;
+}): Promise<FinanceTransaction[]> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canViewFinance(ru)) return [];
+
+  const period = params?.period ?? "today";
+  const { from, to } = periodBounds(period, params?.from, params?.to);
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (service as any).rpc("finance_transactions", {
+    p_restaurant_id: ru.restaurant_id,
+    p_from: from.toISOString(),
+    p_to: to.toISOString(),
+  });
+  if (error || !Array.isArray(data)) return [];
+
+  const num = (v: unknown) => Number(v ?? 0);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data as any[]).map((r) => ({
+    at: r.occurred_at,
+    kind: r.kind as FinanceTxKind,
+    party: r.party ?? null,
+    method: r.method ?? "",
+    amount: num(r.amount),
+    reference: r.reference ?? null,
+    cashDelta: num(r.cash_delta),
+    onlineDelta: num(r.online_delta),
+    creditToUsDelta: num(r.credit_to_us_delta),
+    creditByUsDelta: num(r.credit_by_us_delta),
+    cashAfter: num(r.cash_after),
+    onlineAfter: num(r.online_after),
+    creditToUsAfter: num(r.credit_to_us_after),
+    creditByUsAfter: num(r.credit_by_us_after),
+  }));
 }
 
 // ─── Purchases in the period ──────────────────────────────────────────────────
@@ -257,10 +318,15 @@ function csvCell(v: unknown): string {
   return `"${s.replace(/"/g, '""')}"`;
 }
 
+// Covers both purchase methods and the ledger's derived ones ("partial" = part
+// tendered part credit, "mixed" = cash and bank on one bill).
 const PURCHASE_METHOD_LABEL: Record<string, string> = {
   cash: "Cash",
   online: "Online",
+  card: "Card",
   credit: "Credit",
+  partial: "Part Paid / Part Credit",
+  mixed: "Cash + Online",
 };
 
 export async function exportFinanceCsv(params?: {
@@ -273,10 +339,12 @@ export async function exportFinanceCsv(params?: {
     return { error: "You don't have permission to export the finance report." };
   }
 
-  // The screen now lists the individual purchases, so the file does too.
-  const [report, purchases] = await Promise.all([
+  // The screen lists the individual purchases and the full ledger, so the file
+  // does too — an export that says less than the page it came from is a trap.
+  const [report, purchases, ledger] = await Promise.all([
     getFinanceReport(params),
     getPeriodPurchases(params),
+    getFinanceTransactions(params),
   ]);
   const period = report.period;
 
@@ -294,6 +362,8 @@ export async function exportFinanceCsv(params?: {
     ["OPENING BALANCE"],
     ["Cash", fmt(report.openingCash)],
     ["Online / Bank", fmt(report.openingOnline)],
+    ["Credit to Us (receivable)", fmt(report.openingCreditToUs)],
+    ["Credit by Us (payable)", fmt(report.openingCreditByUs)],
     [],
     ["SALES"],
     ["Cash Sales", fmt(report.salesCash)],
@@ -366,7 +436,39 @@ export async function exportFinanceCsv(params?: {
     ["CLOSING BALANCE"],
     ["Cash Balance", fmt(report.closingCash)],
     ["Online / Bank Balance", fmt(report.closingOnline)],
-    ["Net Balance", fmt(report.closingNet)],
+    ["Credit to Us (receivable)", fmt(report.closingCreditToUs)],
+    ["Credit by Us (payable)", fmt(report.closingCreditByUs)],
+    ["Net Balance (cash + bank)", fmt(report.closingNet)],
+    [],
+    // The movement-by-movement explanation of every figure above. Balance
+    // "before" is the row's after minus its own delta, so the two columns can
+    // never contradict each other.
+    ...(ledger.length > 0
+      ? [
+          ["TRANSACTION HISTORY"],
+          [
+            "Date & Time", "Transaction Type", "Person", "Payment Method", "Amount", "Reference",
+            "Cash Before", "Cash After",
+            "Online Before", "Online After",
+            "Credit to Us Before", "Credit to Us After",
+            "Credit by Us Before", "Credit by Us After",
+          ],
+          // Oldest first: a ledger reads forwards, even though the screen shows
+          // the newest movement at the top.
+          ...[...ledger].reverse().map((t) => [
+            new Date(t.at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }),
+            TX_LABEL[t.kind] ?? t.kind,
+            t.party ?? "",
+            PURCHASE_METHOD_LABEL[t.method] ?? t.method,
+            fmt(t.amount),
+            t.reference ?? "",
+            fmt(t.cashAfter - t.cashDelta), fmt(t.cashAfter),
+            fmt(t.onlineAfter - t.onlineDelta), fmt(t.onlineAfter),
+            fmt(t.creditToUsAfter - t.creditToUsDelta), fmt(t.creditToUsAfter),
+            fmt(t.creditByUsAfter - t.creditByUsDelta), fmt(t.creditByUsAfter),
+          ]),
+        ]
+      : []),
   ];
 
   // Leading BOM so Excel reads UTF-8; CRLF line endings for Windows.

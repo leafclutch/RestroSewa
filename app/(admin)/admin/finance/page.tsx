@@ -3,6 +3,7 @@ import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { STOCK_ACCESS } from "@/lib/permissions";
 import {
   getFinanceReport,
+  getFinanceTransactions,
   getOpeningBalance,
   getPeriodPurchases,
 } from "@/app/actions/finance";
@@ -19,13 +20,14 @@ export default async function FinancePage() {
     redirect("/employee/dashboard");
   }
 
-  const [report, opening, purchases, payroll] = await Promise.all([
+  const [report, opening, purchases, payroll, ledger] = await Promise.all([
     getFinanceReport({ period: "today" }),
     getOpeningBalance(),
     getPeriodPurchases({ period: "today" }),
     // The aggregate wage bill. Gated on `view_finance` like everything else here —
     // it is a company expense, not a window onto any individual's salary.
     getPayrollSummary({ period: "today" }),
+    getFinanceTransactions({ period: "today" }),
   ]);
 
   return (
@@ -34,6 +36,7 @@ export default async function FinancePage() {
       initialOpening={opening}
       initialPurchases={purchases}
       initialPayroll={payroll}
+      initialLedger={ledger}
       // Seeding the opening balance re-bases every balance, so it needs write access.
       canManage={STOCK_ACCESS.canManageStock(restaurantUser)}
     />
