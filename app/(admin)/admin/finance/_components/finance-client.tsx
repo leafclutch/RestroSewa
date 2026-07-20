@@ -30,7 +30,8 @@ import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "../../_components/modal";
-import { Settings2, TriangleAlert } from "lucide-react";
+import { Settings2, TriangleAlert, UserPlus } from "lucide-react";
+import { ImportCreditForm } from "./import-credit-form";
 
 const money = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 const money2 = (n: number) =>
@@ -398,6 +399,7 @@ export function FinanceClient({
   const [loading, startTransition] = useTransition();
   const [exporting, setExporting] = useState(false);
   const [settingOpening, setSettingOpening] = useState(false);
+  const [importingCredit, setImportingCredit] = useState(false);
 
   const load = useCallback((p: FinancePeriod, from?: string, to?: string) => {
     startTransition(async () => {
@@ -508,6 +510,11 @@ export function FinanceClient({
           {canManage && (
             <Button variant="secondary" size="sm" onClick={() => setSettingOpening(true)}>
               <Settings2 size={14} /> Opening balance
+            </Button>
+          )}
+          {canManage && (
+            <Button variant="secondary" size="sm" onClick={() => setImportingCredit(true)}>
+              <UserPlus size={14} /> Import credit
             </Button>
           )}
           <Button variant="secondary" size="sm" onClick={exportCsv} disabled={exporting}>
@@ -910,6 +917,22 @@ export function FinanceClient({
             answers "where do I stand", this answers "why". */}
         <LedgerSection rows={ledger} periodLabel={periodLabel} />
       </div>
+
+      <Modal
+        open={importingCredit}
+        onClose={() => setImportingCredit(false)}
+        title="Import an existing credit"
+        subtitle="Money a customer owed you before HRestroSewa"
+      >
+        <ImportCreditForm
+          onDone={() => {
+            setImportingCredit(false);
+            // The receivable and the ledger both move, so pull the whole report
+            // back rather than patching a figure locally.
+            refreshAll();
+          }}
+        />
+      </Modal>
 
       <Modal
         open={settingOpening}

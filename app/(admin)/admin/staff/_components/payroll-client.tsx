@@ -34,6 +34,7 @@ import type {
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PaymentMethodPicker, splitIsValid, type PaymentMethod } from "@/components/ui/payment-method-picker";
 import { Modal } from "../../_components/modal";
 import {
   ChevronDown,
@@ -211,6 +212,12 @@ function PaymentForm({
 }) {
   const [state, action, pending] = useActionState<ActionResult, FormData>(recordSalaryPayment, null);
   const [method, setMethod] = useState<PayMethod>("cash");
+  // Controlled so the split has something to reconcile against — an
+  // uncontrolled input leaves the picker validating against nothing.
+  const [amount, setAmount] = useState(kind === "salary" ? row.remaining.toFixed(2) : "");
+  const [split, setSplit] = useState({ cash: "", online: "" });
+  const amountNum = parseFloat(amount) || 0;
+  const canSubmit = amountNum > 0 && splitIsValid(method as PaymentMethod, amountNum, split.cash, split.online);
 
   const wasPending = useRef(false);
   useEffect(() => {
@@ -284,7 +291,8 @@ function PaymentForm({
           placeholder="0.00"
           // A final payment almost always clears the balance, so offer it. An
           // advance is by nature a part payment, so don't presume the amount.
-          defaultValue={kind === "salary" ? row.remaining.toFixed(2) : ""}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
         />
         <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
           At most {money2(row.remaining)} — the rest of this month&apos;s salary.
@@ -298,26 +306,18 @@ function PaymentForm({
         >
           Paid by
         </span>
-        <div className="flex gap-2">
-          {(["cash", "online"] as PayMethod[]).map((m) => {
-            const active = method === m;
-            return (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMethod(m)}
-                className="flex-1 text-sm px-3 py-2 rounded-lg border transition-colors"
-                style={{
-                  borderColor: active ? "var(--color-primary)" : "var(--color-hairline)",
-                  background: active ? "var(--color-primary)" : "var(--color-canvas)",
-                  color: active ? "#fff" : "var(--color-ink)",
-                }}
-              >
-                {PAY_METHOD_LABEL[m]}
-              </button>
-            );
-          })}
-        </div>
+        <PaymentMethodPicker
+          methods={["cash", "online", "mixed"]}
+          value={method as PaymentMethod}
+          onChange={(m) => { setMethod(m as PayMethod); setSplit({ cash: "", online: "" }); }}
+          total={amountNum}
+          cash={split.cash}
+          online={split.online}
+          onSplitChange={setSplit}
+          disabled={pending}
+        />
+        <input type="hidden" name="cash_amount" value={method === "mixed" ? split.cash : ""} />
+        <input type="hidden" name="online_amount" value={method === "mixed" ? split.online : ""} />
         <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
           This comes straight out of your {method === "cash" ? "cash" : "bank"} balance on the
           Finance sheet.
@@ -344,7 +344,7 @@ function PaymentForm({
         </p>
       )}
 
-      <Button type="submit" variant="primary" disabled={pending}>
+      <Button type="submit" variant="primary" disabled={pending || !canSubmit}>
         {pending
           ? "Recording…"
           : kind === "advance"

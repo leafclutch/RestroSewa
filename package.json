@@ -8,7 +8,11 @@
     "start": "next start",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
-    "pwa:assets": "node scripts/generate-pwa-assets.mjs"
+    "pwa:assets": "node scripts/generate-pwa-assets.mjs",
+    "migrate": "node scripts/migrate.mjs status",
+    "migrate:up": "node scripts/migrate.mjs up",
+    "migrate:prod": "node scripts/migrate.mjs status --prod",
+    "migrate:prod:up": "node scripts/migrate.mjs up --prod"
   },
   "dependencies": {
     "@supabase/ssr": "latest",

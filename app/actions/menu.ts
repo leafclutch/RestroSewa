@@ -257,6 +257,12 @@ export async function updateCategory(
   if (!existing || existing.restaurant_id !== ru.restaurant_id)
     return { error: "Permission denied." };
 
+  // Changing `workstation_id` here also moves every menu item in the category —
+  // done by the `rs_cascade_category_workstation` trigger, NOT by a second
+  // statement from here, so the category and its items can never be left
+  // disagreeing (that mismatch is exactly the bug this fixed: items kept the
+  // station they were created with, and tickets quietly went to the old one).
+  // See supabase/migrations/20260720200000_category_workstation_cascade.sql.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any)
     .from("menu_categories")

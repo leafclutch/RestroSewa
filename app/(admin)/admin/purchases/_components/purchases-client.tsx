@@ -27,6 +27,7 @@ import { qty } from "@/lib/stock";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PaymentMethodPicker, splitIsValid } from "@/components/ui/payment-method-picker";
 import { Modal } from "../../_components/modal";
 import { ChevronLeft, ChevronRight, Loader2, Plus, Search, Trash2 } from "lucide-react";
 
@@ -40,6 +41,7 @@ type ProductOption = { id: string; name: string; unit: string };
 const METHOD_LABEL: Record<string, string> = {
   cash: "Cash",
   online: "Online",
+  mixed: "Mixed",
   credit: "Credit",
 };
 
@@ -83,7 +85,7 @@ function PurchaseForm({
 }) {
   const [state, action, pending] = useActionState<ActionResult, FormData>(recordPurchase, null);
   const [vendorId, setVendorId] = useState("");
-  const [method, setMethod] = useState<"cash" | "online" | "credit">("cash");
+  const [method, setMethod] = useState<"cash" | "online" | "credit" | "mixed">("cash");
   const [paidNow, setPaidNow] = useState("");
   const [paidTender, setPaidTender] = useState<"cash" | "online">("cash");
   const nextKey = useRef(1);
@@ -114,11 +116,16 @@ function PurchaseForm({
   );
 
   const paidNowNum = parseFloat(paidNow) || 0;
+  const [mixCash, setMixCash] = useState("");
+  const [mixOnline, setMixOnline] = useState("");
   const onCredit = method === "credit" ? Math.max(0, total - paidNowNum) : 0;
+  // A mixed purchase must be settled in full: cash + online = the line total the
+  // server will recompute. The server re-checks, so this only stops a doomed submit.
+  const mixValid = method !== "mixed" || splitIsValid("mixed", total, mixCash, mixOnline);
   const creditValid = method !== "credit" || (paidNowNum >= 0 && paidNowNum < total);
 
   const canSubmit =
-    !pending && !!vendorId && validLines.length > 0 && total > 0 && creditValid;
+    !pending && !!vendorId && validLines.length > 0 && total > 0 && creditValid && mixValid;
 
   const vendor = vendors.find((s) => s.id === vendorId);
 
@@ -128,6 +135,8 @@ function PurchaseForm({
       <input type="hidden" name="method" value={method} />
       <input type="hidden" name="paid_now" value={method === "credit" ? paidNow : ""} />
       <input type="hidden" name="paid_tender" value={paidTender} />
+      <input type="hidden" name="cash_amount" value={method === "mixed" ? mixCash : ""} />
+      <input type="hidden" name="online_amount" value={method === "mixed" ? mixOnline : ""} />
       <input
         type="hidden"
         name="items"
@@ -253,8 +262,8 @@ function PurchaseForm({
         <p className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
           Payment
         </p>
-        <div className="grid grid-cols-3 gap-1">
-          {(["cash", "online", "credit"] as const).map((m) => {
+        <div className="grid grid-cols-4 gap-1">
+          {(["cash", "online", "mixed", "credit"] as const).map((m) => {
             const active = method === m;
             const isCredit = m === "credit";
             return (
@@ -278,6 +287,19 @@ function PurchaseForm({
             );
           })}
         </div>
+
+        {method === "mixed" && (
+          <PaymentMethodPicker
+            methods={["mixed"]}
+            value="mixed"
+            onChange={() => {}}
+            total={total}
+            cash={mixCash}
+            online={mixOnline}
+            onSplitChange={(n) => { setMixCash(n.cash); setMixOnline(n.online); }}
+            disabled={pending}
+          />
+        )}
       </div>
 
       {method === "credit" && (

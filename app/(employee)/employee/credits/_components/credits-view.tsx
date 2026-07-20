@@ -19,6 +19,7 @@ import { CREDIT_STATUS_COLOR, CREDIT_STATUS_LABEL } from "@/lib/credits";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PaymentMethodPicker, splitIsValid, type PaymentMethod } from "@/components/ui/payment-method-picker";
 import { CreditReceiptButton } from "./credit-receipt";
 import { Loader2, Search, X } from "lucide-react";
 
@@ -143,7 +144,8 @@ function CustomerDetailModal({
   const [detail, setDetail] = useState<CreditCustomerDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
-  const [method, setMethod] = useState("cash");
+  const [method, setMethod] = useState<PaymentMethod>("cash");
+  const [split, setSplit] = useState({ cash: "", online: "" });
   const [state, action, pending] = useActionState<ActionResult, FormData>(addCreditPayment, null);
 
   // The modal is portaled to <body> (see the return). `document` doesn't exist during
@@ -175,7 +177,9 @@ function CustomerDetailModal({
   const balance = detail?.balance ?? 0;
   const settled = balance <= 0;
   const amountNum = parseFloat(amount) || 0;
-  const amountValid = amountNum > 0 && amountNum <= balance + 0.005;
+  // A mixed payment only becomes submittable once its two halves reconcile.
+  const amountValid =
+    amountNum > 0 && amountNum <= balance + 0.005 && splitIsValid(method, amountNum, split.cash, split.online);
 
   if (!mounted) return null;
 
@@ -348,27 +352,21 @@ function CustomerDetailModal({
                     >
                       Received as
                     </p>
-                    <div className="grid grid-cols-3 gap-1">
-                      {REPAYMENT_METHODS.map((m) => {
-                        const active = method === m.value;
-                        return (
-                          <button
-                            key={m.value}
-                            type="button"
-                            onClick={() => setMethod(m.value)}
-                            className="py-1.5 rounded-lg border text-sm transition-colors"
-                            style={{
-                              borderColor: active ? "var(--color-primary)" : "var(--color-hairline-input)",
-                              background: active ? "rgba(99,102,241,0.06)" : "var(--color-canvas)",
-                              color: "var(--color-ink)",
-                            }}
-                          >
-                            {m.label}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    {/* The split reconciles against the amount BEING PAID, not
+                        the whole balance — a part payment can itself be split. */}
+                    <PaymentMethodPicker
+                      methods={["cash", "online", "card", "mixed"]}
+                      value={method}
+                      onChange={(m) => { setMethod(m); setSplit({ cash: "", online: "" }); }}
+                      total={amountNum}
+                      cash={split.cash}
+                      online={split.online}
+                      onSplitChange={setSplit}
+                      disabled={pending}
+                    />
                   </div>
+                  <input type="hidden" name="cash_amount" value={method === "mixed" ? split.cash : ""} />
+                  <input type="hidden" name="online_amount" value={method === "mixed" ? split.online : ""} />
 
                   <Input name="notes" type="text" placeholder="Note (optional)" autoComplete="off" />
 

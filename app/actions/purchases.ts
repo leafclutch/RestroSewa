@@ -256,8 +256,8 @@ export async function recordPurchase(
   const paidTender = ((formData.get("paid_tender") as string) || "cash").toLowerCase();
 
   if (!vendorId) return { error: "Choose a vendor." };
-  if (!["cash", "online", "credit"].includes(method)) {
-    return { error: "Choose Cash, Online or Credit." };
+  if (!["cash", "online", "credit", "mixed"].includes(method)) {
+    return { error: "Choose Cash, Online, Mixed or Credit." };
   }
 
   let items: ItemInput[];
@@ -287,6 +287,17 @@ export async function recordPurchase(
     }
     if (paidTender === "online") online = paidNow;
     else cash = paidNow;
+  } else if (method === "mixed") {
+    // A fully-paid bill settled partly in cash and partly online. The RPC
+    // re-checks that the two halves equal the line total it computes itself —
+    // the client is never trusted for the amount.
+    const c = parseFloat((formData.get("cash_amount") as string) || "");
+    const o = parseFloat((formData.get("online_amount") as string) || "");
+    if (isNaN(c) || isNaN(o) || c < 0 || o < 0) {
+      return { error: "Enter both the cash and the online amount." };
+    }
+    cash = c;
+    online = o;
   }
 
   const service = createServiceClient();
