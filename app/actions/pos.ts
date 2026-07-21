@@ -3,7 +3,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { hasPermission, PERMISSIONS, NAV_ACCESS } from "@/lib/permissions";
+import { hasPermission, hasAnyPermission, PERMISSIONS, NAV_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { WALK_IN_SLOT_COUNT } from "@/lib/walk-ins";
 import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignments";
@@ -58,6 +58,25 @@ export type OrderItemRow = {
   notes: string | null;
   created_at: string;
   order_id: string;
+  /**
+   * The Order Ticket this item was sent to the station on, or null if it has not
+   * been sent yet. This is what stops a second OT reprinting the first one's items:
+   * only `ticket_id === null` items are eligible for a new ticket. An item keeps its
+   * ticket for life — including after cancellation — so the ticket is an audit record
+   * of what the kitchen was actually handed.
+   */
+  ticket_id: string | null;
+};
+
+/** One generated Order Ticket — a batch of items sent to one station at one moment. */
+export type OrderTicketRow = {
+  id: string;
+  workstation_id: string | null;
+  workstation_name: string | null;
+  /** Null when that station's OT numbering is switched off. */
+  ot_number: number | null;
+  prefix: string | null;
+  printed_at: string;
 };
 
 export type SessionDetail = {
@@ -87,9 +106,9 @@ export type SessionDetail = {
    *  assign_session_bill_number trigger). Null when the restaurant hasn't configured
    *  numbering — its documents fall back to derived refs. Shared by KOT/BOT and the bill. */
   bill_number: number | null;
-  /** Per-workstation OT numbers stamped for this session (KOT-00125, BOT-00086, …).
-   *  Each workstation's own independent number; empty when OT numbering is off. */
-  workstation_tickets: { workstation_id: string; ot_number: number; prefix: string | null }[];
+  /** Every Order Ticket generated for this session so far, oldest first — the reprint
+   *  history. A station appears once per print, not once per session. */
+  tickets: OrderTicketRow[];
   items: OrderItemRow[];
   total: number;
 };
@@ -580,7 +599,7 @@ export async function getSessionDetail(
     const { data: itemsData } = await (service as any)
       .from("session_order_items")
       .select(
-        "id, item_name, item_price, workstation_id, workstation_name, quantity, item_status, notes, created_at, order_id"
+        "id, item_name, item_price, workstation_id, workstation_name, quantity, item_status, notes, created_at, order_id, ticket_id"
       )
       .in("order_id", orderIds)
       // A cancelled item is off the bill and back on the shelf — it must not be
@@ -595,17 +614,15 @@ export async function getSessionDetail(
     0
   );
 
-  // Per-workstation OT numbers stamped for this session (KOT-00125, BOT-00086, …).
+  // Every OT generated for this session, oldest first — drives the reprint list and
+  // tells each item which ticket it went out on.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: otRows } = await (service as any)
-    .from("workstation_ticket_numbers")
-    .select("workstation_id, ot_number, prefix")
-    .eq("session_id", session.id);
-  const workstation_tickets = ((otRows ?? []) as {
-    workstation_id: string;
-    ot_number: number;
-    prefix: string | null;
-  }[]);
+    .from("order_tickets")
+    .select("id, workstation_id, workstation_name, ot_number, prefix, printed_at")
+    .eq("session_id", session.id)
+    .order("printed_at");
+  const tickets = ((otRows ?? []) as OrderTicketRow[]);
 
   return {
     id: session.id,
@@ -634,7 +651,7 @@ export async function getSessionDetail(
     customer_address: (session as any).customer_address ?? null,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     bill_number: (session as any).bill_number ?? null,
-    workstation_tickets,
+    tickets,
     items,
     total,
   };
@@ -770,6 +787,111 @@ export async function updateOrderItemStatus(
   revalidatePath("/employee/queue");
   revalidatePath(`/employee/session/${order.session_id}`);
   return null;
+}
+
+// ─── Generate an Order Ticket ─────────────────────────────────────────────────
+
+export type TicketResult =
+  | { ok: true; ticket: OrderTicketRow; items: OrderItemRow[] }
+  | { error: string };
+
+/**
+ * Issue ONE Order Ticket for one workstation: claim that station's next number and
+ * stamp it onto exactly the items being sent.
+ *
+ * This is what fixes the reprint bug. Before it existed, printing was purely a
+ * client-side `window.print()` and nothing recorded that an item had gone to the
+ * kitchen, so every OT reprinted the whole table. Now an item carries the ticket it
+ * left on, and only un-ticketed items are ever eligible again.
+ *
+ * `itemIds` is what the cashier saw in the preview, but it is a REQUEST, not a fact
+ * (same principle as the cart in lib/order-items.ts). The DB function re-derives the
+ * station, ownership and eligibility, and the items it returns — not the ones passed
+ * in — are what the caller must put on paper.
+ */
+export async function generateOrderTicket(
+  sessionId: string,
+  workstationId: string | null,
+  itemIds: string[]
+): Promise<TicketResult> {
+  const ru = await getRestaurantUser();
+
+  // Generating a ticket is a billing / order-management action — Cashier, Receptionist,
+  // Manager — NOT any waiter. Mirrors the gate on the print buttons themselves.
+  if (!hasAnyPermission(ru, [PERMISSIONS.PROCESS_PAYMENTS, PERMISSIONS.CLOSE_BILLS])) {
+    return { error: "You don't have permission to print tickets." };
+  }
+
+  if (!itemIds?.length) return { error: "Nothing new to send." };
+
+  const service = createServiceClient();
+
+  // Same ownership + table-group check every other session action performs, so a staff
+  // member cannot print for a table outside their group.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: session } = await (service as any)
+    .from("sessions")
+    .select("id, restaurant_id, table_id, room_id")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (!session || session.restaurant_id !== ru.restaurant_id) {
+    return { error: "Permission denied." };
+  }
+
+  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  if (
+    !visibility.seesAll &&
+    (!visibility.canSeeTable(session.table_id ?? null) ||
+      !visibility.canSeeRoom(session.room_id ?? null))
+  ) {
+    return { error: "Permission denied." };
+  }
+
+  // One transaction inside the database: number claimed, ticket created and items
+  // stamped together, or not at all. Two cashiers pressing Print at the same instant
+  // cannot both win — the loser gets NO_NEW_ITEMS.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: ticket, error } = await (service as any).rpc("generate_order_ticket", {
+    p_session_id: sessionId,
+    p_workstation_id: workstationId,
+    p_item_ids: itemIds,
+    p_printed_by: ru.id,
+  });
+
+  if (error) {
+    if (error.message?.includes("NO_NEW_ITEMS")) {
+      return { error: "Those items have already been sent to this station." };
+    }
+    return { error: "Could not generate the ticket. Please try again." };
+  }
+
+  // Read back what was ACTUALLY stamped. If someone else changed the table between the
+  // preview opening and Print being pressed, the paper must match the record, not the
+  // stale preview.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: items } = await (service as any)
+    .from("session_order_items")
+    .select(
+      "id, item_name, item_price, workstation_id, workstation_name, quantity, item_status, notes, created_at, order_id, ticket_id"
+    )
+    .eq("ticket_id", ticket.id)
+    .order("created_at");
+
+  revalidatePath(`/employee/session/${sessionId}`);
+  revalidatePath("/employee/queue");
+
+  return {
+    ok: true,
+    ticket: {
+      id: ticket.id,
+      workstation_id: ticket.workstation_id ?? null,
+      workstation_name: ticket.workstation_name ?? null,
+      ot_number: ticket.ot_number ?? null,
+      prefix: ticket.prefix ?? null,
+      printed_at: ticket.printed_at,
+    },
+    items: (items as OrderItemRow[]) ?? [],
+  };
 }
 
 // ─── Close Session with Payment ───────────────────────────────────────────────
