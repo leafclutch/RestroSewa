@@ -1358,8 +1358,19 @@ export function CustomerMenu({
 }) {
   const isRoom = !!roomId;
   const contextId = tableId ?? roomId ?? null;
-  const locationLabel = tableNumber ? `Table ${tableNumber}` : roomNumber ? `Room ${roomNumber}` : null;
   const noPin = qrMode === "ordering_no_pin";
+
+  // Where the guest is sitting, as STATE rather than a fixed prop.
+  //
+  // Staff can shift a table underneath a guest who has the menu open (transfer_session).
+  // Their session is untouched — same cart, same orders, same bill — but the QR they
+  // scanned belongs to the table they have left, so a label derived once from that QR
+  // would go stale and tell them the wrong table number. The session is the anchor; the
+  // QR was only the way in.
+  const [placeLabel, setPlaceLabel] = useState<string | null>(
+    tableNumber ? `Table ${tableNumber}` : roomNumber ? `Room ${roomNumber}` : null
+  );
+  const locationLabel = placeLabel;
 
   const [activeSessionId, setActiveSessionId] = useState<string | null>(initialSessionId);
   const orderingAvailable = orderingEnabled && (qrMode === "ordering_enabled" || noPin) && !!contextId;
@@ -1422,9 +1433,27 @@ export function CustomerMenu({
   // acknowledging the call, the table being activated, or the menu changing all
   // land instantly. Scoped by session id — the stream carries only topic names,
   // so an unauthenticated guest can never receive data they shouldn't see.
+  // If staff shift this party to another table, the session is untouched but its place
+  // changes. Re-read it on the 'tables' topic so the header follows the guest — no
+  // reconnect, no rescan, nothing lost from the cart.
+  const followSession = useCallback(() => {
+    if (!activeSessionId) return;
+    checkSessionActive(activeSessionId).then((r) => {
+      if (!r.active) return;
+      if (r.table_number) setPlaceLabel(`Table ${r.table_number}`);
+      else if (r.room_number) setPlaceLabel(`Room ${r.room_number}`);
+    });
+  }, [activeSessionId]);
+
   useRealtime(
     ["orders", "notifications", "tables", "menu"],
-    useCallback(() => pollRef.current?.(), []),
+    useCallback(
+      (topic) => {
+        pollRef.current?.();
+        if (topic === "tables") followSession();
+      },
+      [followSession]
+    ),
     activeSessionId
   );
 
@@ -1470,6 +1499,8 @@ export function CustomerMenu({
         if (r.active) {
           setActiveSessionId(parsed.sessionId!);
           setPinVerified(true);
+          if (r.table_number) setPlaceLabel(`Table ${r.table_number}`);
+          else if (r.room_number) setPlaceLabel(`Room ${r.room_number}`);
         } else {
           localStorage.removeItem(`rs_auth_${cacheKey}`);
         }

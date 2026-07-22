@@ -4,6 +4,8 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
+import { revalidateRestaurantInfo } from "@/lib/restaurant-info";
+import { tenantCache, revalidateWorkstations, CACHE } from "@/lib/cache/tenant-cache";
 
 export type ActionResult = { error: string } | null;
 
@@ -27,24 +29,41 @@ function normalizeTicketCode(v: unknown): string | null {
   return s || null;
 }
 
+/**
+ * The station list. Read on the session screen and the room folio to route each item onto
+ * its own ticket — and it changes only when an admin edits the Workstations page, i.e.
+ * a handful of times a year.
+ *
+ * Cached for 5 minutes. The worst a stale read can do is print a just-renamed station's
+ * old name on a KOT, or route a brand-new station's items to the default ticket for a few
+ * minutes. Every mutation below calls `revalidateWorkstations`, so that window only opens
+ * if someone forgets one.
+ */
 export async function getWorkstations(restaurantId: string): Promise<WorkstationRow[]> {
-  const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any)
-    .from("workstations")
-    .select("id, name, display_color, sort_order, is_active, ticket_code")
-    .eq("restaurant_id", restaurantId)
-    .order("sort_order")
-    .order("name");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return ((data as any[]) ?? []).map((w) => ({
-    id: w.id,
-    name: w.name,
-    display_color: w.display_color,
-    sort_order: w.sort_order,
-    is_active: w.is_active,
-    ticket_code: w.ticket_code ?? null,
-  }));
+  return tenantCache(
+    CACHE.workstations,
+    restaurantId,
+    async () => {
+      const service = createServiceClient();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (service as any)
+        .from("workstations")
+        .select("id, name, display_color, sort_order, is_active, ticket_code")
+        .eq("restaurant_id", restaurantId)
+        .order("sort_order")
+        .order("name");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return ((data as any[]) ?? []).map((w) => ({
+        id: w.id,
+        name: w.name,
+        display_color: w.display_color,
+        sort_order: w.sort_order,
+        is_active: w.is_active,
+        ticket_code: w.ticket_code ?? null,
+      }));
+    },
+    { revalidate: 300 }
+  );
 }
 
 export async function createWorkstation(
@@ -70,6 +89,7 @@ export async function createWorkstation(
 
   if (error) return { error: error.message };
 
+  revalidateWorkstations(ru.restaurant_id);
   revalidatePath("/admin/workstations");
   return null;
 }
@@ -83,6 +103,7 @@ export async function toggleWorkstationStatus(id: string, isActive: boolean) {
     .from("workstations")
     .update({ is_active: isActive })
     .eq("id", id);
+  revalidateWorkstations(ru.restaurant_id);
   revalidatePath("/admin/workstations");
 }
 
@@ -117,6 +138,7 @@ export async function updateWorkstation(
     .eq("id", id);
 
   if (error) return { error: error.message };
+  revalidateWorkstations(ru.restaurant_id);
   revalidatePath("/admin/workstations");
   return null;
 }
@@ -154,6 +176,9 @@ export async function updatePrintSettings(
     .eq("id", ru.restaurant_id);
 
   if (error) return { error: error.message };
+  // Paper width lives in restaurants.settings and decides the printed page size.
+  revalidateRestaurantInfo(ru.restaurant_id);
+  revalidateWorkstations(ru.restaurant_id);
   revalidatePath("/admin/workstations");
   return null;
 }
@@ -172,6 +197,7 @@ export async function deleteWorkstation(id: string): Promise<ActionResult> {
       return { error: "Cannot delete — menu categories or items are assigned to this workstation." };
     return { error: error.message };
   }
+  revalidateWorkstations(ru.restaurant_id);
   revalidatePath("/admin/workstations");
   return null;
 }

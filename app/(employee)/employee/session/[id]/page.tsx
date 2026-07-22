@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionDetail } from "@/app/actions/pos";
+import { getRestaurantConfig } from "@/lib/restaurant-info";
 import { walkInLabel } from "@/lib/walk-ins";
 import { getWorkstations } from "@/app/actions/workstations";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
@@ -8,6 +9,7 @@ import { hasPermission, hasAnyPermission, NAV_ACCESS, PERMISSIONS } from "@/lib/
 import { buildVisibilityFilter } from "@/lib/assignments";
 import { createServiceClient } from "@/lib/supabase/service";
 import { SessionClient } from "./_components/session-client";
+import { TransferHistory } from "./_components/transfer-history";
 import type { RestaurantInfo } from "./_components/print-tickets";
 import { ChevronLeft } from "lucide-react";
 
@@ -36,9 +38,22 @@ export default async function SessionPage({
 
   if (!session) notFound();
 
-  // Table-group isolation: a staff member may only open a session whose table
-  // group (or room) they are assigned to. Admins/managers and walk-ins pass.
-  const visibility = await buildVisibilityFilter(restaurantUser.restaurant_id, restaurantUser);
+  // Everything below needs only `restaurantUser.restaurant_id`, so it all goes in ONE
+  // wave. It used to be three: the visibility filter, then (after ~40 lines of pure
+  // permission arithmetic that costs nothing) the restaurant row and the workstation
+  // list. Nothing was waiting for anything — they were just written in sequence, and each
+  // `await` on its own line is a full network round trip.
+  const [visibility, config, workstations] = await Promise.all([
+    // Table-group isolation: a staff member may only open a session whose table
+    // group (or room) they are assigned to. Admins/managers and walk-ins pass.
+    buildVisibilityFilter(restaurantUser.restaurant_id, restaurantUser),
+    // Restaurant header details for the KOT / Bill tickets. Cached (60s) and shared with
+    // every other document that prints, so this usually costs nothing.
+    getRestaurantConfig(restaurantUser.restaurant_id),
+    // The station list, so a ticket can sort each item onto the KOT or the BOT. Also cached.
+    getWorkstations(restaurantUser.restaurant_id),
+  ]);
+
   const canView =
     visibility.seesAll ||
     (visibility.canSeeTable(session.table_id) && visibility.canSeeRoom(session.room_id));
@@ -76,36 +91,23 @@ export default async function SessionPage({
   // Everyone who can view the session can also see its ordering PIN.
   const canSeePIN = canView;
 
-  // Restaurant header details for the KOT / Bill tickets, plus the station list so a
-  // ticket can sort each item onto the KOT (kitchen) or the BOT (bar).
-  const service = createServiceClient();
-  const [{ data: rest }, workstations] = await Promise.all([
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (service as any)
-      .from("restaurants")
-      .select("name, address, contact_phone, pan_vat_number, logo_url, settings, discount_pin_hash")
-      .eq("id", restaurantUser.restaurant_id)
-      .maybeSingle(),
-    getWorkstations(restaurantUser.restaurant_id),
-  ]);
-
   const restaurant: RestaurantInfo = {
-    name: rest?.name ?? "Restaurant",
-    address: rest?.address ?? null,
-    contact_phone: rest?.contact_phone ?? null,
-    pan_vat_number: rest?.pan_vat_number ?? null,
-    logo_url: rest?.logo_url ?? null,
-    paper_width_mm: rest?.settings?.print_paper_width === "58" ? 58 : 80,
-    bill_number_pad: Number.isFinite(Number(rest?.settings?.bill_number_pad)) ? Number(rest?.settings?.bill_number_pad) : 0,
-    bill_number_label: rest?.settings?.bill_number_label === "order" ? "order" : "bill",
-    tax_percent: numFromSettings(rest?.settings, "tax_percent", "tax_rate", "gst_percent"),
-    service_charge_percent: numFromSettings(rest?.settings, "service_charge_percent", "service_charge"),
+    name: config.name,
+    address: config.address,
+    contact_phone: config.contact_phone,
+    pan_vat_number: config.pan_vat_number,
+    logo_url: config.logo_url,
+    paper_width_mm: config.paper_width_mm,
+    bill_number_pad: config.bill_number_pad,
+    bill_number_label: config.bill_number_label,
+    tax_percent: config.tax_percent,
+    service_charge_percent: config.service_charge_percent,
   };
 
-  // Discounts exist only where an admin has set a discount PIN. Collapsed to a boolean here
-  // so the hash never crosses to the client; the PIN itself is still checked server-side at
-  // payment, so this only decides whether the field is worth showing.
-  const discountEnabled = !!rest?.discount_pin_hash;
+  // Discounts exist only where an admin has set a discount PIN. The hash is collapsed to a
+  // boolean inside getRestaurantConfig so it never reaches a shared cache or the client;
+  // the PIN itself is still checked server-side at payment.
+  const discountEnabled = config.discountEnabled;
 
   const label =
     session.type === "table" && session.table_number
@@ -147,6 +149,9 @@ export default async function SessionPage({
           {session.status}
         </span>
       </div>
+
+      {/* Where this session has been. Renders nothing unless it has actually moved. */}
+      <TransferHistory transfers={session.transfers} />
 
       <SessionClient
         session={session}

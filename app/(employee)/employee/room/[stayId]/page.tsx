@@ -6,6 +6,7 @@ import { getSessionDetail } from "@/app/actions/pos";
 import { getWorkstations } from "@/app/actions/workstations";
 import { createServiceClient } from "@/lib/supabase/service";
 import { FolioClient } from "./_components/folio-client";
+import { TransferHistory } from "../../session/[id]/_components/transfer-history";
 
 /**
  * The room's ONE screen — the counterpart of a table's session screen.
@@ -62,6 +63,14 @@ export default async function RoomPage({
   ]);
 
   return (
+    <>
+    {/* Where this guest has been. Renders nothing unless the stay has been moved.
+        Matches FolioClient's own container so it lines up with the cards below it. */}
+    {session && session.transfers.length > 0 && (
+      <div className="max-w-2xl mx-auto px-3 sm:px-5 pt-4">
+        <TransferHistory transfers={session.transfers} />
+      </div>
+    )}
     <FolioClient
       view={view}
       session={session}
@@ -89,5 +98,6 @@ export default async function RoomPage({
       // Billing + Close Bills, same as a table bill. The action re-checks it.
       canUseCredit={NAV_ACCESS.canManageCredits(restaurantUser)}
     />
+    </>
   );
 }

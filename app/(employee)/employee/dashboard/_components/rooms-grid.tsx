@@ -10,7 +10,8 @@ import { SECTION_ACCENT } from "@/lib/section-colors";
 import { CountPill } from "@/components/ui/count-pill";
 import { Button } from "@/components/ui/button";
 import { formatShort } from "@/lib/format-time";
-import { BedDouble, Clock, LogIn, Plus, Receipt, Sparkles, User, Users, UtensilsCrossed, X } from "lucide-react";
+import { TransferModal } from "@/app/(employee)/employee/_components/transfer-modal";
+import { BedDouble, Clock, LogIn, MoveRight, Plus, Receipt, Sparkles, User, Users, UtensilsCrossed, X } from "lucide-react";
 
 const rupee = (n: number) => "₹" + Number(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
@@ -173,10 +174,12 @@ function CheckInModal({ room, onClose }: { room: RoomOverview; onClose: () => vo
 
 // `memo` so a refetch re-renders only the cards whose data actually moved —
 // checking one guest in shouldn't repaint every other room's countdown.
-const RoomCard = memo(function RoomCard({ room, canCheckIn, onCheckIn, onError }: {
+const RoomCard = memo(function RoomCard({ room, canCheckIn, canShift, onCheckIn, onShift, onError }: {
   room: RoomOverview;
   canCheckIn: boolean;
+  canShift: boolean;
   onCheckIn: () => void;
+  onShift: (room: RoomOverview, sessionId: string) => void;
   onError: (msg: string) => void;
 }) {
   const s = STATUS[room.status];
@@ -358,6 +361,17 @@ const RoomCard = memo(function RoomCard({ room, canCheckIn, onCheckIn, onError }
                 </Button>
               </Link>
             )}
+            {canShift && stay.session_id && (
+              <Button
+                type="button"
+                variant="secondary"
+                title="Move this guest to another room"
+                onClick={() => onShift(room, stay.session_id!)}
+                className="shrink-0 flex items-center justify-center gap-1.5"
+              >
+                <MoveRight size={13} />
+              </Button>
+            )}
           </>
         ) : room.session_id ? (
           // An open session with no stay behind it — made by the old flow, before
@@ -408,12 +422,15 @@ const RoomCard = memo(function RoomCard({ room, canCheckIn, onCheckIn, onError }
 export function RoomsGrid({
   initial,
   canCheckIn,
+  canShift = false,
 }: {
   initial: RoomOverview[];
   canCheckIn: boolean;
+  canShift?: boolean;
 }) {
   const [rooms, setRooms] = useState(initial);
   const [checkingIn, setCheckingIn] = useState<RoomOverview | null>(null);
+  const [moving, setMoving] = useState<{ room: RoomOverview; sessionId: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
@@ -431,6 +448,10 @@ export function RoomsGrid({
 
   // Stable identity, so memoised cards aren't invalidated on every render.
   const onError = useCallback((msg: string) => setError(msg), []);
+  const onShift = useCallback(
+    (room: RoomOverview, sessionId: string) => setMoving({ room, sessionId }),
+    []
+  );
 
   const occupied = rooms.filter((r) => r.stay).length;
   const free = rooms.filter((r) => r.status === "available" && !r.stay).length;
@@ -474,14 +495,25 @@ export function RoomsGrid({
             key={r.id}
             room={r}
             canCheckIn={canCheckIn}
+            canShift={canShift}
             onError={onError}
             onCheckIn={() => setCheckingIn(r)}
+            onShift={onShift}
           />
         ))}
       </div>
 
       {checkingIn && (
         <CheckInModal room={checkingIn} onClose={() => setCheckingIn(null)} />
+      )}
+
+      {moving && (
+        <TransferModal
+          sessionId={moving.sessionId}
+          fallbackLabel={moving.room.number}
+          onClose={() => setMoving(null)}
+          onDone={resync}
+        />
       )}
     </div>
   );

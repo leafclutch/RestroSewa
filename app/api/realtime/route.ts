@@ -1,5 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { getCurrentStaff } from "@/lib/auth/current-user";
 import { subscribe, isListening } from "@/lib/realtime/bus";
 import type { Topic } from "@/lib/realtime/bus";
 
@@ -22,24 +22,15 @@ const HEARTBEAT_MS = 25_000;
  *            fetches everything through the same session-scoped actions.
  */
 async function resolveRestaurant(sessionId: string | null): Promise<string | null> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // This route is EXCLUDED from the middleware matcher, so it used to pay a full auth
+  // round-trip plus its own copy of the staff-row lookup on every page load that opened a
+  // stream — the same two queries the page itself had just made. `getCurrentStaff()` is
+  // the identical check (auth_user_id + is_active + deleted_at) behind local JWT
+  // verification, and it returns restaurant_id already.
+  const staff = await getCurrentStaff();
+  if (staff) return staff.restaurant_id;
 
   const service = createServiceClient();
-
-  if (user) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: ru } = await (service as any)
-      .from("restaurant_users")
-      .select("restaurant_id")
-      .eq("auth_user_id", user.id)
-      .eq("is_active", true)
-      .is("deleted_at", null)
-      .maybeSingle();
-    if (ru) return ru.restaurant_id as string;
-  }
 
   if (sessionId) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

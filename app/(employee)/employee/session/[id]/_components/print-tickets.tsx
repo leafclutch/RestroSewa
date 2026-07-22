@@ -50,6 +50,21 @@ function locationLabel(session: SessionDetail): string {
   return "—";
 }
 
+/**
+ * Where an ALREADY-ISSUED ticket says it went.
+ *
+ * A session can be shifted to another table (transfer_session), and a reprint has to
+ * show where the paper actually went — not where the party sits now. `location_label` is
+ * stamped at transfer time, so it is null on every ticket whose session has not moved:
+ * that is the normal case, and the live label is then the correct answer.
+ */
+function issuedLocationLabel(ticket: OrderTicketRow, session: SessionDetail): string {
+  if (!ticket.location_label) return locationLabel(session);
+  // A transfer is always same-kind (table→table, room→room), so the session's kind still
+  // tells us how to word the frozen label.
+  return session.room_id ? `Room ${ticket.location_label}` : `Table ${ticket.location_label}`;
+}
+
 // The order's ONE sequential number — the same on the KOT, the BOT, every other
 // workstation ticket, and the customer bill. Null when the restaurant hasn't configured
 // numbering, in which case each document falls back to its own derived reference.
@@ -132,6 +147,7 @@ function StationTicket({
   name,
   items,
   number,
+  location,
 }: {
   session: SessionDetail;
   restaurant: RestaurantInfo;
@@ -142,6 +158,9 @@ function StationTicket({
   items: OrderItemRow[];
   /** The number line. Rendered as-is so the caller decides pending vs issued. */
   number: { label: string; value: string };
+  /** Where the paper is for. Defaults to where the session is NOW; a reprint passes the
+   *  label frozen on the ticket, so an old KOT keeps saying the table it was cooked for. */
+  location?: string;
 }) {
   return (
     <>
@@ -154,7 +173,7 @@ function StationTicket({
       <Divider />
       {/* The table/room number is what a runner reads first — make it big. */}
       <div style={{ textAlign: "center", fontWeight: 700, fontSize: 20, margin: "2px 0 6px" }}>
-        {locationLabel(session)}
+        {location ?? locationLabel(session)}
       </div>
       {/* Walk-in customer — the kitchen/delivery needs the name + phone on a takeaway. */}
       {(session.customer_name || session.customer_phone) && (
@@ -419,6 +438,7 @@ export function SessionPrintButtons({
                 name={d.name}
                 items={items}
                 number={numberLine(d.code, sent?.ticket ?? null)}
+                location={sent ? issuedLocationLabel(sent.ticket, session) : undefined}
               />
             </PrintModal>
           );
@@ -444,6 +464,7 @@ export function SessionPrintButtons({
             }
             items={itemsOfTicket(reprintTicket.id)}
             number={numberLine(codeOfTicket(reprintTicket, workstations), reprintTicket)}
+            location={issuedLocationLabel(reprintTicket, session)}
           />
         </PrintModal>
       )}

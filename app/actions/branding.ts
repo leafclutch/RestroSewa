@@ -3,6 +3,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { revalidatePath } from "next/cache";
+import { revalidateRestaurantInfo } from "@/lib/restaurant-info";
 
 export type ActionResult = { error: string } | null;
 
@@ -136,6 +137,9 @@ export async function removeRestaurantLogo(restaurantId: string): Promise<Action
 // The logo is chrome on every surface of the app, so a change has to invalidate
 // all of them — not just the page the super admin was standing on.
 function revalidateBranding(restaurantId: string) {
+  // The logo prints on every bill and the config is cached for 60s, so drop it here —
+  // both write paths (set logo, clear logo) funnel through this one helper.
+  revalidateRestaurantInfo(restaurantId);
   revalidatePath(`/superadmin/restaurants/${restaurantId}`);
   revalidatePath("/superadmin/dashboard");
   revalidatePath("/admin", "layout");

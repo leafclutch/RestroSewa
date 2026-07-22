@@ -6,6 +6,8 @@ import { requireRestaurantAdmin } from "@/lib/auth/guards";
 import { normalizeBillLabel, type BillNumberLabel } from "@/lib/billing/bill-number";
 import { normalizeClosingHour } from "@/lib/business-day";
 import { defaultTicketCode, ticketCodeOf } from "@/lib/workstations/ticket-code";
+import { revalidateRestaurantInfo } from "@/lib/restaurant-info";
+import { revalidateWorkstations } from "@/lib/cache/tenant-cache";
 
 export type ActionResult = { error: string } | { ok: true } | null;
 
@@ -81,6 +83,13 @@ export async function updateDiscountPin(
   });
   if (error) return { error: "Could not save the discount PIN. Please try again." };
 
+  // Written by the `set_discount_pin` DB function, not by a .update() here — so this is
+  // the one invalidation a grep for `.from("restaurants").update(` would have missed.
+  // Setting or clearing the PIN is the on/off switch for discounts existing at all, so a
+  // stale `discountEnabled` would show the cashier a field that cannot work (or hide one
+  // that now can).
+  revalidateRestaurantInfo(restaurantUser.restaurant_id);
+
   revalidatePath("/admin/settings");
   return { ok: true };
 }
@@ -142,6 +151,10 @@ export async function updateBillingSettings(
 
   if (error) return { error: error.message };
 
+  // PAN, bill numbering and the tax/service percentages all print on a customer receipt,
+  // and the config is cached for 60s — so this must be dropped NOW, not on the next TTL.
+  revalidateRestaurantInfo(restaurantUser.restaurant_id);
+
   // The floor reads these when printing, so refresh the surfaces that render a bill.
   revalidatePath("/admin/settings");
   revalidatePath("/employee/sales");
@@ -194,6 +207,8 @@ export async function updateBusinessDaySettings(
     .eq("id", restaurantUser.restaurant_id);
 
   if (error) return { error: error.message };
+
+  revalidateRestaurantInfo(restaurantUser.restaurant_id);
 
   // This re-buckets every date-based figure in the app, so every reporting
   // surface must be refreshed — a cached page would keep showing totals computed
@@ -314,6 +329,9 @@ export async function updateWorkstationNumbering(
     if (error) return { error: error.message };
   }
 
+  // This form edits `ticket_code`, which is the prefix printed on every Order Ticket —
+  // so a stale station list would keep printing the old code.
+  revalidateWorkstations(restaurantUser.restaurant_id);
   revalidatePath("/admin/settings");
   revalidatePath("/admin/workstations");
   return { ok: true };

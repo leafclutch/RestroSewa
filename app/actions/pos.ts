@@ -11,6 +11,8 @@ import { computeCreditStats, settlementOf } from "@/lib/credits";
 import type { BillSettlement, CreditStats } from "@/lib/credits";
 import { resolveOrderItems } from "@/lib/order-items";
 import { businessDate, businessPeriodBounds, businessToday } from "@/lib/business-day";
+import { span } from "@/lib/perf/timing";
+import { getRestaurantConfig } from "@/lib/restaurant-info";
 import {
   emitNewOrder,
   emitOrderCancelled,
@@ -77,6 +79,23 @@ export type OrderTicketRow = {
   ot_number: number | null;
   prefix: string | null;
   printed_at: string;
+  /**
+   * Which table/room this ticket was PRINTED for, frozen at issue time. A session can
+   * move (see transfer_session), and a reprint must show where the paper actually went —
+   * not where the party sits now. Null only for a walk-in, which has no place at all.
+   */
+  location_label: string | null;
+};
+
+/** One row per completed session transfer — the "A1 → B4, 8:15 PM, by John" history. */
+export type SessionTransferRow = {
+  id: string;
+  kind: string;
+  from_label: string;
+  to_label: string;
+  reason: string | null;
+  created_at: string;
+  staff_name: string | null;
 };
 
 export type SessionDetail = {
@@ -109,6 +128,8 @@ export type SessionDetail = {
   /** Every Order Ticket generated for this session so far, oldest first — the reprint
    *  history. A station appears once per print, not once per session. */
   tickets: OrderTicketRow[];
+  /** Every table shift / room move this session has been through, oldest first. */
+  transfers: SessionTransferRow[];
   items: OrderItemRow[];
   total: number;
 };
@@ -237,57 +258,74 @@ export async function openTableSession(tableId: string) {
   const ru = await getRestaurantUser();
   const service = createServiceClient();
 
-  // Table-group isolation: staff may only open tables in their assigned groups.
-  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  // FIVE round trips became two.
+  //
+  // This used to check, in sequence: is the table mine → is there already a session on it
+  // → is it dirty → what's the qr_mode → insert. Three of those were LOOK-BEFORE-YOU-LEAP
+  // checks for rules the database already enforces absolutely:
+  //
+  //   sessions_one_open_per_table_idx      — one open session per table (20260723000000)
+  //   trg_refuse_session_on_dirty_table    — no seating a dirty table (20260717160000)
+  //
+  // So they weren't just slow, they were a TOCTOU window: two waiters tapping the same
+  // table both passed the pre-check and one hit the constraint anyway. Inserting first and
+  // reading the failure is both faster and narrower — the only path that pays an extra
+  // round trip is the loser of a genuine race.
+  const [visibility, customer_pin] = await Promise.all([
+    // Table-group isolation: staff may only open tables in their assigned groups.
+    buildVisibilityFilter(ru.restaurant_id, ru),
+    // Only "Menu + Ordering (With PIN)" restaurants use a customer ordering PIN.
+    // No-PIN and view-only restaurants get a plain session (no PIN gate / UI).
+    pinForNewSession(service, ru.restaurant_id),
+  ]);
+
   if (!visibility.seesAll && !visibility.canSeeTable(tableId)) {
     redirect("/employee/dashboard");
   }
 
-  // Check for existing active session on this table
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: existing } = await (service as any)
-    .from("sessions")
-    .select("id")
-    .eq("restaurant_id", ru.restaurant_id)
-    .eq("table_id", tableId)
-    .eq("status", "active")
-    .maybeSingle();
+  const { data: session, error } = await span("db.openSession", async () =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("sessions")
+      .insert({
+        restaurant_id: ru.restaurant_id,
+        type: "table",
+        table_id: tableId,
+        customer_pin,
+      })
+      .select("id")
+      .single()
+  );
 
-  if (existing) {
-    redirect(`/employee/session/${existing.id}`);
+  if (error) {
+    // Match on SQLSTATE and constraint name, never on message text alone: a message is a
+    // string someone may reword, a SQLSTATE is a contract.
+    //
+    // 23505 on the partial unique index = somebody already has this table open. That is
+    // not an error to the waiter, it is the answer to what they asked — take them there,
+    // exactly as the old pre-check did.
+    if (error.code === "23505") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: existing } = await (service as any)
+        .from("sessions")
+        .select("id")
+        .eq("restaurant_id", ru.restaurant_id)
+        .eq("table_id", tableId)
+        .neq("status", "closed")
+        .maybeSingle();
+      if (existing) redirect(`/employee/session/${existing.id}`);
+      return { error: "That table was just taken. Refresh and try again." };
+    }
+
+    // P0001 is a plpgsql `raise exception`; the trigger raises TABLE_NEEDS_CLEANING.
+    if (error.code === "P0001" && String(error.message).includes("TABLE_NEEDS_CLEANING")) {
+      return { error: "This table still needs cleaning. Mark it clean before seating anyone." };
+    }
+
+    return { error: "Could not open that table. Please try again." };
   }
 
-  // A table still awaiting cleaning can't be seated. The DB refuses this too
-  // (trg_refuse_session_on_dirty_table); checking here is what turns that exception into a
-  // sentence the waiter can act on.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: tbl } = await (service as any)
-    .from("restaurant_tables")
-    .select("cleaning_since")
-    .eq("id", tableId)
-    .eq("restaurant_id", ru.restaurant_id)
-    .maybeSingle();
-
-  if (tbl?.cleaning_since) {
-    return { error: "This table still needs cleaning. Mark it clean before seating anyone." };
-  }
-
-  // Only "Menu + Ordering (With PIN)" restaurants use a customer ordering PIN.
-  // No-PIN and view-only restaurants get a plain session (no PIN gate / UI).
-  const customer_pin = await pinForNewSession(service, ru.restaurant_id);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: session, error } = await (service as any)
-    .from("sessions")
-    .insert({
-      restaurant_id: ru.restaurant_id,
-      type: "table",
-      table_id: tableId,
-      customer_pin,
-    })
-    .select("id")
-    .single();
-
-  if (error) return { error: error.message };
   redirect(`/employee/session/${session.id}`);
 }
 
@@ -296,15 +334,13 @@ export async function openTableSession(tableId: string) {
 // never surfaces a PIN and the customer never sees a PIN gate.
 async function pinForNewSession(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  service: any,
+  _service: any,
   restaurantId: string
 ): Promise<string | null> {
-  const { data: restaurant } = await service
-    .from("restaurants")
-    .select("qr_mode")
-    .eq("id", restaurantId)
-    .maybeSingle();
-  const qrMode = restaurant?.qr_mode ?? "ordering_enabled";
+  // Was a dedicated round trip for one column, on the path of every table opening. The
+  // restaurant's config is cached (60s, invalidated on every settings write), so this is
+  // now free in the common case.
+  const { qr_mode: qrMode } = await getRestaurantConfig(restaurantId);
   return qrMode === "ordering_enabled"
     ? String(Math.floor(1000 + Math.random() * 9000))
     : null;
@@ -571,58 +607,118 @@ export async function rejectTableActivation(notificationId: string): Promise<Act
 
 // ─── Session Detail ───────────────────────────────────────────────────────────
 
+/**
+ * Chronological, with a TOTAL tie-break.
+ *
+ * Items added in one statement share a `created_at` to the microsecond, and ordering by
+ * that column alone leaves their relative order up to whatever the query plan happened to
+ * emit — so two dishes could swap places between one refresh and the next. Falling back to
+ * `id` makes the list stable: the same session renders the same way every time, on every
+ * device, which is what a waiter reading a bill is entitled to assume.
+ */
+function byCreatedThenId(
+  a: { created_at: string; id: string },
+  b: { created_at: string; id: string }
+): number {
+  if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
 export async function getSessionDetail(
   sessionId: string
 ): Promise<SessionDetail | null> {
   const service = createServiceClient();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: session } = await (service as any)
-    .from("sessions")
-    .select(`id, type, status, opened_at, customer_pin, table_id, room_id, room_stay_id, walk_in_no, customer_name, customer_phone, customer_address, bill_number, restaurant_tables ( number ), rooms ( number )`)
-    .eq("id", sessionId)
-    .maybeSingle();
+  // THREE round trips became one.
+  //
+  // This used to be session → session_orders → session_order_items, each waiting on the
+  // previous one's ids. Only the last dependency was ever real, and none of the queries
+  // was slow — they execute in well under a millisecond. What cost ~400ms was making the
+  // network trip three times.
+  //
+  // PostgREST compiles each to-many embed to a correlated json_agg sub-select rather than
+  // a flat join, so nesting items under orders does NOT multiply rows on the wire; the
+  // response is smaller than the three separate ones because the ids aren't repeated.
+  //
+  // `cancelled_at` is BOTH filtered here and re-checked when flattening. A cancelled item
+  // is off the bill and back on the shelf, so if this embedded filter ever silently
+  // stopped applying — a PostgREST version difference, a typo in the deep path — the
+  // failure would be cancelled food being charged for. Belt and braces on money.
+  const [sessionRes, ticketsRes, transfersRes] = await Promise.all([
+    span("db.session+orders+items", async () =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (service as any)
+        .from("sessions")
+        .select(
+          `id, type, status, opened_at, customer_pin, table_id, room_id, room_stay_id,
+           walk_in_no, customer_name, customer_phone, customer_address, bill_number,
+           restaurant_tables ( number ), rooms ( number ),
+           session_orders ( id,
+             session_order_items ( id, item_name, item_price, workstation_id,
+               workstation_name, quantity, item_status, notes, created_at, order_id,
+               ticket_id, cancelled_at ) )`
+        )
+        .eq("id", sessionId)
+        .is("session_orders.session_order_items.cancelled_at", null)
+        .maybeSingle()
+    ),
+    // Independent of the items — no reason for these to wait their turn.
+    span("db.tickets", async () =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (service as any)
+        .from("order_tickets")
+        .select("id, workstation_id, workstation_name, ot_number, prefix, printed_at, location_label")
+        .eq("session_id", sessionId)
+        .order("printed_at")
+    ),
+    // The transfer history. Joined to the staff name here rather than in the client, so a
+    // renamed or deactivated employee still reads correctly on an old line.
+    span("db.transfers", async () =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (service as any)
+        .from("session_transfers")
+        .select("id, kind, from_label, to_label, reason, created_at, restaurant_users ( display_name )")
+        .eq("session_id", sessionId)
+        .order("created_at")
+    ),
+  ]);
 
+  const session = sessionRes.data;
   if (!session) return null;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: orders } = await (service as any)
-    .from("session_orders")
-    .select("id")
-    .eq("session_id", sessionId);
-
-  const orderIds = ((orders ?? []) as { id: string }[]).map((o) => o.id);
-  let items: OrderItemRow[] = [];
-
-  if (orderIds.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: itemsData } = await (service as any)
-      .from("session_order_items")
-      .select(
-        "id, item_name, item_price, workstation_id, workstation_name, quantity, item_status, notes, created_at, order_id, ticket_id"
-      )
-      .in("order_id", orderIds)
-      // A cancelled item is off the bill and back on the shelf — it must not be
-      // shown, and must not be charged for.
-      .is("cancelled_at", null)
-      .order("created_at");
-    items = (itemsData as OrderItemRow[]) ?? [];
-  }
+  // Flatten orders → items. The embed orders items WITHIN each order, so the result is
+  // order-1's items then order-2's — not chronological across the session, which is what
+  // the screen shows and what the old global `.order("created_at")` produced. Sorting
+  // here restores it; do not rely on the embed for cross-parent ordering.
+  const items: OrderItemRow[] = (
+    ((session.session_orders ?? []) as { session_order_items?: OrderItemRow[] }[])
+      .flatMap((o) => o.session_order_items ?? [])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((i) => (i as any).cancelled_at == null)
+  ).sort(byCreatedThenId);
 
   const total = items.reduce(
     (sum, i) => sum + Number(i.item_price) * i.quantity,
     0
   );
 
-  // Every OT generated for this session, oldest first — drives the reprint list and
-  // tells each item which ticket it went out on.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: otRows } = await (service as any)
-    .from("order_tickets")
-    .select("id, workstation_id, workstation_name, ot_number, prefix, printed_at")
-    .eq("session_id", session.id)
-    .order("printed_at");
-  const tickets = ((otRows ?? []) as OrderTicketRow[]);
+  const tickets = ((ticketsRes.data ?? []) as OrderTicketRow[]);
+  const trRows = transfersRes.data;
+  const transfers: SessionTransferRow[] = (
+    (trRows ?? []) as {
+      id: string; kind: string; from_label: string; to_label: string;
+      reason: string | null; created_at: string;
+      restaurant_users: { display_name: string } | null;
+    }[]
+  ).map((t) => ({
+    id: t.id,
+    kind: t.kind,
+    from_label: t.from_label,
+    to_label: t.to_label,
+    reason: t.reason,
+    created_at: t.created_at,
+    staff_name: t.restaurant_users?.display_name ?? null,
+  }));
 
   return {
     id: session.id,
@@ -652,6 +748,7 @@ export async function getSessionDetail(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     bill_number: (session as any).bill_number ?? null,
     tickets,
+    transfers,
     items,
     total,
   };
@@ -889,6 +986,9 @@ export async function generateOrderTicket(
       ot_number: ticket.ot_number ?? null,
       prefix: ticket.prefix ?? null,
       printed_at: ticket.printed_at,
+      // Always null on a ticket just issued: the label is frozen only when the session
+      // MOVES away from where it printed. Until then the live label is the right one.
+      location_label: ticket.location_label ?? null,
     },
     items: (items as OrderItemRow[]) ?? [],
   };
@@ -1362,51 +1462,61 @@ export async function getMyOrderQueue(): Promise<QueueOrder[]> {
   const restaurantId = ru.restaurant_id;
   const service = createServiceClient();
 
-  const visibility = await buildVisibilityFilter(restaurantId, ru);
+  // THIS IS THE HIGHEST-FREQUENCY READ IN THE APP — it re-runs on every realtime
+  // `orders` burst, on every connected device. It used to be five sequential round trips:
+  // visibility → workstations → sessions → orders (needs session ids) → items (needs order
+  // ids). Now it is one wave. The three permission/data reads don't depend on each other,
+  // and sessions → orders → items is one nested embed.
+  const [visibility, myWorkstations, sessionsRes] = await Promise.all([
+    buildVisibilityFilter(restaurantId, ru),
+    // Workstation routing: staff with assigned workstations (kitchen/bar/bakery)
+    // only work items for those workstations, restaurant-wide. Admins/managers
+    // (seesAll) always see full orders regardless of any workstation assignment.
+    getAssignedWorkstationIds(ru.id),
+    // session_order_items has no restaurant_id, so scope through active sessions →
+    // their orders → the order items. Cancelled items are filtered in the embed AND
+    // again when flattening: the kitchen must never be handed cancelled food, so this
+    // one does not rely on a single mechanism.
+    span("db.queue", async () =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (service as any)
+        .from("sessions")
+        .select(
+          `id, type, table_id, room_id, credit_customer_id,
+           restaurant_tables ( number ), rooms ( number ), credit_customers ( name, phone ),
+           session_orders ( id, session_id, created_at,
+             session_order_items ( id, order_id, item_name, quantity, item_status, notes,
+               workstation_id, workstation_name, item_price, created_at, cancelled_at ) )`
+        )
+        .eq("restaurant_id", restaurantId)
+        .eq("status", "active")
+        .is("session_orders.session_order_items.cancelled_at", null)
+    ),
+  ]);
 
-  // Workstation routing: staff with assigned workstations (kitchen/bar/bakery)
-  // only work items for those workstations, restaurant-wide. Admins/managers
-  // (seesAll) always see full orders regardless of any workstation assignment.
-  const myWorkstations = await getAssignedWorkstationIds(ru.id);
   const isWorkstationStaff = !visibility.seesAll && myWorkstations.size > 0;
 
-  // session_order_items has no restaurant_id, so scope through active sessions →
-  // their orders → the order items.
-  // 1. Active sessions for this restaurant (+ table/room/customer context).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: sessions } = await (service as any)
-    .from("sessions")
-    .select("id, type, table_id, room_id, credit_customer_id, restaurant_tables ( number ), rooms ( number ), credit_customers ( name, phone )")
-    .eq("restaurant_id", restaurantId)
-    .eq("status", "active");
+  const sessions = (sessionsRes.data ?? []) as any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+  if (sessionMap.size === 0) return [];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sessionMap = new Map(((sessions ?? []) as any[]).map((s) => [s.id, s]));
-  const sessionIds = [...sessionMap.keys()];
-  if (sessionIds.length === 0) return [];
+  const orders = sessions.flatMap((s) => (s.session_orders ?? []) as any[]);
+  if (orders.length === 0) return [];
 
-  // 2. Orders on those sessions.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: orders } = await (service as any)
-    .from("session_orders")
-    .select("id, session_id, created_at")
-    .in("session_id", sessionIds);
-
-  const orderIds = [...new Set(((orders ?? []) as { id: string }[]).map((o) => o.id))];
-  if (orderIds.length === 0) return [];
-
-  // 3. All items for those orders.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: items } = await (service as any)
-    .from("session_order_items")
-    .select("id, order_id, item_name, quantity, item_status, notes, workstation_id, workstation_name, item_price, created_at")
-    .in("order_id", orderIds)
-    // Cancelled items are off the queue — the kitchen must not cook them.
-    .is("cancelled_at", null)
-    .order("created_at");
+  // The embed sorts items within each order; this list is consumed per-order below, but
+  // sort globally anyway so any future consumer sees the same chronology the old single
+  // `.order("created_at")` produced.
+  const items = orders
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .flatMap((o) => ((o.session_order_items ?? []) as any[]))
+    .filter((i) => i.cancelled_at == null)
+    .sort(byCreatedThenId);
 
   const orderMeta = new Map(
-    ((orders ?? []) as { id: string; session_id: string; created_at: string }[]).map((o) => [
+    (orders as { id: string; session_id: string; created_at: string }[]).map((o) => [
       o.id,
       o,
     ])

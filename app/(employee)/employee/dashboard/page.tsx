@@ -153,7 +153,7 @@ export default async function EmployeeDashboardPage({
       subtitle: "Check in, folios & check out",
       body: (
         <Suspense fallback={<SectionSkeleton />}>
-          <RoomsSection canCheckIn />
+          <RoomsSection canCheckIn restaurantUser={restaurantUser} />
         </Suspense>
       ),
     });
