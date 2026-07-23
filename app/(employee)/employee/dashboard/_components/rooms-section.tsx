@@ -1,5 +1,5 @@
 import { getRoomsOverview } from "@/app/actions/rooms";
-import { hasAnyPermission, PERMISSIONS } from "@/lib/permissions";
+import { hasAnyPermission, PERMISSIONS, ROOM_ACCESS } from "@/lib/permissions";
 import type { RestaurantUserContext } from "@/lib/auth/guards";
 import { RoomsGrid } from "./rooms-grid";
 
@@ -11,13 +11,15 @@ import { RoomsGrid } from "./rooms-grid";
 // keeps them live by refetching itself, rather than calling router.refresh() and
 // dragging the whole dashboard along with it.
 export async function RoomsSection({
-  canCheckIn,
   restaurantUser,
 }: {
-  canCheckIn: boolean;
   restaurantUser: RestaurantUserContext;
 }) {
   const rooms = await getRoomsOverview();
+
+  // Check-in is now its own right: view_rooms alone is read-only. checkInRoom re-checks
+  // this server-side — hiding the button is only UX.
+  const canCheckIn = ROOM_ACCESS.canCheckIn(restaurantUser);
 
   // Moving a guest rearranges a live folio, so it gates where billing does. UX only —
   // transferSession re-checks server-side.

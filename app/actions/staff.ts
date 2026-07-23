@@ -5,11 +5,47 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { PERMISSIONS } from "@/lib/permissions";
 import type { Permission } from "@/lib/permissions";
+import { getAuthUser, getCurrentStaff, isSuperAdmin } from "@/lib/auth/current-user";
 
 export type ActionResult = { error: string } | { redirectTo: string } | null;
 
 const PIN_REGEX = /^[0-9]{4}$/;
 const VALID_PERMISSIONS = new Set<string>(Object.values(PERMISSIONS));
+
+// ─── Authorisation ────────────────────────────────────────────────────────────
+// These actions had NO server-side guard at all — the superadmin LAYOUT protected the
+// page, but a forged POST straight to the action bypassed it entirely. Creating staff,
+// resetting PINs and deleting logins were callable by anyone. That is the hole this closes.
+//
+// Staff CRUD is a SUPER-ADMIN operation in this app: the admin `/admin/staff` page only
+// assigns workstations and runs payroll; every create/edit/delete/PIN control lives on the
+// superadmin surface. So the authority is `isSuperAdmin`, NOT a restaurant permission —
+// `getRestaurantUser()` would wrongly reject the super admin, who is not a restaurant_user.
+// (create_staff / edit_staff / delete_staff therefore remain unused today; they are kept
+// for a future in which a restaurant admin is allowed to manage their own staff.)
+
+const DENIED = { error: "Permission denied." } as const;
+
+/** Null when the caller is a super admin; an error result otherwise. */
+async function requireSuperAdminGuard(): Promise<{ error: string } | null> {
+  const user = await getAuthUser();
+  if (user && (await isSuperAdmin(user.id))) return null;
+  return DENIED;
+}
+
+/**
+ * Workstation assignment is reachable from BOTH surfaces (the admin staff page and the
+ * superadmin one), so it allows a super admin OR the target restaurant's own admin —
+ * scoped to that restaurant, so one restaurant's admin can't touch another's staff.
+ */
+async function requireStaffManagerOf(restaurantId: string): Promise<{ error: string } | null> {
+  const user = await getAuthUser();
+  if (!user) return DENIED;
+  if (await isSuperAdmin(user.id)) return null;
+  const staff = await getCurrentStaff();
+  if (staff && staff.restaurant_id === restaurantId && staff.role === "restaurant_admin") return null;
+  return DENIED;
+}
 
 function parsePermissions(raw: string | null): string[] {
   try {
@@ -27,6 +63,9 @@ export async function createStaffMember(
   _prevState: ActionResult,
   formData: FormData
 ): Promise<ActionResult> {
+  const denied = await requireSuperAdminGuard();
+  if (denied) return denied;
+
   const restaurantId = formData.get("restaurant_id") as string;
   const displayName  = (formData.get("display_name") as string)?.trim();
   const title        = (formData.get("title") as string)?.trim() ?? "";
@@ -79,6 +118,9 @@ export async function updateStaffPermissions(
   _prevState: ActionResult,
   formData: FormData
 ): Promise<ActionResult> {
+  const denied = await requireSuperAdminGuard();
+  if (denied) return denied;
+
   const staffId      = formData.get("staff_id") as string;
   const restaurantId = formData.get("restaurant_id") as string;
   const permissions  = parsePermissions(formData.get("permissions") as string | null);
@@ -102,6 +144,9 @@ export async function resetStaffPin(
   authUserId: string | null,
   newPin: string
 ): Promise<ActionResult> {
+  const denied = await requireSuperAdminGuard();
+  if (denied) return denied;
+
   if (!PIN_REGEX.test(newPin)) return { error: "PIN must be exactly 4 digits (numbers only)." };
 
   const admin = createAdminClient();
@@ -151,6 +196,9 @@ export async function deleteStaffMember(
   authUserId: string | null,
   restaurantId: string
 ): Promise<ActionResult> {
+  const denied = await requireSuperAdminGuard();
+  if (denied) return denied;
+
   if (authUserId) {
     const admin = createAdminClient();
     const { error: authError } = await admin.auth.admin.deleteUser(authUserId);
@@ -173,6 +221,9 @@ export async function toggleStaffStatus(
   isActive: boolean,
   restaurantId: string
 ): Promise<ActionResult> {
+  const denied = await requireSuperAdminGuard();
+  if (denied) return denied;
+
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any)
@@ -198,6 +249,9 @@ export async function softDeleteStaffMember(
   authUserId: string | null,
   restaurantId: string
 ): Promise<ActionResult> {
+  const denied = await requireSuperAdminGuard();
+  if (denied) return denied;
+
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any)
@@ -221,6 +275,11 @@ export async function updateWorkstationAssignments(
   restaurantId: string,
   workstationIds: string[]
 ): Promise<ActionResult> {
+  // Reachable from the admin surface too, so a restaurant's own admin may run it —
+  // scoped to their restaurant. A super admin may run it for anyone.
+  const denied = await requireStaffManagerOf(restaurantId);
+  if (denied) return denied;
+
   const service = createServiceClient();
 
   // Delete existing assignments
@@ -248,6 +307,9 @@ export async function updateStaffMember(
   _prevState: ActionResult,
   formData: FormData
 ): Promise<ActionResult> {
+  const denied = await requireSuperAdminGuard();
+  if (denied) return denied;
+
   const staffId      = formData.get("staff_id") as string;
   const restaurantId = formData.get("restaurant_id") as string;
   const authUserId   = (formData.get("auth_user_id") as string) || null;

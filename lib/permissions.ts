@@ -14,16 +14,15 @@ export const PERMISSIONS = {
   // Tables
   VIEW_TABLES:      "view_tables",
   MANAGE_TABLES:    "manage_tables",
-  // Rooms
+  // Rooms — three tiers. view_rooms is read-only; check_in starts stays without
+  // granting room configuration; manage_rooms is the full CRUD (managers/admins).
   VIEW_ROOMS:       "view_rooms",
+  CHECK_IN:         "check_in",
   MANAGE_ROOMS:     "manage_rooms",
   // Billing
   PROCESS_PAYMENTS: "process_payments",
   APPLY_DISCOUNTS:  "apply_discounts",
   REFUND_BILLS:     "refund_bills",
-  // Customers
-  VIEW_CUSTOMERS:   "view_customers",
-  MANAGE_CUSTOMERS: "manage_customers",
   // Stock & Finance
   VIEW_STOCK:       "view_stock",
   MANAGE_STOCK:     "manage_stock",
@@ -39,9 +38,10 @@ export const PERMISSIONS = {
   // same as seeing what everyone earns.
   VIEW_PAYROLL:     "view_payroll",
   MANAGE_PAYROLL:   "manage_payroll",
-  // Settings
-  VIEW_SETTINGS:    "view_settings",
-  MANAGE_SETTINGS:  "manage_settings",
+  // NOTE: view_customers/manage_customers and view_settings/manage_settings were removed
+  // 2026-07-23 — they gated nothing. Customer accounts run through Credits (gated on
+  // process_payments + close_bills); Settings gates on admin ROLE. Do not reintroduce
+  // them without wiring them to something.
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -84,7 +84,10 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
   {
     label: "Rooms",
     items: [
+      // Three tiers: view is read-only; check-in starts stays (front desk) without room
+      // configuration; manage is full CRUD (managers). See ROOM_ACCESS below.
       { key: "view_rooms",   label: "View Rooms" },
+      { key: "check_in",     label: "Check-in" },
       { key: "manage_rooms", label: "Manage Rooms" },
     ],
   },
@@ -97,19 +100,19 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
     ],
   },
   {
-    label: "Customers",
+    label: "Stock",
     items: [
-      { key: "view_customers",   label: "View Customers" },
-      { key: "manage_customers", label: "Manage Customers" },
+      // Manage Stock automatically includes View Stock — see STOCK_ACCESS.canViewStock,
+      // which passes on either permission. Ticking Manage alone is enough.
+      { key: "view_stock",   label: "View Stock" },
+      { key: "manage_stock", label: "Manage Stock" },
     ],
   },
   {
-    label: "Stock & Finance",
+    label: "Finance",
     items: [
-      { key: "view_stock",   label: "View Stock & Vendors" },
-      { key: "manage_stock", label: "Manage Stock, Vendors & Purchases" },
-      // Kept separate from stock: the daily report exposes takings, margins and
-      // every outstanding debt, which a storekeeper has no business seeing.
+      // Kept apart from Stock: the daily report exposes takings, margins and every
+      // outstanding debt, which a storekeeper has no business seeing.
       { key: "view_finance", label: "View Daily Finance Report" },
     ],
   },
@@ -135,13 +138,6 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
       // default, so payroll is only ever granted on purpose.
       { key: "view_payroll",   label: "View Payroll & Salaries" },
       { key: "manage_payroll", label: "Set Salaries & Record Payments" },
-    ],
-  },
-  {
-    label: "Settings",
-    items: [
-      { key: "view_settings",   label: "View Settings" },
-      { key: "manage_settings", label: "Manage Restaurant Settings" },
     ],
   },
 ];
@@ -274,6 +270,27 @@ export const NAV_ACCESS = {
 // finance report, and the finance report can be granted without stock entry.
 // `restaurant_admin` passes all three via hasPermission/hasAnyPermission.
 
+// ─── Rooms (three tiers) ──────────────────────────────────────────────────────
+// view_rooms is strictly read-only. check_in adds "put a guest in and run the stay"
+// without room configuration. manage_rooms adds the CRUD. Write implies read, the same
+// way manage_stock implies view_stock: a manager needs no separate check_in box, and a
+// receptionist needs no separate view_rooms box.
+//
+// This REPLACES the old model where check-in rode on view_rooms ("a Receptionist is just
+// a Cashier with view_rooms"). That is exactly what changed.
+
+export const ROOM_ACCESS = {
+  /** Sees the Rooms section, folios and room bills (read-only is enough). */
+  canViewRooms: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.VIEW_ROOMS, P_.CHECK_IN, P_.MANAGE_ROOMS]),
+  /** Checks guests in, starts room sessions, marks a room cleaned to turn it over. */
+  canCheckIn: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.CHECK_IN, P_.MANAGE_ROOMS]),
+  /** Creates/edits/deletes rooms and room types, changes availability. */
+  canManageRooms: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.MANAGE_ROOMS),
+};
+
 export const STOCK_ACCESS = {
   /** Sees Vendors / Stock / Purchases (read-only is enough). */
   canViewStock: (u: { role: string; permissions: string[] }) =>
@@ -354,6 +371,23 @@ export const STAFF_PRESETS: StaffPresetDef[] = [
     ],
   },
   {
+    key: "receptionist",
+    label: "Receptionist",
+    description: "Front desk: checks guests in, runs room sessions and takes payment. No room configuration.",
+    permissions: [
+      P.VIEW_DASHBOARD,
+      P.VIEW_ORDERS,
+      P.CREATE_ORDERS,
+      P.VIEW_MENU,
+      P.VIEW_TABLES,
+      P.VIEW_ROOMS,
+      P.CHECK_IN,
+      P.CLOSE_BILLS,
+      P.PROCESS_PAYMENTS,
+      P.APPLY_DISCOUNTS,
+    ],
+  },
+  {
     key: "chef",
     label: "Chef / Kitchen",
     description: "Works the kitchen queue. Sees orders and toggles menu availability.",
@@ -382,16 +416,14 @@ export const STAFF_PRESETS: StaffPresetDef[] = [
       P.VIEW_TABLES,
       P.MANAGE_TABLES,
       P.VIEW_ROOMS,
+      // Explicit for clarity; MANAGE_ROOMS already implies it via ROOM_ACCESS.canCheckIn.
+      P.CHECK_IN,
       P.MANAGE_ROOMS,
       P.PROCESS_PAYMENTS,
       P.APPLY_DISCOUNTS,
       P.REFUND_BILLS,
-      P.VIEW_CUSTOMERS,
-      P.MANAGE_CUSTOMERS,
       P.VIEW_REPORTS,
       P.VIEW_STAFF,
-      P.VIEW_SETTINGS,
-      P.MANAGE_SETTINGS,
     ],
   },
   {
