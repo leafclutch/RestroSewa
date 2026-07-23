@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { memo, useCallback, useState, useTransition } from "react";
 import { getMyTables, openTableSession, markTableClean } from "@/app/actions/pos";
 import type { TableStatus } from "@/app/actions/pos";
@@ -8,7 +9,8 @@ import { STATUS_STYLE, cleaningFor } from "@/lib/status-colors";
 import { SECTION_ACCENT } from "@/lib/section-colors";
 import { CountPill } from "@/components/ui/count-pill";
 import { useRealtime } from "@/lib/realtime/use-realtime";
-import { Sparkles, LayoutGrid } from "lucide-react";
+import { TransferModal } from "@/app/(employee)/employee/_components/transfer-modal";
+import { Sparkles, LayoutGrid, MoveRight } from "lucide-react";
 
 const CARD =
   "flex flex-col items-center justify-center rounded-xl border w-full p-2 text-center transition-all";
@@ -35,34 +37,67 @@ const NUMBER_STYLE = { letterSpacing: "-0.3px", fontSize: "clamp(1.05rem, 3.6vw,
  */
 const TableCard = memo(function TableCard({
   table,
-  onError,
+  busy,
+  canShift,
+  onOpen,
+  onClean,
+  onShift,
 }: {
   table: TableStatus;
-  onError: (msg: string) => void;
+  /** Owned by the GRID, not this card — see the note on TablesGrid.run. */
+  busy: boolean;
+  canShift: boolean;
+  onOpen: (id: string) => void;
+  onClean: (id: string) => void;
+  onShift: (t: TableStatus) => void;
 }) {
-  const [opening, startOpen] = useTransition();
-  const [cleaning, startClean] = useTransition();
+  const opening = busy;
+  const cleaning = busy;
+  const router = useRouter();
 
   // In use — the one card that's solid-filled. A busy table is the thing a cashier looks for,
   // so it's the loudest state; free tables stay quiet even when there are 55 of them.
   if (table.state === "active" && table.session_id) {
     const s = STATUS_STYLE.active;
+    // The Shift control is a SIBLING of the link, not a child: a <button> inside an <a>
+    // is invalid HTML, and nesting it would make the whole card's tap target ambiguous.
     return (
-      <Link
-        href={`/employee/session/${table.session_id}`}
-        title={`Table ${table.number} — active`}
-        className={`${CARD} hover:brightness-110`}
-        // Constant blue FILL, not s.color: the status token flips to a light blue in dark that
-        // the white number can't sit on. This keeps the in-use card a solid readable blue in both.
-        style={{ minHeight: 88, background: "var(--fill-blue)", borderColor: "var(--fill-blue)" }}
-      >
-        <span className={NUMBER} style={{ ...NUMBER_STYLE, color: "#fff" }}>
-          {table.number}
-        </span>
-        <span className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.9)" }}>
-          Active
-        </span>
-      </Link>
+      <div className="relative w-full">
+        <Link
+          href={`/employee/session/${table.session_id}`}
+          title={`Table ${table.number} — active`}
+          // App Router prefetches every in-viewport Link by default. On a floor with
+          // twenty tables open that is twenty concurrent server renders of the session
+          // page the moment the dashboard scrolls — all competing with whatever the user
+          // is actually waiting for. Warm exactly ONE instead, on pointer-down, which on
+          // touch fires ~100ms before the click lands and is plenty.
+          prefetch={false}
+          onPointerDown={() => router.prefetch(`/employee/session/${table.session_id}`)}
+          className={`${CARD} hover:brightness-110`}
+          // Constant blue FILL, not s.color: the status token flips to a light blue in dark that
+          // the white number can't sit on. This keeps the in-use card a solid readable blue in both.
+          style={{ minHeight: 88, background: "var(--fill-blue)", borderColor: "var(--fill-blue)" }}
+        >
+          <span className={NUMBER} style={{ ...NUMBER_STYLE, color: "#fff" }}>
+            {table.number}
+          </span>
+          <span className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.9)" }}>
+            Active
+          </span>
+        </Link>
+        {canShift && (
+          <button
+            type="button"
+            aria-label={`Shift table ${table.number}`}
+            title="Shift to another table"
+            onClick={() => onShift(table)}
+            className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center transition-colors"
+            style={{ background: "rgba(255,255,255,0.22)", color: "#fff" }}
+          >
+            <MoveRight size={12} />
+          </button>
+        )}
+      </div>
     );
   }
 
@@ -84,12 +119,7 @@ const TableCard = memo(function TableCard({
         <button
           type="button"
           disabled={cleaning}
-          onClick={() =>
-            startClean(async () => {
-              const r = await markTableClean(table.id);
-              if (r && "error" in r) onError(r.error);
-            })
-          }
+          onClick={() => onClean(table.id)}
           // nowrap + 11px: at text-xs the label wrapped to two lines inside a 92px card and
           // squashed the number above it. It has to stay one line at the narrowest column.
           className="mt-1 inline-flex items-center gap-1 whitespace-nowrap text-[11px] px-1.5 py-0.5 rounded-md border transition-colors"
@@ -117,15 +147,7 @@ const TableCard = memo(function TableCard({
       type="button"
       disabled={opening}
       title={`Table ${table.number} — free`}
-      onClick={() =>
-        startOpen(async () => {
-          // On success this redirects and never returns. Only a FAILURE comes
-          // back — and the old open-table page dropped it on the floor, so a
-          // table that wouldn't open just sat there doing nothing.
-          const r = await openTableSession(table.id);
-          if (r && "error" in r) onError(r.error);
-        })
-      }
+      onClick={() => onOpen(table.id)}
       className={`${CARD} hover:brightness-95`}
       style={{
         minHeight: 88,
@@ -158,12 +180,16 @@ const TableCard = memo(function TableCard({
 export function TablesGrid({
   initial,
   hasAnyTables,
+  canShift = false,
 }: {
   initial: TableStatus[];
   hasAnyTables: boolean;
+  canShift?: boolean;
 }) {
   const [tables, setTables] = useState(initial);
   const [error, setError] = useState<string | null>(null);
+  const [shifting, setShifting] = useState<TableStatus | null>(null);
+  const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
   const [, startTransition] = useTransition();
 
   const resync = useCallback(() => {
@@ -174,8 +200,52 @@ export function TablesGrid({
 
   useRealtime(["tables", "orders"], resync);
 
-  // Stable identity, so memoised cards aren't invalidated on every render.
-  const onError = useCallback((msg: string) => setError(msg), []);
+  /**
+   * THE FIX FOR THE SILENT-TAP BUG.
+   *
+   * These calls used to live inside TableCard, inside its own `useTransition`. When a
+   * realtime resync landed mid-request and flipped a table from available to active, the
+   * card re-rendered down a different branch — `<button>` became `<Link>` — the subtree
+   * unmounted, and React discarded the pending transition. The POST was aborted and the
+   * tap did nothing at all, most often during exactly the busy burst that caused the
+   * resync.
+   *
+   * Two changes, both load-bearing:
+   *   1. The request lives HERE, in a component whose lifetime is the page's. Cards may
+   *      come and go underneath it; the in-flight action no longer cares.
+   *   2. It is NOT wrapped in a transition. A transition is precisely the thing React is
+   *      allowed to interrupt — which is correct for rendering and wrong for a POST that
+   *      opens a bill.
+   *
+   * `busy` lives here too, so a resync repainting every card cannot wipe the pending
+   * state of the one the user just touched.
+   */
+  const run = useCallback(
+    async (id: string, action: () => Promise<{ error: string } | null | undefined>) => {
+      setBusy((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+      setError(null);
+      try {
+        const r = await action();
+        // On success openTableSession REDIRECTS and never returns; only failures land here.
+        if (r && "error" in r) setError(r.error);
+      } catch {
+        setError("That didn't go through. Please try again.");
+      } finally {
+        setBusy((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    },
+    []
+  );
+
+  // Stable identities, so memoised cards aren't invalidated on every render.
+  const onOpen = useCallback((id: string) => run(id, () => openTableSession(id)), [run]);
+  const onClean = useCallback((id: string) => run(id, () => markTableClean(id)), [run]);
+  const onShift = useCallback((t: TableStatus) => setShifting(t), []);
 
   const active = tables.filter((t) => t.state === "active").length;
   const dirty = tables.filter((t) => t.state === "cleaning").length;
@@ -229,10 +299,29 @@ export function TablesGrid({
             style={{ gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))" }}
           >
             {tables.map((t) => (
-              <TableCard key={t.id} table={t} onError={onError} />
+              <TableCard
+                key={t.id}
+                table={t}
+                busy={busy.has(t.id)}
+                canShift={canShift}
+                onOpen={onOpen}
+                onClean={onClean}
+                onShift={onShift}
+              />
             ))}
           </div>
         </>
+      )}
+
+      {shifting?.session_id && (
+        <TransferModal
+          sessionId={shifting.session_id}
+          fallbackLabel={shifting.number}
+          onClose={() => setShifting(null)}
+          // The move fires rs_ev_sessions, so every OTHER dashboard repaints on its own.
+          // This one asked for it, so don't make it wait for the round trip.
+          onDone={resync}
+        />
       )}
     </div>
   );

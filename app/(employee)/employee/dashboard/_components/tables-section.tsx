@@ -1,5 +1,6 @@
 import { getTableStatusOverview } from "@/app/actions/pos";
 import { buildVisibilityFilter } from "@/lib/assignments";
+import { hasAnyPermission, PERMISSIONS } from "@/lib/permissions";
 import type { RestaurantUserContext } from "@/lib/auth/guards";
 import { TablesGrid } from "./tables-grid";
 
@@ -18,7 +19,15 @@ export async function TablesSection({ restaurantUser }: { restaurantUser: Restau
 
   const visible = tables.filter((t) => visibility.canSeeTable(t.id));
 
+  // Shifting a table rearranges a live bill, so it gates where printing and billing do —
+  // a waiter holds VIEW_TABLES but none of these. UX only: transferSession re-checks.
+  const canShift = hasAnyPermission(restaurantUser, [
+    PERMISSIONS.MANAGE_TABLES,
+    PERMISSIONS.PROCESS_PAYMENTS,
+    PERMISSIONS.CLOSE_BILLS,
+  ]);
+
   // "None assigned to you" and "none exist at all" are different problems with
   // different fixes, so the empty state has to tell them apart.
-  return <TablesGrid initial={visible} hasAnyTables={tables.length > 0} />;
+  return <TablesGrid initial={visible} hasAnyTables={tables.length > 0} canShift={canShift} />;
 }

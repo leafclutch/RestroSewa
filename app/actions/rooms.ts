@@ -3,7 +3,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { buildVisibilityFilter } from "@/lib/assignments";
-import { hasPermission, hasAnyPermission, NAV_ACCESS, PERMISSIONS } from "@/lib/permissions";
+import { hasPermission, NAV_ACCESS, PERMISSIONS, ROOM_ACCESS } from "@/lib/permissions";
 import { buildFolio, CHARGE_TYPES } from "@/lib/room-billing";
 import type { RoomChargeType, RoomFolio } from "@/lib/room-billing";
 import { revalidatePath } from "next/cache";
@@ -11,23 +11,21 @@ import { redirect } from "next/navigation";
 
 export type ActionResult = { error: string } | null;
 
-// Staff-facing room operations. Deliberately reuses the permissions the rest of
-// the app already defines rather than inventing room-specific ones:
+// Staff-facing room operations, gated on the three-tier ROOM_ACCESS model:
 //
-//   see a room            view_rooms      (+ the SAME assignment filter as tables)
-//   check a guest in      view_rooms      — like opening a table: no extra right
+//   see a room            canViewRooms    view_rooms | check_in | manage_rooms
+//                                          (+ the SAME assignment filter as tables)
+//   check a guest in      canCheckIn      check_in | manage_rooms
+//   mark it cleaned       canCheckIn      turning a room over is a modification, not a view
 //   add a folio charge    create_orders   — it is a line on a bill
 //   check out / settle    close_bills     — like closing any other bill
 //   discount the folio    apply_discounts
 //   leave it on credit    process_payments + close_bills  (canManageCredits)
-//   mark it cleaned       view_rooms      — same as check-in: whoever can put a guest in
-//                                           the room is trusted to say it's been made up
+//   create/edit/delete    manage_rooms    (in rooms-admin.ts)
 //
-// So a Receptionist is just a Cashier with view_rooms; no new permission had to
-// be granted to anyone, and none of the existing presets change meaning.
-
-const canSeeRooms = (u: { role: string; permissions: string[] }) =>
-  hasAnyPermission(u, [PERMISSIONS.VIEW_ROOMS, PERMISSIONS.MANAGE_ROOMS]);
+// This split check-in OUT of view_rooms (it used to ride on it). view_rooms is now
+// strictly read-only; a front-desk receptionist needs check_in, which the backfill
+// migration granted to existing view_rooms + close_bills staff.
 
 export type RoomStayInfo = {
   stay_id: string;
@@ -63,7 +61,7 @@ export type RoomOverview = {
 
 export async function getRoomsOverview(): Promise<RoomOverview[]> {
   const ru = await getRestaurantUser();
-  if (!canSeeRooms(ru)) return [];
+  if (!ROOM_ACCESS.canViewRooms(ru)) return [];
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -264,7 +262,7 @@ export async function checkInRoom(
   formData: FormData
 ): Promise<ActionResult> {
   const ru = await getRestaurantUser();
-  if (!canSeeRooms(ru)) return { error: "You don't have permission to manage rooms." };
+  if (!ROOM_ACCESS.canCheckIn(ru)) return { error: "You don't have permission to check guests in." };
 
   const roomId = String(formData.get("room_id") ?? "");
   const guestName = String(formData.get("guest_name") ?? "").trim();
@@ -330,13 +328,13 @@ export async function checkInRoom(
 // A room parks in "cleaning" automatically at checkout (see check_out_room). This is the way
 // out: housekeeping taps once and it's sellable again.
 //
-// Same right as checking a guest IN (view_rooms + the room assignment filter) — whoever can
-// put a guest in the room is trusted to say it's been made up. Gating this behind
-// manage_rooms would leave the Waiter/Cashier presets unable to release a room, and rooms
-// would sit dirty waiting for a manager.
+// Same right as checking a guest IN (check_in + the room assignment filter) — whoever can
+// put a guest in the room turns it over afterwards. NOT view_rooms: releasing a room is a
+// state change, and view is now strictly read-only. Not manage_rooms either, or the front
+// desk couldn't free a room and it would sit dirty waiting for a manager.
 export async function markRoomClean(roomId: string): Promise<ActionResult> {
   const ru = await getRestaurantUser();
-  if (!canSeeRooms(ru)) return { error: "You don't have permission to manage rooms." };
+  if (!ROOM_ACCESS.canCheckIn(ru)) return { error: "You don't have permission to update rooms." };
 
   const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
   if (!visibility.seesAll && !visibility.canSeeRoom(roomId)) {
@@ -394,7 +392,7 @@ export type RoomFolioView = {
  */
 async function loadFolioInputs(stayId: string) {
   const ru = await getRestaurantUser();
-  if (!canSeeRooms(ru)) return null;
+  if (!ROOM_ACCESS.canViewRooms(ru)) return null;
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

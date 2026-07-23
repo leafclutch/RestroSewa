@@ -142,6 +142,8 @@ export function PrintModal({
   title,
   children,
   paperWidthMm = 80,
+  onBeforePrint,
+  printLabel = "Print",
 }: {
   open: boolean;
   onClose: () => void;
@@ -149,10 +151,26 @@ export function PrintModal({
   children: React.ReactNode;
   /** Thermal roll width; sizes both the print page and the on-screen preview. */
   paperWidthMm?: 58 | 80;
+  /**
+   * Runs on Print, BEFORE the browser dialog opens; a non-ok result aborts it.
+   *
+   * Exists so an Order Ticket can be recorded server-side at the moment it is actually
+   * printed — claiming its number and marking its items as sent — rather than when the
+   * preview is merely opened. Callers update their own state inside this, and the
+   * repainted ticket is what gets measured and printed. Bill/receipt callers omit it.
+   *
+   * The `error` is shown in the modal, so the reason a print was refused ("another till
+   * already sent these") reaches the person holding the printer.
+   */
+  onBeforePrint?: () => Promise<{ ok: true } | { ok: false; error?: string }>;
+  /** Overrides the Print button's text (e.g. "Print & send to Kitchen"). */
+  printLabel?: string;
 }) {
   // Portaled to <body>, and `document` only exists after mount.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   // The ticket, and a dedicated <style> that owns the @page size.
   const ticketRef = useRef<HTMLDivElement>(null);
@@ -184,13 +202,34 @@ export function PrintModal({
   // Size the page whenever the preview opens (covers Ctrl+P as well as the Print button).
   useEffect(() => {
     if (open && mounted) measureAndSetPage();
+    if (open) setErr(null);
   }, [open, mounted, measureAndSetPage]);
 
   if (!open || !mounted) return null;
 
   const previewPx = mmToPx(paperWidthMm);
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
+    if (onBeforePrint) {
+      setBusy(true);
+      setErr(null);
+      let res: { ok: true } | { ok: false; error?: string };
+      try {
+        res = await onBeforePrint();
+      } catch {
+        res = { ok: false };
+      }
+      setBusy(false);
+      if (!res.ok) {
+        setErr(res.error ?? "Could not prepare this ticket. Nothing was printed.");
+        return;
+      }
+      // `onBeforePrint` changed what the ticket says (its number, its items). React has
+      // to actually PAINT that before we measure, because the page height is measured
+      // from live DOM — measuring first would size the page to the stale ticket. Two
+      // frames is the reliable "after the next paint" barrier.
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    }
     measureAndSetPage(); // re-measure against the final laid-out content, then print
     window.print();
   };
@@ -235,11 +274,21 @@ export function PrintModal({
           </div>
         </div>
 
-        <div className="flex gap-2 px-4 py-3 border-t rs-no-print" style={{ borderColor: "var(--color-hairline)" }}>
-          <Button variant="secondary" className="flex-1" onClick={onClose}>Close</Button>
-          <Button variant="primary" className="flex-1 flex items-center justify-center gap-2" onClick={handlePrint}>
-            <Printer size={14} /> Print
-          </Button>
+        <div className="px-4 py-3 border-t rs-no-print" style={{ borderColor: "var(--color-hairline)" }}>
+          {err && (
+            <p className="text-xs mb-2 text-center" style={{ color: "var(--color-danger)" }}>{err}</p>
+          )}
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={onClose} disabled={busy}>Close</Button>
+            <Button
+              variant="primary"
+              className="flex-1 flex items-center justify-center gap-2"
+              onClick={handlePrint}
+              disabled={busy}
+            >
+              <Printer size={14} /> {busy ? "Preparing…" : printLabel}
+            </Button>
+          </div>
         </div>
       </div>
     </div>,

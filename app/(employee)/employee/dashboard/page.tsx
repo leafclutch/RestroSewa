@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import type { RestaurantUserContext } from "@/lib/auth/guards";
-import { getStaffNav, hasAnyPermission, NAV_ACCESS, PERMISSIONS } from "@/lib/permissions";
+import { getStaffNav, NAV_ACCESS, ROOM_ACCESS, STOCK_ACCESS } from "@/lib/permissions";
 import { getMyOrderQueue, getSalesReport } from "@/app/actions/pos";
 import { getCredits, getCreditSummary } from "@/app/actions/credits";
 import { getAllMenuItems, getMenuCategories } from "@/app/actions/menu";
@@ -12,6 +12,7 @@ import { MenuClient } from "@/app/(admin)/admin/menu/_components/menu-client";
 import { TablesSection } from "./_components/tables-section";
 import { WalkInsSection } from "./_components/walkins-section";
 import { RoomsSection } from "./_components/rooms-section";
+import { StockSection } from "./_components/stock-section";
 import { OrdersSection } from "./_components/orders-section";
 import { StaffDashboard, SectionSkeleton } from "./_components/staff-dashboard";
 import type { DashboardSection, SectionKey } from "./_components/staff-dashboard";
@@ -89,7 +90,7 @@ export default async function EmployeeDashboardPage({
   const { restaurantUser } = await requireRestaurantStaff();
   const { credit: openCreditId, focus: focusParam } = await searchParams;
 
-  const SCROLLABLE: SectionKey[] = ["orders", "tables", "walkins", "rooms", "sales", "credits", "menu"];
+  const SCROLLABLE: SectionKey[] = ["orders", "tables", "walkins", "rooms", "sales", "credits", "menu", "stock"];
   const focusSection: SectionKey | null = openCreditId
     ? "credits"
     : SCROLLABLE.includes(focusParam as SectionKey)
@@ -146,14 +147,15 @@ export default async function EmployeeDashboardPage({
   // 3. Rooms — its own section, not a row of squares under Tables. Shown only to
   // staff who can see rooms at all; the section then shows only the rooms
   // assigned to them, via the same filter that governs tables.
-  if (hasAnyPermission(restaurantUser, [PERMISSIONS.VIEW_ROOMS, PERMISSIONS.MANAGE_ROOMS])) {
+  if (ROOM_ACCESS.canViewRooms(restaurantUser)) {
     sections.push({
       key: "rooms",
       title: "Rooms",
       subtitle: "Check in, folios & check out",
       body: (
         <Suspense fallback={<SectionSkeleton />}>
-          <RoomsSection canCheckIn />
+          {/* RoomsSection computes canCheckIn itself now — view_rooms is read-only. */}
+          <RoomsSection restaurantUser={restaurantUser} />
         </Suspense>
       ),
     });
@@ -197,6 +199,21 @@ export default async function EmployeeDashboardPage({
       body: (
         <Suspense fallback={<SectionSkeleton />}>
           <MenuBody ru={restaurantUser} />
+        </Suspense>
+      ),
+    });
+  }
+
+  // 7. Stock — after Menu. Shown to anyone who can view stock (view_stock or
+  // manage_stock); the summary is read-only, the full page enforces write access.
+  if (STOCK_ACCESS.canViewStock(restaurantUser)) {
+    sections.push({
+      key: "stock",
+      title: "Stock",
+      subtitle: "Inventory levels & low-stock alerts",
+      body: (
+        <Suspense fallback={<SectionSkeleton />}>
+          <StockSection />
         </Suspense>
       ),
     });

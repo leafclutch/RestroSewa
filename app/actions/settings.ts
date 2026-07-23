@@ -6,6 +6,8 @@ import { requireRestaurantAdmin } from "@/lib/auth/guards";
 import { normalizeBillLabel, type BillNumberLabel } from "@/lib/billing/bill-number";
 import { normalizeClosingHour } from "@/lib/business-day";
 import { defaultTicketCode, ticketCodeOf } from "@/lib/workstations/ticket-code";
+import { revalidateRestaurantInfo } from "@/lib/restaurant-info";
+import { revalidateWorkstations } from "@/lib/cache/tenant-cache";
 
 export type ActionResult = { error: string } | { ok: true } | null;
 
@@ -81,6 +83,13 @@ export async function updateDiscountPin(
   });
   if (error) return { error: "Could not save the discount PIN. Please try again." };
 
+  // Written by the `set_discount_pin` DB function, not by a .update() here — so this is
+  // the one invalidation a grep for `.from("restaurants").update(` would have missed.
+  // Setting or clearing the PIN is the on/off switch for discounts existing at all, so a
+  // stale `discountEnabled` would show the cashier a field that cannot work (or hide one
+  // that now can).
+  revalidateRestaurantInfo(restaurantUser.restaurant_id);
+
   revalidatePath("/admin/settings");
   return { ok: true };
 }
@@ -142,6 +151,10 @@ export async function updateBillingSettings(
 
   if (error) return { error: error.message };
 
+  // PAN, bill numbering and the tax/service percentages all print on a customer receipt,
+  // and the config is cached for 60s — so this must be dropped NOW, not on the next TTL.
+  revalidateRestaurantInfo(restaurantUser.restaurant_id);
+
   // The floor reads these when printing, so refresh the surfaces that render a bill.
   revalidatePath("/admin/settings");
   revalidatePath("/employee/sales");
@@ -194,6 +207,8 @@ export async function updateBusinessDaySettings(
     .eq("id", restaurantUser.restaurant_id);
 
   if (error) return { error: error.message };
+
+  revalidateRestaurantInfo(restaurantUser.restaurant_id);
 
   // This re-buckets every date-based figure in the app, so every reporting
   // surface must be refreshed — a cached page would keep showing totals computed
@@ -267,12 +282,12 @@ export async function updateWorkstationNumbering(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: stations } = await (service as any)
     .from("workstations")
-    .select("id")
+    .select("id, name")
     .eq("restaurant_id", restaurantUser.restaurant_id);
 
-  const ids = ((stations ?? []) as { id: string }[]).map((s) => s.id);
+  const rows = ((stations ?? []) as { id: string; name: string }[]);
 
-  for (const id of ids) {
+  for (const { id, name } of rows) {
     const prefixRaw = ((formData.get(`prefix_${id}`) as string) || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
     const nextRaw = ((formData.get(`next_${id}`) as string) || "").trim();
 
@@ -281,6 +296,28 @@ export async function updateWorkstationNumbering(
       const n = Number(nextRaw);
       if (!Number.isInteger(n) || n < 0) return { error: "Each next number must be a whole number (0 or more)." };
       otNext = n;
+    }
+
+    // Every ticket this station has ever issued keeps its number forever, and two of its
+    // tickets may never share one. Winding the counter back into already-issued territory
+    // would therefore not renumber history — it would make the NEXT print fail outright,
+    // at the counter, mid-service. Refuse it here, where it can still be explained.
+    if (otNext !== null) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: highest } = await (service as any)
+        .from("order_tickets")
+        .select("ot_number")
+        .eq("workstation_id", id)
+        .not("ot_number", "is", null)
+        .order("ot_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const used = highest?.ot_number as number | undefined;
+      if (used != null && otNext <= used) {
+        return {
+          error: `${name} has already issued number ${used}. Its next number must be ${used + 1} or higher.`,
+        };
+      }
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -292,6 +329,9 @@ export async function updateWorkstationNumbering(
     if (error) return { error: error.message };
   }
 
+  // This form edits `ticket_code`, which is the prefix printed on every Order Ticket —
+  // so a stale station list would keep printing the old code.
+  revalidateWorkstations(restaurantUser.restaurant_id);
   revalidatePath("/admin/settings");
   revalidatePath("/admin/workstations");
   return { ok: true };

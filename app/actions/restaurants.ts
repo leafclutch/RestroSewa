@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { revalidateRestaurantInfo } from "@/lib/restaurant-info";
 
 // The (superadmin) layout guards page RENDERING. A server action is a POST
 // endpoint in its own right — reachable without ever loading that layout — so
@@ -157,6 +158,7 @@ export async function toggleRestaurantStatus(id: string, makeActive: boolean) {
     .update({ is_active: makeActive })
     .eq("id", id);
 
+  revalidateRestaurantInfo(id);
   revalidatePath(`/superadmin/restaurants/${id}`);
   revalidatePath("/superadmin/dashboard");
 }
@@ -216,6 +218,9 @@ export async function updateRestaurant(
 
   if (error) return { error: error.message };
 
+  // Name, PAN, address, logo and qr_mode are all in the cached config, and qr_mode decides
+  // whether a newly opened table mints a customer PIN — so it must take effect at once.
+  revalidateRestaurantInfo(id);
   revalidatePath(`/superadmin/restaurants/${id}`);
   revalidatePath("/superadmin/dashboard");
   return null;

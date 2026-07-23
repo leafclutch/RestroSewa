@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ListOrdered, Banknote, LayoutGrid, BedDouble, BookOpen, ChevronDown, HandCoins, ShoppingBag } from "lucide-react";
+import { ListOrdered, Banknote, LayoutGrid, BedDouble, BookOpen, ChevronDown, HandCoins, ShoppingBag, Boxes } from "lucide-react";
 import { accentOf } from "@/lib/section-colors";
 import { PlatformLogo, PlatformWordmark } from "@/components/branding/platform-logo";
 
-export type SectionKey = "orders" | "tables" | "walkins" | "rooms" | "sales" | "credits" | "menu";
+export type SectionKey = "orders" | "tables" | "walkins" | "rooms" | "sales" | "credits" | "menu" | "stock";
 
 export type DashboardSection = {
   key: SectionKey;
@@ -29,6 +29,7 @@ const SECTION_ICON: Record<
   sales: Banknote,
   credits: HandCoins,
   menu: BookOpen,
+  stock: Boxes,
 };
 
 /**

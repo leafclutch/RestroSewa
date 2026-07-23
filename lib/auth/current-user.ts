@@ -2,32 +2,62 @@ import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { normalizeClosingHour } from "@/lib/business-day";
+import { span } from "@/lib/perf/timing";
+
+/** What every caller actually reads off the auth user: the id, and rarely the email. */
+export type AuthIdentity = { id: string; email: string | null };
+
+// One env flag, so the change can be turned off without a revert. Vercel reads env at
+// instance boot, so flipping it needs a redeploy — it exists to make the diff obviously
+// reversible, not to be fast.
+const LOCAL_VERIFY = process.env.AUTH_LOCAL_VERIFY !== "0";
 
 /**
- * Who is asking — resolved ONCE per request.
+ * Who is asking — resolved ONCE per request, and now WITHOUT a network call.
  *
- * `supabase.auth.getUser()` is not a local JWT decode. It is an HTTP round-trip
- * to Supabase Auth to validate the token (~300ms against a remote project), and
- * every guard and every server action was calling it independently. A Cashier's
- * dashboard renders six sections, each fetching through its own action, so a
- * single page load spent about two seconds doing the same auth check seven times
- * and the same staff-row lookup seven times.
+ * `supabase.auth.getUser()` is not a local JWT decode. It is an HTTP round-trip to
+ * Supabase Auth to validate the token (~130-300ms against a remote project), and it used
+ * to sit on the critical path of literally every authenticated request — twice, because
+ * `proxy.ts` pays it again in middleware.
  *
- * That is also exactly why the problem scaled with permissions: more permissions
- * meant more sections, which meant more actions, which meant more auth calls. A
- * staff member with two sections barely noticed.
+ * `getClaims()` verifies the token's signature LOCALLY with WebCrypto against the
+ * project's published JWKS, which it fetches once per process and caches. Zero network
+ * per request. Two things make this safe rather than clever:
  *
- * React's `cache()` memoises for the lifetime of ONE server request, so every
- * caller inside a single render now shares one result. It is not a cross-request
- * cache — a different user, or the next request, resolves afresh. Nothing about
- * who may see what changes; only the number of times we ask.
+ *   1. It still calls `getSession()` internally, which means the @supabase/ssr cookie
+ *      adapter still runs and an expired access token is still REFRESHED. Verification
+ *      moving local does not move the refresh.
+ *   2. While the project still signs with the legacy HS256 shared secret, the secret is
+ *      not public, so `getClaims()` cannot verify locally and transparently falls back to
+ *      the network. Behaviour is then byte-identical to before. That is why this can ship
+ *      before the Supabase key rotation, and why the rotation carries no code risk.
+ *
+ * ON ERROR WE FALL BACK, WE DO NOT RETURN NULL. A returned null means "not signed in",
+ * which redirects to /login. If the JWKS endpoint ever blips, returning null would sign
+ * out the entire restaurant floor mid-service on a transient network fault. A
+ * verification failure is a failure to ANSWER, not an answer of "no".
+ *
+ * React's `cache()` memoises for the lifetime of ONE server request, so every caller in a
+ * render shares one result. It is not a cross-request cache — a different user, or the
+ * next request, resolves afresh.
  */
-export const getAuthUser = cache(async () => {
+export const getAuthUser = cache(async (): Promise<AuthIdentity | null> => {
   const supabase = await createClient();
+
+  if (LOCAL_VERIFY) {
+    const { data, error } = await span("auth.getClaims", () => supabase.auth.getClaims());
+    if (!error) {
+      const sub = data?.claims?.sub;
+      if (!sub) return null; // verified, and there is genuinely no session
+      return { id: sub, email: (data?.claims?.email as string | undefined) ?? null };
+    }
+    // Fall through to the network path rather than claiming "not signed in".
+  }
+
   const {
     data: { user },
-  } = await supabase.auth.getUser();
-  return user;
+  } = await span("auth.getUser", () => supabase.auth.getUser());
+  return user ? { id: user.id, email: user.email ?? null } : null;
 });
 
 export type StaffRow = {
@@ -53,14 +83,21 @@ export const getStaffRow = cache(async (authUserId: string): Promise<StaffRow | 
   const service = createServiceClient();
   // `restaurant_users` has exactly one FK to `restaurants`, so the embed is
   // unambiguous and costs nothing beyond one more column on the same query.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any)
-    .from("restaurant_users")
-    .select("id, restaurant_id, role, display_name, permissions, restaurants ( settings )")
-    .eq("auth_user_id", authUserId)
-    .eq("is_active", true)
-    .is("deleted_at", null)
-    .maybeSingle();
+  //
+  // NOT cached across requests, deliberately: `is_active` / `deleted_at` here are the
+  // ONLY live check that an employee still works here. Caching this would mean
+  // "deactivate that cashier right now" stops being immediate, on a system where that
+  // request usually means money has gone missing.
+  const { data } = await span("db.staffRow", async () =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("restaurant_users")
+      .select("id, restaurant_id, role, display_name, permissions, restaurants ( settings )")
+      .eq("auth_user_id", authUserId)
+      .eq("is_active", true)
+      .is("deleted_at", null)
+      .maybeSingle()
+  );
 
   if (!data) return null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

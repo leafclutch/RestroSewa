@@ -393,17 +393,30 @@ export async function getCustomerActivationState(
   return { status: "none", sessionId: resolvedSessionId };
 }
 
+/**
+ * Is this session still live, and WHERE is it now?
+ *
+ * The location matters because staff can shift a table (transfer_session). The guest's
+ * session is unchanged — same cart, same orders, same bill — but it is now at a
+ * different table, and the header must say so without a rescan. The customer client
+ * holds its session id in localStorage and follows it here; the table QR is only ever
+ * the way in, never the anchor.
+ */
 export async function checkSessionActive(
   sessionId: string
-): Promise<{ active: boolean }> {
+): Promise<{ active: boolean; table_number?: string | null; room_number?: string | null }> {
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: session } = await (service as any)
     .from("sessions")
-    .select("status")
+    .select("status, restaurant_tables ( number ), rooms ( number )")
     .eq("id", sessionId)
     .maybeSingle();
-  return { active: session?.status === "active" };
+  return {
+    active: session?.status === "active",
+    table_number: session?.restaurant_tables?.number ?? null,
+    room_number: session?.rooms?.number ?? null,
+  };
 }
 
 export async function submitCustomerOrder(
