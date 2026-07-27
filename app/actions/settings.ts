@@ -14,6 +14,7 @@ import {
   EMAIL_RE,
   type DailySummaryConfig,
 } from "@/lib/reports/daily-summary";
+import { sendDailySummary } from "@/lib/reports/daily-summary-send";
 
 export type ActionResult = { error: string } | { ok: true } | null;
 
@@ -305,6 +306,71 @@ export async function updateDailySummarySettings(
 
   revalidatePath("/admin/settings");
   return { ok: true };
+}
+
+// ─── Daily Finance Report — delivery history + retry ──────────────────────────
+
+export type ReportDeliveryRow = {
+  businessDate: string;    // period_key (YYYY-MM-DD)
+  generatedAt: string | null;
+  sentAt: string | null;   // only meaningful when status === "sent"
+  recipients: string[];
+  status: "sent" | "failed";
+  error: string | null;
+  attempts: number;
+};
+
+// The recent daily-report deliveries for this restaurant, newest first. Admin-only
+// (the report exposes takings), matching the rest of Settings.
+export async function getReportHistory(limit = 30): Promise<ReportDeliveryRow[]> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("report_deliveries")
+    .select("period_key, generated_at, sent_at, recipients, status, error, attempts")
+    .eq("restaurant_id", restaurantUser.restaurant_id)
+    .eq("period_type", "daily")
+    .order("period_key", { ascending: false })
+    .limit(Math.min(Math.max(1, limit), 100));
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((data ?? []) as any[]).map((r) => ({
+    businessDate: r.period_key,
+    generatedAt: r.generated_at ?? null,
+    sentAt: r.status === "sent" ? r.sent_at ?? null : null,
+    recipients: Array.isArray(r.recipients) ? r.recipients : [],
+    status: r.status === "sent" ? "sent" : "failed",
+    error: r.error ?? null,
+    attempts: Number(r.attempts ?? 0),
+  }));
+}
+
+// Re-generate and re-send a single day's report on demand (the history "Retry"
+// button). Admin-only; forces a resend even if a row exists. Rebuilds the PDF from
+// live data so a retry reflects any corrections since the failure.
+export async function retryReportDelivery(
+  businessDate: string
+): Promise<ActionResult> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
+    return { error: "Invalid report date." };
+  }
+
+  const outcome = await sendDailySummary(
+    restaurantUser.restaurant_id,
+    businessDate,
+    restaurantUser.closingHour,
+    { force: true }
+  );
+
+  revalidatePath("/admin/settings");
+
+  if (outcome.status === "sent") return { ok: true };
+  if (outcome.status === "skipped") {
+    return { error: "Nothing to send — add at least one recipient and enable the daily summary." };
+  }
+  return { error: outcome.error || "Could not send the report. Please try again." };
 }
 
 // ─── Per-workstation Order-Ticket (OT) numbering ──────────────────────────────
