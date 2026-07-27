@@ -29,8 +29,15 @@ type NavItem = {
   href: string;
   icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
   exact: boolean;
-  /** Finance-only: needs `view_finance`, which stock permissions do NOT grant. */
-  financeOnly?: boolean;
+  /**
+   * Which access lane unlocks this link, so nav and route guard stay in step:
+   *   "stock"     — the Stock page (view_stock/manage_stock)
+   *   "purchases" — the Purchases page (any stock right OR manage_purchases)
+   *   "vendors"   — the Vendors page (any stock right OR manage_vendors)
+   *   "finance"   — the Finance report (view_finance only)
+   * Absent ⇒ always shown (the base nav).
+   */
+  needs?: "stock" | "purchases" | "vendors" | "finance";
 };
 
 const NAV: NavItem[] = [
@@ -46,15 +53,26 @@ const NAV: NavItem[] = [
 // is gated separately again, so a storekeeper never sees a link that would just
 // bounce them (nav and route guard must agree).
 const STOCK_NAV: NavItem[] = [
-  { label: "Stock",     href: "/admin/stock",     icon: Package,      exact: false },
-  { label: "Purchases", href: "/admin/purchases", icon: ShoppingCart, exact: false },
-  { label: "Vendors",   href: "/admin/vendors",   icon: Truck,        exact: false },
-  { label: "Finance",   href: "/admin/finance",   icon: Wallet,       exact: false, financeOnly: true },
+  { label: "Stock",     href: "/admin/stock",     icon: Package,      exact: false, needs: "stock" },
+  { label: "Purchases", href: "/admin/purchases", icon: ShoppingCart, exact: false, needs: "purchases" },
+  { label: "Vendors",   href: "/admin/vendors",   icon: Truck,        exact: false, needs: "vendors" },
+  { label: "Finance",   href: "/admin/finance",   icon: Wallet,       exact: false, needs: "finance" },
 ];
 
-const stockNavFor = (canSeeStock: boolean, canSeeFinance: boolean) =>
+const stockNavFor = (
+  canSeeStock: boolean,
+  canSeePurchases: boolean,
+  canSeeVendors: boolean,
+  canSeeFinance: boolean
+) =>
   STOCK_NAV.filter((i) =>
-    i.financeOnly ? canSeeFinance : canSeeStock
+    i.needs === "finance"
+      ? canSeeFinance
+      : i.needs === "purchases"
+      ? canSeePurchases
+      : i.needs === "vendors"
+      ? canSeeVendors
+      : canSeeStock
   );
 
 // Owner-only: billing details (PAN, bill numbering) that print on every bill.
@@ -107,6 +125,8 @@ function NavLink({
 function NavLinks({
   pathname,
   showStock,
+  showPurchases,
+  showVendors,
   showFinance,
   showSettings,
   rail = false,
@@ -114,12 +134,14 @@ function NavLinks({
 }: {
   pathname: string;
   showStock: boolean;
+  showPurchases: boolean;
+  showVendors: boolean;
   showFinance: boolean;
   showSettings: boolean;
   rail?: boolean;
   onNavigate?: () => void;
 }) {
-  const stockItems = stockNavFor(showStock, showFinance);
+  const stockItems = stockNavFor(showStock, showPurchases, showVendors, showFinance);
   const baseItems = showSettings ? [...NAV, SETTINGS_ITEM] : NAV;
   return (
     <>
@@ -159,12 +181,16 @@ export function AdminSidebar({
   restaurantName,
   restaurantLogo = null,
   showStock = false,
+  showPurchases = false,
+  showVendors = false,
   showFinance = false,
   showSettings = false,
 }: {
   restaurantName: string;
   restaurantLogo?: string | null;
   showStock?: boolean;
+  showPurchases?: boolean;
+  showVendors?: boolean;
   showFinance?: boolean;
   showSettings?: boolean;
 }) {
@@ -233,7 +259,7 @@ export function AdminSidebar({
         {/* The nav itself scrolls if it ever outgrows the viewport, so Sign out
             can never be pushed off-screen. */}
         <nav className="flex-1 min-h-0 overflow-y-auto px-2 lg:px-3 py-4 flex flex-col gap-0.5">
-          <NavLinks pathname={pathname} showStock={showStock} showFinance={showFinance} showSettings={showSettings} rail />
+          <NavLinks pathname={pathname} showStock={showStock} showPurchases={showPurchases} showVendors={showVendors} showFinance={showFinance} showSettings={showSettings} rail />
         </nav>
 
         <div
@@ -337,6 +363,8 @@ export function AdminSidebar({
               <NavLinks
                 pathname={pathname}
                 showStock={showStock}
+                showPurchases={showPurchases}
+                showVendors={showVendors}
                 showFinance={showFinance}
                 showSettings={showSettings}
                 onNavigate={() => setMobileOpen(false)}

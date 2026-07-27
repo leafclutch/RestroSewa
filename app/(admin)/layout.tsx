@@ -21,9 +21,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <AdminSidebar
         restaurantName={restaurant?.name ?? "Restaurant"}
         restaurantLogo={restaurant?.logo_url ?? null}
-        // Don't advertise links that would only bounce the user. Finance is gated
-        // separately from stock, so a storekeeper sees Stock but not Finance.
+        // Don't advertise links that would only bounce the user. Each lane is gated
+        // on its own right: a storekeeper sees Stock; a purchaser sees Purchases; a
+        // vendor manager sees Vendors; Finance needs view_finance. So a buyer with
+        // only manage_purchases never sees a Stock or Vendors link that would redirect.
         showStock={STOCK_ACCESS.canViewStock(restaurantUser)}
+        showPurchases={STOCK_ACCESS.canViewPurchases(restaurantUser)}
+        showVendors={STOCK_ACCESS.canViewVendors(restaurantUser)}
         showFinance={STOCK_ACCESS.canViewFinance(restaurantUser)}
         // Settings (billing) is owner-only; the page redirects non-admins anyway.
         showSettings={restaurantUser.role === "restaurant_admin"}

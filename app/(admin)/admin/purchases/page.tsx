@@ -5,12 +5,13 @@ import { getPurchases, getPurchaseSummary, getVendorOptions } from "@/app/action
 import { getProductOptions } from "@/app/actions/stock";
 import { PurchasesClient } from "./_components/purchases-client";
 
-// Stock & Finance → Purchases. Viewing needs `view_stock` or `manage_stock`;
-// recording a purchase needs `manage_stock` (it moves stock, money and debt).
+// Stock & Finance → Purchases. Viewing needs any stock/purchases right; recording
+// a purchase needs `manage_purchases` (it moves stock, money and debt), split out
+// of `manage_stock` and separate from `manage_vendors`. `restaurant_admin` passes.
 export default async function PurchasesPage() {
   const { restaurantUser } = await requireRestaurantStaff();
 
-  if (!STOCK_ACCESS.canViewStock(restaurantUser)) {
+  if (!STOCK_ACCESS.canViewPurchases(restaurantUser)) {
     redirect("/employee/dashboard");
   }
 
@@ -27,7 +28,7 @@ export default async function PurchasesPage() {
       initialSummary={summary}
       vendors={vendors}
       products={products}
-      canManage={STOCK_ACCESS.canManageStock(restaurantUser)}
+      canManage={STOCK_ACCESS.canManagePurchases(restaurantUser)}
     />
   );
 }

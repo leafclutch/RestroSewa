@@ -111,7 +111,7 @@ export async function getPurchases(params?: {
   vendorId?: string | null;
 }): Promise<PurchaseRow[]> {
   const ru = await getRestaurantUser();
-  if (!STOCK_ACCESS.canViewStock(ru)) return [];
+  if (!STOCK_ACCESS.canViewPurchases(ru)) return [];
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -151,7 +151,7 @@ export async function getPurchaseSummary(day?: string | null): Promise<PurchaseS
     creditPurchases: 0,
     purchaseCount: 0,
   };
-  if (!STOCK_ACCESS.canViewStock(ru)) return empty;
+  if (!STOCK_ACCESS.canViewPurchases(ru)) return empty;
 
   const service = createServiceClient();
   const { from, to } = dayBounds(day ?? null, ru.closingHour);
@@ -184,7 +184,7 @@ export async function getPurchaseDetail(
   purchaseId: string
 ): Promise<PurchaseDetail | { error: string }> {
   const ru = await getRestaurantUser();
-  if (!STOCK_ACCESS.canViewStock(ru)) {
+  if (!STOCK_ACCESS.canViewPurchases(ru)) {
     return { error: "You don't have permission to view purchases." };
   }
 
@@ -244,7 +244,7 @@ export async function recordPurchase(
   formData: FormData
 ): Promise<ActionResult> {
   const ru = await getRestaurantUser();
-  if (!STOCK_ACCESS.canManageStock(ru)) {
+  if (!STOCK_ACCESS.canManagePurchases(ru)) {
     return { error: "You don't have permission to record purchases." };
   }
 
@@ -331,7 +331,7 @@ export async function recordPurchase(
 /** Active vendors, for the purchase picker. */
 export async function getVendorOptions(): Promise<VendorOption[]> {
   const ru = await getRestaurantUser();
-  if (!STOCK_ACCESS.canViewStock(ru)) return [];
+  if (!STOCK_ACCESS.canViewPurchases(ru)) return [];
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
