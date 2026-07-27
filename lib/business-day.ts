@@ -81,6 +81,15 @@ const firstOfMonthStr = (day: string) => `${day.slice(0, 7)}-01`;
 const firstOfYearStr = (day: string) => `${day.slice(0, 4)}-01-01`;
 
 /**
+ * Calendar add/subtract on a YYYY-MM-DD business-day STRING (pure UTC maths, so
+ * timezone-free). `addBusinessDays(businessToday(h), -1)` is the previous, fully
+ * closed business day — what the daily-summary job reports on.
+ */
+export function addBusinessDays(day: string, n: number): string {
+  return addDaysStr(day, n);
+}
+
+/**
  * The instant business day `day` begins: Nepal midnight of that date plus the
  * closing hour. Accepts a YYYY-MM-DD string, or a Date (read as its Nepal day).
  */

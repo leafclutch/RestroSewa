@@ -120,6 +120,10 @@ const RPC_ERRORS: Record<string, string> = {
   UNIT_REQUIRED: "Enter a unit (bottle, kg, litre…).",
   INVALID_OPENING_STOCK: "Opening stock cannot be negative.",
   INVALID_LOW_STOCK: "The low-stock level cannot be negative.",
+  PRODUCT_HAS_LINKS:
+    "This product is used in one or more menu-item recipes and can't be deleted. Remove those links, or deactivate the product instead.",
+  PRODUCT_HAS_HISTORY:
+    "This product has purchase or stock history and can't be deleted. Deactivate it instead to keep the record.",
 };
 
 function rpcError(message: string, fallback: string): string {
@@ -498,6 +502,34 @@ export async function setProductActive(
   return null;
 }
 
+// ─── Delete a product ─────────────────────────────────────────────────────────
+// A true delete for the safe case only: a product with no recipe links, no
+// purchase lines and no stock adjustments — i.e. one created by mistake. The
+// `delete_product` RPC re-checks references inside its own transaction; anything
+// with history is refused and the UI falls back to Deactivate.
+
+export async function deleteProduct(productId: string): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canManageStock(ru)) {
+    return { error: "You don't have permission to delete products." };
+  }
+  if (!productId) return { error: "Product not found." };
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).rpc("delete_product", {
+    p_restaurant_id: ru.restaurant_id, // tenant scope re-checked inside the RPC
+    p_product_id: productId,
+  });
+
+  if (error) {
+    return { error: rpcError(error.message ?? "", "Could not delete the product. Please try again.") };
+  }
+
+  revalidatePath("/admin/stock");
+  return null;
+}
+
 // ─── Adjust stock (correction / wastage) ──────────────────────────────────────
 
 const REASONS = new Set([
@@ -808,12 +840,14 @@ export async function getLinkTargets(): Promise<LinkTarget[]> {
   return targets;
 }
 
-/** Active products, for the link + purchase pickers. */
+/** Active products, for the link + purchase pickers. Purchasers (manage_purchases,
+ *  possibly without view_stock) need this to build a purchase, so it's gated on the
+ *  broader purchases view rather than stock view. */
 export async function getProductOptions(): Promise<
   { id: string; name: string; unit: string }[]
 > {
   const ru = await getRestaurantUser();
-  if (!STOCK_ACCESS.canViewStock(ru)) return [];
+  if (!STOCK_ACCESS.canViewPurchases(ru)) return [];
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

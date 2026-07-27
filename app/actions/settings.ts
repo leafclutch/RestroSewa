@@ -8,6 +8,12 @@ import { normalizeClosingHour } from "@/lib/business-day";
 import { defaultTicketCode, ticketCodeOf } from "@/lib/workstations/ticket-code";
 import { revalidateRestaurantInfo } from "@/lib/restaurant-info";
 import { revalidateWorkstations } from "@/lib/cache/tenant-cache";
+import {
+  normalizeDailySummaryConfig,
+  MAX_SUMMARY_EMAILS,
+  EMAIL_RE,
+  type DailySummaryConfig,
+} from "@/lib/reports/daily-summary";
 
 export type ActionResult = { error: string } | { ok: true } | null;
 
@@ -226,6 +232,78 @@ export async function updateBusinessDaySettings(
   ]) {
     revalidatePath(p);
   }
+  return { ok: true };
+}
+
+// ─── Daily financial-summary emails ───────────────────────────────────────────
+// Owner opts in and lists up to three recipients. After the business day closes,
+// a scheduled job (pg_cron → /api/cron/daily-summary) emails each restaurant's
+// summary. No email configured ⇒ nothing is sent. The config lives in the
+// settings jsonb; the shape is owned by lib/reports/daily-summary.ts.
+
+export async function getDailySummarySettings(): Promise<DailySummaryConfig> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("restaurants")
+    .select("settings")
+    .eq("id", restaurantUser.restaurant_id)
+    .maybeSingle();
+
+  return normalizeDailySummaryConfig(data?.settings?.daily_summary);
+}
+
+export async function updateDailySummarySettings(
+  _prev: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+  const service = createServiceClient();
+
+  const enabled = formData.get("enabled") === "1";
+
+  // Up to three fixed slots. A blank slot is fine; a filled one must be a valid
+  // address, so a typo is caught here rather than silently dropping a recipient.
+  const seen = new Set<string>();
+  const emails: string[] = [];
+  for (let i = 0; i < MAX_SUMMARY_EMAILS; i++) {
+    const raw = ((formData.get(`email_${i}`) as string) || "").trim();
+    if (!raw) continue;
+    if (!EMAIL_RE.test(raw)) {
+      return { error: `“${raw}” is not a valid email address.` };
+    }
+    const key = raw.toLowerCase();
+    if (seen.has(key)) continue; // ignore duplicates rather than erroring
+    seen.add(key);
+    emails.push(raw);
+  }
+
+  if (enabled && emails.length === 0) {
+    return { error: "Add at least one email address, or turn the daily summary off." };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: rest } = await (service as any)
+    .from("restaurants")
+    .select("settings")
+    .eq("id", restaurantUser.restaurant_id)
+    .maybeSingle();
+
+  const settings = {
+    ...(rest?.settings ?? {}),
+    daily_summary: { enabled, emails },
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("restaurants")
+    .update({ settings })
+    .eq("id", restaurantUser.restaurant_id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/admin/settings");
   return { ok: true };
 }
 

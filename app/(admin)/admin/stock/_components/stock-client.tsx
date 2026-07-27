@@ -12,6 +12,7 @@ import {
 import {
   adjustStock,
   createProduct,
+  deleteProduct,
   getMenuItemLinks,
   getProductDetail,
   getProductHistory,
@@ -57,6 +58,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Trash2,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -979,6 +981,9 @@ export function StockClient({
   const [toggling, setToggling] = useState<StockRow | null>(null);
   const [togglePending, startToggle] = useTransition();
   const [toggleError, setToggleError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<StockRow | null>(null);
+  const [deletePending, startDelete] = useTransition();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const reload = useCallback((s: string, f: StockFilter, d: string) => {
     startTransition(async () => {
@@ -1234,6 +1239,15 @@ export function StockClient({
                             >
                               {p.is_active ? "Deactivate" : "Reactivate"}
                             </button>
+                            <button
+                              type="button"
+                              title="Delete"
+                              onClick={() => { setDeleteError(null); setDeleting(p); }}
+                              className="w-8 h-8 rounded-lg flex items-center justify-center"
+                              style={{ background: "var(--color-canvas-soft)", color: "var(--color-danger)" }}
+                            >
+                              <Trash2 size={14} />
+                            </button>
                           </>
                         )}
                       </div>
@@ -1309,6 +1323,15 @@ export function StockClient({
                       style={{ borderColor: "var(--color-hairline)", color: "var(--color-ink-mute)" }}
                     >
                       {p.is_active ? "Deactivate" : "Reactivate"}
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete"
+                      onClick={() => { setDeleteError(null); setDeleting(p); }}
+                      className="shrink-0 px-2.5 py-1.5 rounded-lg border flex items-center justify-center"
+                      style={{ borderColor: "var(--color-hairline)", color: "var(--color-danger)" }}
+                    >
+                      <Trash2 size={13} />
                     </button>
                   </div>
                 )}
@@ -1415,6 +1438,33 @@ export function StockClient({
             const res = await setProductActive(target.id, !target.is_active);
             if (res?.error) setToggleError(res.error);
             else { setToggling(null); refresh(); }
+          });
+        }}
+      />
+
+      {/* Delete — succeeds only for a product with no recipe links, purchases or
+          adjustments; anything else is refused (the RPC re-checks) with a message
+          pointing at Deactivate. */}
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete product?"
+        message={
+          `Permanently delete ${deleting?.name}? This can't be undone. Only a product with no ` +
+          `menu-item recipes, purchases or stock history can be deleted — otherwise deactivate it instead.`
+        }
+        confirmLabel="Delete"
+        destructive
+        pending={deletePending}
+        error={deleteError}
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => {
+          if (!deleting) return;
+          const target = deleting;
+          setDeleteError(null);
+          startDelete(async () => {
+            const res = await deleteProduct(target.id);
+            if (res?.error) setDeleteError(res.error);
+            else { setDeleting(null); refresh(); }
           });
         }}
       />

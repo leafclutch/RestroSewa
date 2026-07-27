@@ -26,6 +26,12 @@ export const PERMISSIONS = {
   // Stock & Finance
   VIEW_STOCK:       "view_stock",
   MANAGE_STOCK:     "manage_stock",
+  // Purchasing is split OUT of manage_stock, and split again into two: recording
+  // supplier bills (manage_purchases) vs managing + paying the vendor accounts
+  // (manage_vendors). Both spend the restaurant's money and are a different trust
+  // level from counting stock. See STOCK_ACCESS.canManagePurchases / canManageVendors.
+  MANAGE_PURCHASES: "manage_purchases",
+  MANAGE_VENDORS:   "manage_vendors",
   VIEW_FINANCE:     "view_finance",
   // Reports
   VIEW_REPORTS:     "view_reports",
@@ -106,6 +112,22 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
       // which passes on either permission. Ticking Manage alone is enough.
       { key: "view_stock",   label: "View Stock" },
       { key: "manage_stock", label: "Manage Stock" },
+    ],
+  },
+  {
+    label: "Purchases",
+    items: [
+      // Recording supplier bills (moves stock, cash and vendor credit). Write
+      // implies the read of the Purchases page. See STOCK_ACCESS.canManagePurchases.
+      { key: "manage_purchases", label: "Manage Purchases" },
+    ],
+  },
+  {
+    label: "Vendors",
+    items: [
+      // Creating/editing/deleting vendors and paying what they're owed. Write
+      // implies the read of the Vendors page. See STOCK_ACCESS.canManageVendors.
+      { key: "manage_vendors", label: "Manage Vendors" },
     ],
   },
   {
@@ -291,19 +313,40 @@ export const ROOM_ACCESS = {
     hasPermission(u, P_.MANAGE_ROOMS),
 };
 
+// Three independent write lanes now live under one module:
+//   • manage_stock     — products, stock counts/adjustments, recipe links.
+//   • manage_purchases — record supplier bills (the buying workflow).
+//   • manage_vendors   — the vendor accounts: add/edit/delete vendors and pay them.
+// A storekeeper who logs wastage is no longer automatically able to buy, and a
+// buyer is not automatically able to edit or pay vendor accounts. Each WRITE
+// implies the READ of what it touches (a purchaser can view Purchases without
+// view_stock; a vendor manager can view Vendors), mirroring how manage_stock
+// implies view_stock.
 export const STOCK_ACCESS = {
-  /** Sees Vendors / Stock / Purchases (read-only is enough). */
+  /** Sees the Stock page (products, counts). */
   canViewStock: (u: { role: string; permissions: string[] }) =>
     hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK]),
-  /** Creates vendors, records purchases and pays vendors. */
+  /** Adds/edits/deletes products, adjusts stock, edits recipe links. */
   canManageStock: (u: { role: string; permissions: string[] }) =>
     hasPermission(u, P_.MANAGE_STOCK),
+  /** Sees the Purchases page (view-only is enough). Any stock or purchases right. */
+  canViewPurchases: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.MANAGE_PURCHASES]),
+  /** Records purchases. */
+  canManagePurchases: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.MANAGE_PURCHASES),
+  /** Sees the Vendors page (view-only is enough). Any stock or vendors right. */
+  canViewVendors: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.MANAGE_VENDORS]),
+  /** Creates/edits/deletes vendors and pays them. */
+  canManageVendors: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.MANAGE_VENDORS),
   /** Sees the Daily Finance Report (takings, margins, all outstanding debt). */
   canViewFinance: (u: { role: string; permissions: string[] }) =>
     hasPermission(u, P_.VIEW_FINANCE),
   /** Shows the Stock & Finance group in the admin sidebar at all. */
   canSeeModule: (u: { role: string; permissions: string[] }) =>
-    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.VIEW_FINANCE]),
+    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.MANAGE_PURCHASES, P_.MANAGE_VENDORS, P_.VIEW_FINANCE]),
 };
 
 // ─── Payroll (Staff → Payroll) ────────────────────────────────────────────────

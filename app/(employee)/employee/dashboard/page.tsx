@@ -13,6 +13,8 @@ import { TablesSection } from "./_components/tables-section";
 import { WalkInsSection } from "./_components/walkins-section";
 import { RoomsSection } from "./_components/rooms-section";
 import { StockSection } from "./_components/stock-section";
+import { PurchasesSection } from "./_components/purchases-section";
+import { VendorsSection } from "./_components/vendors-section";
 import { OrdersSection } from "./_components/orders-section";
 import { StaffDashboard, SectionSkeleton } from "./_components/staff-dashboard";
 import type { DashboardSection, SectionKey } from "./_components/staff-dashboard";
@@ -90,7 +92,7 @@ export default async function EmployeeDashboardPage({
   const { restaurantUser } = await requireRestaurantStaff();
   const { credit: openCreditId, focus: focusParam } = await searchParams;
 
-  const SCROLLABLE: SectionKey[] = ["orders", "tables", "walkins", "rooms", "sales", "credits", "menu", "stock"];
+  const SCROLLABLE: SectionKey[] = ["orders", "tables", "walkins", "rooms", "sales", "credits", "menu", "stock", "purchases", "vendors"];
   const focusSection: SectionKey | null = openCreditId
     ? "credits"
     : SCROLLABLE.includes(focusParam as SectionKey)
@@ -214,6 +216,39 @@ export default async function EmployeeDashboardPage({
       body: (
         <Suspense fallback={<SectionSkeleton />}>
           <StockSection />
+        </Suspense>
+      ),
+    });
+  }
+
+  // 8. Purchases — after Stock. These are ACTION surfaces, so they appear only for
+  // staff who can actually do the work: gate on manage_purchases, not merely view.
+  // A view-only storekeeper (view_stock/manage_stock without manage_purchases) does
+  // not get a "record a purchase" card on their dashboard.
+  if (STOCK_ACCESS.canManagePurchases(restaurantUser)) {
+    sections.push({
+      key: "purchases",
+      title: "Purchases",
+      subtitle: "Record supplier bills",
+      body: (
+        <Suspense fallback={<SectionSkeleton />}>
+          <PurchasesSection />
+        </Suspense>
+      ),
+    });
+  }
+
+  // 9. Vendors — after Purchases. Same rule: only staff with manage_vendors see it.
+  // Without that permission the Vendors section is hidden from the dashboard, even
+  // for someone who can view stock.
+  if (STOCK_ACCESS.canManageVendors(restaurantUser)) {
+    sections.push({
+      key: "vendors",
+      title: "Vendors",
+      subtitle: "Suppliers & what we owe them",
+      body: (
+        <Suspense fallback={<SectionSkeleton />}>
+          <VendorsSection />
         </Suspense>
       ),
     });

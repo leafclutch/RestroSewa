@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   createVendor,
+  deleteVendor,
   getVendorDetail,
   getVendors,
   getVendorSummary,
@@ -37,6 +38,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Trash2,
   Wallet,
 } from "lucide-react";
 
@@ -452,6 +454,9 @@ export function VendorsClient({
   const [deactivating, setDeactivating] = useState<VendorRow | null>(null);
   const [deactivatePending, startDeactivate] = useTransition();
   const [deactivateError, setDeactivateError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<VendorRow | null>(null);
+  const [deletePending, startDelete] = useTransition();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const reload = useCallback((s: string, f: VendorFilter) => {
     startTransition(async () => {
@@ -647,6 +652,17 @@ export function VendorsClient({
                             {s.is_active ? "Deactivate" : "Reactivate"}
                           </button>
                         )}
+                        {canManage && (
+                          <button
+                            type="button"
+                            title="Delete"
+                            onClick={() => { setDeleteError(null); setDeleting(s); }}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center"
+                            style={{ background: "var(--color-canvas-soft)", color: "var(--color-danger)" }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -711,6 +727,15 @@ export function VendorsClient({
                       style={{ borderColor: "var(--color-hairline)", color: "var(--color-ink-mute)" }}
                     >
                       {s.is_active ? "Deactivate" : "Reactivate"}
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete"
+                      onClick={() => { setDeleteError(null); setDeleting(s); }}
+                      className="shrink-0 px-2.5 py-1.5 rounded-lg border flex items-center justify-center"
+                      style={{ borderColor: "var(--color-hairline)", color: "var(--color-danger)" }}
+                    >
+                      <Trash2 size={13} />
                     </button>
                   </div>
                 )}
@@ -812,6 +837,36 @@ export function VendorsClient({
             if (res?.error) setDeactivateError(res.error);
             else {
               setDeactivating(null);
+              refresh();
+            }
+          });
+        }}
+      />
+
+      {/* Delete — only succeeds for a vendor with no purchases or payment history;
+          anything else is refused (the RPC re-checks) and the message points at
+          Deactivate instead. */}
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete vendor?"
+        message={
+          `Permanently delete ${deleting?.name}? This can't be undone. Only a vendor with ` +
+          `no purchases and no payment history can be deleted — otherwise deactivate them instead.`
+        }
+        confirmLabel="Delete"
+        destructive
+        pending={deletePending}
+        error={deleteError}
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => {
+          if (!deleting) return;
+          const target = deleting;
+          setDeleteError(null);
+          startDelete(async () => {
+            const res = await deleteVendor(target.id);
+            if (res?.error) setDeleteError(res.error);
+            else {
+              setDeleting(null);
               refresh();
             }
           });

@@ -94,7 +94,7 @@ export async function getVendors(params?: {
   filter?: VendorFilter;
 }): Promise<VendorRow[]> {
   const ru = await getRestaurantUser();
-  if (!STOCK_ACCESS.canViewStock(ru)) return [];
+  if (!STOCK_ACCESS.canViewVendors(ru)) return [];
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -132,7 +132,7 @@ export async function getVendors(params?: {
 export async function getVendorSummary(): Promise<VendorSummary> {
   const ru = await getRestaurantUser();
   const empty = { total: 0, activeCount: 0, outstanding: 0, owingCount: 0 };
-  if (!STOCK_ACCESS.canViewStock(ru)) return empty;
+  if (!STOCK_ACCESS.canViewVendors(ru)) return empty;
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -162,7 +162,7 @@ export async function getVendorDetail(
   vendorId: string
 ): Promise<VendorDetail | { error: string }> {
   const ru = await getRestaurantUser();
-  if (!STOCK_ACCESS.canViewStock(ru)) {
+  if (!STOCK_ACCESS.canViewVendors(ru)) {
     return { error: "You don't have permission to view vendors." };
   }
 
@@ -294,6 +294,10 @@ const RPC_ERRORS: Record<string, string> = {
   NOTHING_OWED: "This vendor is already fully settled — nothing is owed.",
   AMOUNT_EXCEEDS_BALANCE:
     "That's more than the outstanding balance. Enter the balance or less.",
+  VENDOR_HAS_PURCHASES:
+    "This vendor has purchases on record and can't be deleted. Deactivate them instead to hide them from pickers while keeping the history.",
+  VENDOR_HAS_HISTORY:
+    "This vendor has account history (payments or carried-over dues) and can't be deleted. Deactivate them instead to keep the record.",
 };
 
 function rpcError(message: string, fallback: string): string {
@@ -308,7 +312,7 @@ export async function createVendor(
   formData: FormData
 ): Promise<ActionResult> {
   const ru = await getRestaurantUser();
-  if (!STOCK_ACCESS.canManageStock(ru)) {
+  if (!STOCK_ACCESS.canManageVendors(ru)) {
     return { error: "You don't have permission to manage vendors." };
   }
 
@@ -353,7 +357,7 @@ export async function updateVendor(
   formData: FormData
 ): Promise<ActionResult> {
   const ru = await getRestaurantUser();
-  if (!STOCK_ACCESS.canManageStock(ru)) {
+  if (!STOCK_ACCESS.canManageVendors(ru)) {
     return { error: "You don't have permission to manage vendors." };
   }
 
@@ -400,7 +404,7 @@ export async function setVendorActive(
   isActive: boolean
 ): Promise<ActionResult> {
   const ru = await getRestaurantUser();
-  if (!STOCK_ACCESS.canManageStock(ru)) {
+  if (!STOCK_ACCESS.canManageVendors(ru)) {
     return { error: "You don't have permission to manage vendors." };
   }
 
@@ -436,6 +440,34 @@ export async function setVendorActive(
   return null;
 }
 
+// ─── Delete a vendor ──────────────────────────────────────────────────────────
+// A true delete, but only for the safe case: a vendor with no purchases, no
+// payments and no carried-over dues — i.e. one created by mistake. Anything with
+// history is refused (the `delete_vendor` RPC re-checks inside its own transaction)
+// and the UI falls back to Deactivate, which preserves the record.
+
+export async function deleteVendor(vendorId: string): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canManageVendors(ru)) {
+    return { error: "You don't have permission to delete vendors." };
+  }
+  if (!vendorId) return { error: "Vendor not found." };
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).rpc("delete_vendor", {
+    p_restaurant_id: ru.restaurant_id, // tenant scope re-checked inside the RPC
+    p_vendor_id: vendorId,
+  });
+
+  if (error) {
+    return { error: rpcError(error.message ?? "", "Could not delete the vendor. Please try again.") };
+  }
+
+  revalidatePath("/admin/vendors");
+  return null;
+}
+
 // ─── Pay a vendor ─────────────────────────────────────────────────────────────
 
 const PAYMENT_METHODS = new Set(WITH_MIXED);
@@ -445,7 +477,7 @@ export async function payVendor(
   formData: FormData
 ): Promise<ActionResult> {
   const ru = await getRestaurantUser();
-  if (!STOCK_ACCESS.canManageStock(ru)) {
+  if (!STOCK_ACCESS.canManageVendors(ru)) {
     return { error: "You don't have permission to pay vendors." };
   }
 
