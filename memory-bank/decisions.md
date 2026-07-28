@@ -77,5 +77,19 @@ follow-up. This exists so future work doesn't re-propose things already chosen o
   backwards`, not `both` — `both` left an identity-matrix transform that trapped `position:fixed`
   modals off-screen on mobile (`.rs-page`).
 
+- **Walk-ins are their own permission, enforced type-aware in shared actions.** `view_walkins` /
+  `manage_walkins` (write-implies-read). Because walk-ins and tables share the session actions
+  (`pos.ts`), a walk-in session (`type='walk_in'`) is guarded by `walkInWriteBlocked` INSIDE the
+  mutating actions — so a staffer with dine-in order/billing perms but only `view_walkins` can't
+  operate a walk-in. *Reason:* least privilege for a takeaway/delivery desk without duplicating
+  the whole session pipeline. Backfill went to `close_bills` holders only.
+
+- **Module visibility follows `restaurants.type`, not just permissions.** `lib/business-type.ts`
+  (`hasRooms`/`hasRestaurant`) gates whole modules; a restaurant-only client hides Rooms
+  everywhere (UI + permission editor + room-create actions), not just visually. *Reason:* a
+  module that doesn't exist for a business type must not be navigable, grantable, or POST-able.
+  `type` is exposed once via `getRestaurantConfig.businessType`. Hotel-only hiding of restaurant
+  modules is deferred (helper ready).
+
 - **Don't export sync helpers from a `"use server"` module.** It typechecks but 500s the route
   at runtime. Keep pure helpers in plain modules; import them into actions.

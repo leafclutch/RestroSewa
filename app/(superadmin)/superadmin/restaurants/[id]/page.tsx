@@ -4,6 +4,7 @@ import { getRestaurantWithStaff } from "@/app/actions/restaurants";
 import { AddStaffForm } from "./_components/add-staff-form";
 import { StaffSection } from "./_components/staff-section";
 import { RestaurantDetailClient } from "./_components/restaurant-detail-client";
+import { normalizeBusinessType } from "@/lib/business-type";
 import { ChevronLeft } from "lucide-react";
 
 export default async function RestaurantDetailPage({
@@ -51,10 +52,11 @@ export default async function RestaurantDetailPage({
             staff={staff}
             restaurantSlug={r.slug}
             restaurantId={r.id}
+            businessType={normalizeBusinessType(r.type)}
           />
         </div>
 
-        <AddStaffForm restaurantId={r.id} />
+        <AddStaffForm restaurantId={r.id} businessType={normalizeBusinessType(r.type)} />
       </div>
     </div>
   );

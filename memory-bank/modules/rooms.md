@@ -2,6 +2,9 @@
 
 # Overview
 The hotel side: rooms and room-types with check-in/out, folios, room service, and cleaning.
+**Exists only for a hotel / restaurant+hotel client** — a restaurant-only `restaurants.type` hides
+the whole module (sidebar, dashboard, `/admin/rooms` redirect, permission editor, room-create
+actions) via `lib/business-type.ts` `hasRooms`. See `decisions.md` → "Module visibility follows type".
 Mirrors tables (sessions) but adds a stay/folio and a three-tier permission. See
 `architecture.md` → "Session flow".
 
@@ -11,7 +14,9 @@ Mirrors tables (sessions) but adds a stay/folio and a three-tier permission. See
 
 # Features
 - **Check-in** — start a stay/session for a guest (needs `check_in`).
-- **Checkout** — settle and close the stay (billing action).
+- **Checkout** — settle and close the stay. Payment supports Cash / Online / Card / **Mixed
+  (Cash+Online)** / Credit; on a credit checkout the "Paid now" down-payment can itself be split
+  Cash+Online (parity with the table bill; server = `check_out_room` taking `p_cash`/`p_online`/`p_card`).
 - **Room billing / folio** — the stay's running charges + bill.
 - **Room service** — add/remove charges to the folio (an order-style charge).
 - **Assignments** — staff assigned to rooms (`restaurant_user_rooms`) see only their rooms.

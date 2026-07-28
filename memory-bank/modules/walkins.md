@@ -18,7 +18,7 @@ orders — sessions that behave like tables but belong to no table group. See `w
 
 # Business Rules
 - Walk-ins are **not** in a table group, so there's no group-staff routing — they show to staff
-  who can see tables.
+  with the walk-in permission (`view_walkins`/`manage_walkins`), not to everyone who can see tables.
 - In Without-PIN mode there's no PIN on a walk-in.
 - Optional customer details print on the ticket/bill when provided.
 - Same session semantics as tables (one active order-set per slot; parks/cleans like a table).
@@ -35,8 +35,12 @@ and `modules/tables.md`.
 Walk-in slots refresh on order/session channels like tables (see `modules/realtime.md`).
 
 # Permissions
-Follows table/order/billing permissions (`view_tables`, `create_orders`, `close_bills`,
-`process_payments`). See `modules/permissions.md`.
+Own permission group now: **`view_walkins`** (read-only — see slots/sessions/customer/billing)
+and **`manage_walkins`** (open/edit/order/bill/close), via `WALKIN_ACCESS` (write implies read).
+The dashboard section gates on `canViewWalkins`; the open action + all writes require
+`canManageWalkins` (enforced type-aware in the shared `pos.ts` session actions via
+`walkInWriteBlocked`, since walk-ins reuse the table session pipeline). Cashier/Receptionist/
+Manager presets include Manage; Waiter does not. See `modules/permissions.md`.
 
 # Known Limitations
 - Fixed W1/W2/W3 count; no per-slot delivery-driver/address model.

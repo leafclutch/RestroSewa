@@ -3,6 +3,22 @@
 Chronological log of meaningful shipped features (newest first). Not every commit — only
 features worth remembering. Dates are approximate to the work, not necessarily merge dates.
 
+## 2026-07 — Walk-in permission · Room mixed down-payment · Business-type Rooms gating
+Three changes. **(1) Walk-in permission** — new `view_walkins`/`manage_walkins` (`WALKIN_ACCESS`);
+the dashboard section + open action gate on it, and a type-aware backend guard
+(`walkInWriteBlocked`, pos.ts) refuses walk-in writes (add order / close / force-close / cancel)
+from order/billing staff holding only `view_walkins`. Presets (cashier/receptionist/manager) +
+backfill to `close_bills` holders (migration `20260727600000`). **(2) Room credit Mixed
+down-payment** — the folio-client credit "Paid now" now supports a Cash+Online split, matching the
+table checkout (server already accepted the split). **(3) Business-type Rooms gating** —
+`lib/business-type.ts` (`hasRooms`/`hasRestaurant`) + `getRestaurantConfig.businessType`;
+**restaurant-only clients hide Rooms** in the admin sidebar, staff dashboard, `/admin/rooms`
+(redirect), the Super Admin permission editor (Rooms group hidden), and room-create actions
+(defense-in-depth). Hotel-only module hiding deferred.
+*Files:* `lib/{permissions,business-type,restaurant-info}.ts`, `app/actions/{pos,rooms-admin}.ts`,
+folio-client, walkins-grid/section, employee dashboard, admin layout + sidebar, superadmin staff
+forms + `permission-picker.tsx`.
+
 ## 2026-07 — Daily Finance Report (PDF via Gmail SMTP)
 Automatic per-business-day PDF financial report emailed from the HRestroSewa Gmail. Reusable
 report service: `ReportPdf` chrome (logo/header, sections, page numbers, footer), Gmail SMTP

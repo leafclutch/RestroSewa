@@ -11,7 +11,9 @@ almost everything is reached through the **service_role** client or **RPCs** (RL
 
 ## Tenancy & identity
 - **restaurants** — the tenant. `name`, `logo_url` (Supabase Storage), `qr_mode`,
-  `pan_vat_number`, `bill_number_next`, `discount_pin_hash` (never leaves the server),
+  **`type`** (enum `restaurant | hotel | restaurant_hotel`, DB-checked — the business type set at
+  creation; gates which modules exist, e.g. Rooms — read via `hasRooms`/`hasRestaurant`),
+  `max_rooms`, `pan_vat_number`, `bill_number_next`, `discount_pin_hash` (never leaves the server),
   `settings jsonb`. **`settings`** holds: `business_closing_hour`, `daily_summary {enabled,
   emails[]}`, `bill_number_pad`, `bill_number_label`, `print_paper_width`, tax/service percents.
   Rule: config is cached (`getRestaurantConfig`, 60s) — every writer calls

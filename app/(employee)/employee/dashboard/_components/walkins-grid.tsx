@@ -19,9 +19,11 @@ const NUMBER_STYLE = { letterSpacing: "-0.3px", fontSize: "clamp(1.05rem, 3.6vw,
 // Free → a server action that opens/reopens the slot and redirects.
 const WalkInCard = memo(function WalkInCard({
   slot,
+  canManage,
   onError,
 }: {
   slot: WalkInStatus;
+  canManage: boolean;
   onError: (msg: string) => void;
 }) {
   const [opening, startOpen] = useTransition();
@@ -53,6 +55,21 @@ const WalkInCard = memo(function WalkInCard({
   // to, it's a lane waiting for an order — the purple keeps it distinct from the free tables
   // sitting directly above it in the same page.
   const a = SECTION_ACCENT.walkins;
+  // Read-only (View Walk-ins without Manage): show the slot's status but don't let it be
+  // opened. The server (openWalkInSlot) enforces this too.
+  if (!canManage) {
+    return (
+      <div
+        title={`Walk-in ${label} — free`}
+        className={CARD}
+        style={{ minHeight: 88, background: a.soft, borderColor: a.color }}
+      >
+        <ShoppingBag aria-hidden size={13} className="mb-0.5" style={{ color: a.color }} />
+        <span className={NUMBER} style={{ ...NUMBER_STYLE, color: "var(--color-ink)" }}>{label}</span>
+        <span className="text-xs mt-1" style={{ color: a.color }}>Free</span>
+      </div>
+    );
+  }
   return (
     <button
       type="button"
@@ -80,7 +97,7 @@ const WalkInCard = memo(function WalkInCard({
   );
 });
 
-export function WalkInsGrid({ initial }: { initial: WalkInStatus[] }) {
+export function WalkInsGrid({ initial, canManage }: { initial: WalkInStatus[]; canManage: boolean }) {
   const [walkIns, setWalkIns] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
@@ -115,7 +132,7 @@ export function WalkInsGrid({ initial }: { initial: WalkInStatus[] }) {
 
       <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))" }}>
         {walkIns.map((w) => (
-          <WalkInCard key={w.no} slot={w} onError={onError} />
+          <WalkInCard key={w.no} slot={w} canManage={canManage} onError={onError} />
         ))}
       </div>
     </div>

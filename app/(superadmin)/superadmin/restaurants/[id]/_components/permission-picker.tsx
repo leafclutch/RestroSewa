@@ -1,14 +1,26 @@
 "use client";
 
 import { PERMISSION_GROUPS } from "@/lib/permissions";
+import { hasRooms, type BusinessType } from "@/lib/business-type";
 
 export function PermissionPicker({
   selected,
   onChange,
+  businessType,
 }: {
   selected: string[];
   onChange: (next: string[]) => void;
+  /** When set, hides module groups the business type doesn't have (Rooms for a
+   *  restaurant-only client). Omitted ⇒ all groups shown (backward compatible). */
+  businessType?: BusinessType;
 }) {
+  // A restaurant-only client has no hotel side, so the Rooms permission group is
+  // hidden from the editor entirely — you can't grant a permission for a module that
+  // doesn't exist.
+  const groups =
+    businessType && !hasRooms(businessType)
+      ? PERMISSION_GROUPS.filter((g) => g.label !== "Rooms")
+      : PERMISSION_GROUPS;
   function toggle(key: string) {
     onChange(
       selected.includes(key) ? selected.filter((p) => p !== key) : [...selected, key]
@@ -27,7 +39,7 @@ export function PermissionPicker({
 
   return (
     <div className="flex flex-col gap-3">
-      {PERMISSION_GROUPS.map((group) => {
+      {groups.map((group) => {
         const keys = group.items.map((i) => i.key);
         const allOn  = keys.every((k) => selected.includes(k));
         const someOn = keys.some((k) => selected.includes(k));

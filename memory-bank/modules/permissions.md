@@ -24,6 +24,7 @@ the reference for *what* and *how*.
 - Orders: `view_orders`, `manage_orders`, `create_orders`, `edit_orders`, `cancel_orders`, `close_bills`
 - Menu: `view_menu`, `manage_menu`
 - Tables: `view_tables`, `manage_tables`
+- Walk-ins: `view_walkins`, `manage_walkins`
 - Rooms: `view_rooms`, `check_in`, `manage_rooms`
 - Billing: `process_payments`, `apply_discounts`, `refund_bills`
 - Stock: `view_stock`, `manage_stock`
@@ -39,6 +40,9 @@ Helpers encode tiers so a manager needn't tick a read box under a write box:
 - **STOCK_ACCESS**: `canViewStock` (view|manage_stock) · `canManageStock` · `canViewPurchases`
   (view_stock|manage_stock|manage_purchases) · `canManagePurchases` · `canViewVendors`
   (…|manage_vendors) · `canManageVendors` · `canViewFinance` · `canSeeModule`.
+- **WALKIN_ACCESS**: `canViewWalkins` (view|manage — read-only section) · `canManageWalkins`
+  (open/edit/order/bill/close). Enforced type-aware in shared session actions (`pos.ts`
+  `walkInWriteBlocked`) since walk-ins reuse the table session pipeline.
 - **PAYROLL_ACCESS**: `canViewPayroll` (view|manage) · `canManagePayroll`.
 - **NAV_ACCESS**: `canSeeOrders`, `canManageOrders`, `canSeeSales`, `canManageCredits`
   (credits require BOTH `process_payments` + `close_bills`).

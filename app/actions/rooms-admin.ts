@@ -4,8 +4,18 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
+import { getRestaurantConfig } from "@/lib/restaurant-info";
+import { hasRooms } from "@/lib/business-type";
 
 export type ActionResult = { error: string } | null;
+
+// Defense-in-depth: the Rooms module only exists for a hotel / restaurant+hotel
+// client. The UI already hides it and the page redirects, but a forged POST must
+// not create hotel data on a restaurant-only client. Cheap (config is cached).
+async function roomsEnabled(restaurantId: string): Promise<boolean> {
+  const cfg = await getRestaurantConfig(restaurantId);
+  return hasRooms(cfg.businessType);
+}
 
 export type RoomTypeRow = {
   id: string;
@@ -67,6 +77,7 @@ export async function createRoomType(
 ): Promise<ActionResult> {
   const ru = await getRestaurantUser();
   if (!hasPermission(ru, PERMISSIONS.MANAGE_ROOMS)) return { error: "Permission denied." };
+  if (!(await roomsEnabled(ru.restaurant_id))) return { error: "Rooms are not enabled for this business type." };
 
   const restaurantId = formData.get("restaurant_id") as string;
   if (restaurantId !== ru.restaurant_id) return { error: "Permission denied." };
@@ -157,6 +168,7 @@ export async function createRoom(
 ): Promise<ActionResult> {
   const ru = await getRestaurantUser();
   if (!hasPermission(ru, PERMISSIONS.MANAGE_ROOMS)) return { error: "Permission denied." };
+  if (!(await roomsEnabled(ru.restaurant_id))) return { error: "Rooms are not enabled for this business type." };
 
   const restaurantId = formData.get("restaurant_id") as string;
   if (restaurantId !== ru.restaurant_id) return { error: "Permission denied." };

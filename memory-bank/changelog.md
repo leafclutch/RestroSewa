@@ -5,6 +5,14 @@ Versioning is informal (the app ships continuously); dates anchor the entries.
 
 ## [Unreleased] — 2026-07
 ### Added
+- **Walk-in permission** (`view_walkins` / `manage_walkins`) — the Walk-ins section now needs its
+  own permission (View = read-only, Manage = operate); enforced front and back. Cashier /
+  Receptionist / Manager presets include Manage; Waiter does not.
+- **Room credit — Mixed down-payment**: on a credit checkout the "Paid now" amount can be split
+  Cash + Online (parity with the table/walk-in bill).
+- **Business-type awareness**: Restaurant-only clients no longer see the **Rooms** module anywhere
+  (sidebar, staff dashboard, `/admin/rooms`, the permission editor); a forged room-create POST is
+  refused too. Driven by `restaurants.type` via `lib/business-type.ts`.
 - **Daily Finance Report**: automatic per-business-day PDF (logo, name, business date, opening/
   closing balances, cash/online/mixed/credit sales, discounts, purchases, vendor payments, new
   vendor credit, customer-credit collected, estimated profit, total bills/orders, inventory

@@ -156,7 +156,9 @@ function CheckOutForm({
   const [cash, setCash] = useState("");
   const [online, setOnline] = useState("");
   const [paidNow, setPaidNow] = useState("");
-  const [downTender, setDownTender] = useState<"cash" | "online" | "card">("cash");
+  const [downTender, setDownTender] = useState<"cash" | "online" | "card" | "mixed">("cash");
+  const [downCash, setDownCash] = useState("");
+  const [downOnline, setDownOnline] = useState("");
 
   // Credit account picker — the same live search the table bill uses, so a
   // returning guest never collects a second credit id.
@@ -189,15 +191,37 @@ function CheckOutForm({
   const cashNum = parseFloat(cash) || 0;
   const onlineNum = parseFloat(online) || 0;
   const paidNum = parseFloat(paidNow) || 0;
+  const downCashNum = parseFloat(downCash) || 0;
+  const downOnlineNum = parseFloat(downOnline) || 0;
+
+  // A mixed down payment splits the "paid now" amount across cash and online; the
+  // two must add up to it. Mirrors the table checkout's credit flow exactly, and
+  // the check_out_room RPC already accepts p_cash/p_online/p_card separately, so no
+  // backend change is needed — a mixed down payment just sends both cash and online.
+  const downSplitValid =
+    downTender !== "mixed" ||
+    paidNum === 0 ||
+    (downCash !== "" && downOnline !== "" && Math.abs(downCashNum + downOnlineNum - paidNum) < 0.01);
 
   const mixedOk = method !== "mixed" || Math.abs(cashNum + onlineNum - total) < 0.01;
   const creditOk =
-    method !== "credit" || (paidNum >= 0 && paidNum < total && (!!picked || query.trim().length > 0));
+    method !== "credit" ||
+    (paidNum >= 0 && paidNum < total && (!!picked || query.trim().length > 0) && downSplitValid);
   const owed = Math.max(0, total - paidNum);
 
   const amounts = {
-    cash: method === "cash" ? total : method === "mixed" ? cashNum : method === "credit" && downTender === "cash" ? paidNum : 0,
-    online: method === "online" ? total : method === "mixed" ? onlineNum : method === "credit" && downTender === "online" ? paidNum : 0,
+    cash:
+      method === "cash" ? total
+      : method === "mixed" ? cashNum
+      : method === "credit" && downTender === "cash" ? paidNum
+      : method === "credit" && downTender === "mixed" ? downCashNum
+      : 0,
+    online:
+      method === "online" ? total
+      : method === "mixed" ? onlineNum
+      : method === "credit" && downTender === "online" ? paidNum
+      : method === "credit" && downTender === "mixed" ? downOnlineNum
+      : 0,
     card: method === "card" ? total : method === "credit" && downTender === "card" ? paidNum : 0,
   };
 
@@ -349,7 +373,7 @@ function CheckOutForm({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-3">
             <div>
               <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>Paid now</label>
               <input
@@ -361,19 +385,73 @@ function CheckOutForm({
                 style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
               />
             </div>
-            <div>
-              <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>Tendered as</label>
-              <select
-                value={downTender}
-                onChange={(e) => setDownTender(e.target.value as typeof downTender)}
-                className="w-full h-10 rounded-sm border px-2 text-sm"
-                style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
-              >
-                <option value="cash">Cash</option>
-                <option value="online">Online</option>
-                <option value="card">Card</option>
-              </select>
-            </div>
+
+            {paidNum > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs block" style={{ color: "var(--color-ink-mute)" }}>Tendered as</label>
+                <div className="grid grid-cols-2 gap-1">
+                  {([
+                    ["cash", "Cash"],
+                    ["online", "Online"],
+                    ["card", "Card"],
+                    ["mixed", "Cash + Online"],
+                  ] as const).map(([key, label]) => {
+                    const active = downTender === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => { setDownTender(key); setDownCash(""); setDownOnline(""); }}
+                        className="py-1.5 rounded-lg border text-sm transition-colors"
+                        style={{
+                          borderColor: active ? "var(--color-primary)" : "var(--color-hairline-input)",
+                          background: active ? "rgba(99,102,241,0.06)" : "var(--color-canvas-soft)",
+                          color: "var(--color-ink)",
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Split the "paid now" amount across cash and online; typing one
+                    fills the other so the two always add up to what's being paid. */}
+                {downTender === "mixed" && (
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    {(["cash", "online"] as const).map((side) => {
+                      const val = side === "cash" ? downCash : downOnline;
+                      const setThis = side === "cash" ? setDownCash : setDownOnline;
+                      const setOther = side === "cash" ? setDownOnline : setDownCash;
+                      return (
+                        <div key={side}>
+                          <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+                            {side === "cash" ? "Cash" : "Online"}
+                          </label>
+                          <input
+                            type="number" min="0" max={paidNum} step="0.01" inputMode="decimal"
+                            value={val}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setThis(v);
+                              const n = parseFloat(v);
+                              setOther(v === "" || isNaN(n) ? "" : String(Math.round((paidNum - n) * 100) / 100 || 0));
+                            }}
+                            className="w-full h-10 rounded-sm border px-3 text-sm tabular"
+                            style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+                          />
+                        </div>
+                      );
+                    })}
+                    {!downSplitValid && (
+                      <p className="col-span-2 text-xs" style={{ color: "var(--color-ruby)" }}>
+                        Cash and Online together must equal {rupee(paidNum)}.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div
