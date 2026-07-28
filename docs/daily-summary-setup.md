@@ -1,33 +1,39 @@
-# Daily financial-summary emails — setup
+# Daily Finance Report — setup
 
-After a restaurant's business day closes, the app emails a financial summary to the
-addresses configured in **Admin → Settings → Daily summary emails** (up to 3). If a
-restaurant hasn't turned it on, it's skipped.
+After a restaurant's business day closes, the app generates a **PDF financial report** and
+emails it (from our HRestroSewa Gmail) to the recipients configured in
+**Admin → Settings → Daily Finance Report Recipients** (up to 3). Not opted in ⇒ skipped.
+Failures are logged and retryable from the **Report history** in Settings.
 
 Owners configure recipients in the UI. The pieces below are the one-time infrastructure
-setup an operator does per environment.
+setup an operator (HRestroSewa) does per environment.
 
 ## 1. Environment variables
 
 Add to `.env.local` (DEV) and the Vercel project env (prod). **Append with a trailing
 newline** — never `>>` onto a file with no final newline (it silently concatenates onto the
-previous value).
+previous value). These are the SENDER credentials — one HRestroSewa account for every
+restaurant; restaurants never configure SMTP.
 
 | Var | What |
 |---|---|
-| `RESEND_API_KEY` | Resend API key (Resend → API Keys). |
-| `SUMMARY_FROM_EMAIL` | The `from` address, e.g. `reports@yourdomain.com`. Its domain should be **verified** in Resend; until then use their sandbox sender. |
-| `CRON_SECRET` | A long random string. The cron job must send it back in the `x-cron-secret` header. Generate one: `openssl rand -hex 32`. |
+| `GMAIL_USER` | The HRestroSewa Gmail address that sends all reports (the `from`). |
+| `GMAIL_APP_PASSWORD` | A Google **App Password** (not the account password). See below. |
+| `SUMMARY_FROM_NAME` | Optional display name; defaults to `HRestroSewa Reports`. |
+| `CRON_SECRET` | A long random string. The cron job sends it back in the `x-cron-secret` header. Generate one: `openssl rand -hex 32`. |
 
-## 2. Resend
+## 2. Gmail App Password
 
-1. Create a Resend account and an API key → `RESEND_API_KEY`.
-2. Add and verify your sending domain (DNS records), or start on Resend's onboarding
-   sandbox domain for testing. Set `SUMMARY_FROM_EMAIL` accordingly.
+1. On the HRestroSewa Google account, enable **2-Step Verification**.
+2. Create an **App Password** (Google Account → Security → App passwords) → use it as
+   `GMAIL_APP_PASSWORD`. Set `GMAIL_USER` to that Gmail address.
+3. Mail sends via `smtp.gmail.com:465` (implicit TLS). Gmail caps ~500 recipients/day —
+   ample for daily reports. Credentials live only in server env vars; they never reach the
+   client (the mailer is `server-only`).
 
 ## 3. Database
 
-Apply the migration (adds the `report_deliveries` exactly-once log):
+Apply the migrations (the `report_deliveries` log + its history columns):
 
 ```
 node scripts/migrate.mjs up            # dev

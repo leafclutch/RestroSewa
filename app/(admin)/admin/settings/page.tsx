@@ -3,6 +3,7 @@ import {
   getBillingSettings,
   getBusinessDaySettings,
   getDailySummarySettings,
+  getReportHistory,
   getWorkstationNumbering,
 } from "@/app/actions/settings";
 import { SettingsClient } from "./_components/settings-client";
@@ -14,11 +15,12 @@ import { DailySummaryClient } from "./_components/daily-summary-client";
 export default async function SettingsPage() {
   // Billing settings are the owner's call — staff (even with permissions) don't set them.
   await requireRestaurantAdmin();
-  const [settings, workstations, businessDay, dailySummary] = await Promise.all([
+  const [settings, workstations, businessDay, dailySummary, reportHistory] = await Promise.all([
     getBillingSettings(),
     getWorkstationNumbering(),
     getBusinessDaySettings(),
     getDailySummarySettings(),
+    getReportHistory(),
   ]);
 
   return (
@@ -40,7 +42,7 @@ export default async function SettingsPage() {
         <BusinessDayClient closingHour={businessDay.closingHour} />
         <SettingsClient settings={settings} />
         <DiscountPinClient pinSet={settings.discountPinSet} />
-        <DailySummaryClient config={dailySummary} />
+        <DailySummaryClient config={dailySummary} history={reportHistory} />
         <WorkstationNumberingClient workstations={workstations} />
       </div>
     </div>

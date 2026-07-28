@@ -1,6 +1,7 @@
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/service";
 import { tenantCache, revalidateTenant, CACHE } from "@/lib/cache/tenant-cache";
+import { normalizeBusinessType, type BusinessType } from "@/lib/business-type";
 
 /**
  * The restaurant's own header/config, cached across requests.
@@ -24,6 +25,8 @@ export type RestaurantConfig = {
   contact_phone: string | null;
   pan_vat_number: string | null;
   logo_url: string | null;
+  /** Business type — gates which modules exist (Rooms for hotel/restaurant_hotel). */
+  businessType: BusinessType;
   qr_mode: string;
   paper_width_mm: 58 | 80;
   bill_number_pad: number;
@@ -53,7 +56,7 @@ export async function getRestaurantConfig(restaurantId: string): Promise<Restaur
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: rest } = await (service as any)
         .from("restaurants")
-        .select("name, address, contact_phone, pan_vat_number, logo_url, settings, qr_mode, discount_pin_hash")
+        .select("name, address, contact_phone, pan_vat_number, logo_url, type, settings, qr_mode, discount_pin_hash")
         .eq("id", restaurantId)
         .maybeSingle();
 
@@ -64,6 +67,7 @@ export async function getRestaurantConfig(restaurantId: string): Promise<Restaur
         contact_phone: rest?.contact_phone ?? null,
         pan_vat_number: rest?.pan_vat_number ?? null,
         logo_url: rest?.logo_url ?? null,
+        businessType: normalizeBusinessType(rest?.type),
         qr_mode: rest?.qr_mode ?? "ordering_enabled",
         paper_width_mm: s?.print_paper_width === "58" ? 58 : 80,
         bill_number_pad: Number.isFinite(Number(s?.bill_number_pad)) ? Number(s?.bill_number_pad) : 0,

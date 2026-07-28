@@ -1,6 +1,7 @@
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { createServiceClient } from "@/lib/supabase/service";
 import { STOCK_ACCESS } from "@/lib/permissions";
+import { hasRooms, normalizeBusinessType } from "@/lib/business-type";
 import { AdminSidebar } from "./admin/_components/admin-sidebar";
 import { OfflineGate } from "@/components/pwa/offline-gate";
 
@@ -12,9 +13,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: restaurant } = await (service as any)
     .from("restaurants")
-    .select("name, logo_url")
+    .select("name, logo_url, type")
     .eq("id", restaurantUser.restaurant_id)
     .single();
+
+  // A restaurant-only client has no hotel side, so the Rooms module is hidden
+  // entirely (not just visually) — the link never renders and the page redirects.
+  const showRooms = hasRooms(normalizeBusinessType(restaurant?.type));
 
   return (
     <div className="admin-surface flex min-h-screen" style={{ background: "var(--color-canvas-soft)" }}>
@@ -29,6 +34,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         showPurchases={STOCK_ACCESS.canViewPurchases(restaurantUser)}
         showVendors={STOCK_ACCESS.canViewVendors(restaurantUser)}
         showFinance={STOCK_ACCESS.canViewFinance(restaurantUser)}
+        // Rooms only exist for a hotel / restaurant+hotel client.
+        showRooms={showRooms}
         // Settings (billing) is owner-only; the page redirects non-admins anyway.
         showSettings={restaurantUser.role === "restaurant_admin"}
       />

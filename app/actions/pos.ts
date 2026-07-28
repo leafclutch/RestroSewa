@@ -3,7 +3,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { hasPermission, hasAnyPermission, PERMISSIONS, NAV_ACCESS } from "@/lib/permissions";
+import { hasPermission, hasAnyPermission, PERMISSIONS, NAV_ACCESS, WALKIN_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { WALK_IN_SLOT_COUNT } from "@/lib/walk-ins";
 import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignments";
@@ -404,6 +404,7 @@ export async function getWalkInStatusOverview(
 /** For the dashboard's live refetch — same data, callable from the client action layer. */
 export async function getMyWalkIns(): Promise<WalkInStatus[]> {
   const ru = await getRestaurantUser();
+  if (!WALKIN_ACCESS.canViewWalkins(ru)) return [];
   return getWalkInStatusOverview(ru.restaurant_id);
 }
 
@@ -413,6 +414,9 @@ export async function getMyWalkIns(): Promise<WalkInStatus[]> {
 // "With PIN" restaurant gets one, so a "Without PIN" restaurant's walk-in never shows a PIN.
 export async function openWalkInSlot(no: number) {
   const ru = await getRestaurantUser();
+  if (!WALKIN_ACCESS.canManageWalkins(ru)) {
+    return { error: "You don't have permission to open walk-ins." };
+  }
   const service = createServiceClient();
 
   if (!Number.isInteger(no) || no < 1 || no > WALK_IN_SLOT_COUNT) {
@@ -471,7 +475,7 @@ export async function updateWalkInCustomer(
   formData: FormData
 ): Promise<ActionResult> {
   const ru = await getRestaurantUser();
-  if (!hasPermission(ru, PERMISSIONS.CREATE_ORDERS)) return { error: "Permission denied." };
+  if (!WALKIN_ACCESS.canManageWalkins(ru)) return { error: "You don't have permission to manage walk-ins." };
   const service = createServiceClient();
 
   const sessionId = (formData.get("session_id") as string) || "";
@@ -498,6 +502,22 @@ export async function updateWalkInCustomer(
   if (error) return { error: error.message };
   revalidatePath(`/employee/session/${sessionId}`);
   return null;
+}
+
+// Walk-in write guard. A walk-in session is only mutable by staff with manage_walkins —
+// even if they hold the dine-in order/billing permission the action already checked. So a
+// staffer with `view_walkins` (read-only) plus, say, `create_orders` for tables cannot add
+// orders to, or close, a walk-in. Returns true when the write must be refused. One cheap
+// lookup, and only on the write paths (never the hot reads).
+async function walkInWriteBlocked(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  service: any,
+  ru: { role: string; permissions: string[] },
+  sessionId: string
+): Promise<boolean> {
+  if (!sessionId || WALKIN_ACCESS.canManageWalkins(ru)) return false;
+  const { data } = await service.from("sessions").select("type").eq("id", sessionId).maybeSingle();
+  return data?.type === "walk_in";
 }
 
 // ─── Table Activation Requests (Menu + Ordering without PIN) ───────────────────
@@ -780,6 +800,10 @@ export async function submitOrder(
 
   if (!cartItems?.length) return { error: "No items selected." };
 
+  if (await walkInWriteBlocked(service, ru, sessionId)) {
+    return { error: "You don't have permission to manage walk-ins." };
+  }
+
   // Name, price, variant and workstation are all resolved from the menu — the
   // cart only ever chooses WHAT and HOW MANY. See lib/order-items.ts.
   const resolved = await resolveOrderItems(service, ru.restaurant_id, cartItems);
@@ -1029,6 +1053,10 @@ export async function closeSessionWithPayment(
   // driven the payable negative — already refused above. Only the sign is left to check.
   if (isNaN(discount) || discount < 0) {
     return { error: "Invalid discount amount." };
+  }
+
+  if (await walkInWriteBlocked(service, ru, sessionId)) {
+    return { error: "You don't have permission to manage walk-ins." };
   }
 
   // A discount needs the restaurant's discount PIN — money coming off the till is an
@@ -1290,6 +1318,10 @@ export async function forceCloseSession(sessionId: string): Promise<ActionResult
   const ru = await getRestaurantUser();
   const service = createServiceClient();
 
+  if (await walkInWriteBlocked(service, ru, sessionId)) {
+    return { error: "You don't have permission to manage walk-ins." };
+  }
+
   // Verify ownership and get table/room context
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: session } = await (service as any)
@@ -1355,6 +1387,13 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
 
   const service = createServiceClient();
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: co } = await (service as any)
+    .from("session_orders").select("session_id").eq("id", orderId).maybeSingle();
+  if (co?.session_id && (await walkInWriteBlocked(service, ru, co.session_id))) {
+    return { error: "You don't have permission to manage walk-ins." };
+  }
+
   // Capture what the stations are working on BEFORE the cancel lands. Afterwards
   // every item is marked cancelled and there is nothing left to name — "stop" is not
   // a useful instruction if you can't say stop WHAT.
@@ -1396,6 +1435,15 @@ export async function cancelOrderItem(itemId: string): Promise<ActionResult> {
     .select("order_id")
     .eq("id", itemId)
     .maybeSingle();
+
+  if (item?.order_id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: co } = await (service as any)
+      .from("session_orders").select("session_id").eq("id", item.order_id).maybeSingle();
+    if (co?.session_id && (await walkInWriteBlocked(service, ru, co.session_id))) {
+      return { error: "You don't have permission to manage walk-ins." };
+    }
+  }
 
   const ctx = item?.order_id
     ? await loadOrderContext(service, ru.restaurant_id, item.order_id)

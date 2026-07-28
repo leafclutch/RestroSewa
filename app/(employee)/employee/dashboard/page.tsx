@@ -1,7 +1,9 @@
 import { Suspense } from "react";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import type { RestaurantUserContext } from "@/lib/auth/guards";
-import { getStaffNav, NAV_ACCESS, ROOM_ACCESS, STOCK_ACCESS } from "@/lib/permissions";
+import { getStaffNav, NAV_ACCESS, ROOM_ACCESS, STOCK_ACCESS, WALKIN_ACCESS } from "@/lib/permissions";
+import { getRestaurantConfig } from "@/lib/restaurant-info";
+import { hasRooms } from "@/lib/business-type";
 import { getMyOrderQueue, getSalesReport } from "@/app/actions/pos";
 import { getCredits, getCreditSummary } from "@/app/actions/credits";
 import { getAllMenuItems, getMenuCategories } from "@/app/actions/menu";
@@ -91,6 +93,9 @@ export default async function EmployeeDashboardPage({
 }) {
   const { restaurantUser } = await requireRestaurantStaff();
   const { credit: openCreditId, focus: focusParam } = await searchParams;
+  // Rooms only exist for a hotel / restaurant+hotel client.
+  const config = await getRestaurantConfig(restaurantUser.restaurant_id);
+  const roomsEnabled = hasRooms(config.businessType);
 
   const SCROLLABLE: SectionKey[] = ["orders", "tables", "walkins", "rooms", "sales", "credits", "menu", "stock", "purchases", "vendors"];
   const focusSection: SectionKey | null = openCreditId
@@ -131,9 +136,9 @@ export default async function EmployeeDashboardPage({
     });
   }
 
-  // 2b. Walk-ins — fixed W1/W2/W3 workspaces that behave like tables (takeaway/delivery
-  // friendly). Same audience as Tables; no table-group filter (walk-ins have no group).
-  if (navKeys.has("tables")) {
+  // 2b. Walk-ins — fixed W1/W2/W3 workspaces (takeaway/phone/delivery). Own permission
+  // now: view_walkins shows the section (read-only), manage_walkins enables operations.
+  if (WALKIN_ACCESS.canViewWalkins(restaurantUser)) {
     sections.push({
       key: "walkins",
       title: "Walk-ins",
@@ -149,7 +154,7 @@ export default async function EmployeeDashboardPage({
   // 3. Rooms — its own section, not a row of squares under Tables. Shown only to
   // staff who can see rooms at all; the section then shows only the rooms
   // assigned to them, via the same filter that governs tables.
-  if (ROOM_ACCESS.canViewRooms(restaurantUser)) {
+  if (roomsEnabled && ROOM_ACCESS.canViewRooms(restaurantUser)) {
     sections.push({
       key: "rooms",
       title: "Rooms",

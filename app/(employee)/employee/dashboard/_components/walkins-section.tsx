@@ -1,5 +1,6 @@
 import { getWalkInStatusOverview } from "@/app/actions/pos";
 import type { RestaurantUserContext } from "@/lib/auth/guards";
+import { WALKIN_ACCESS } from "@/lib/permissions";
 import { WalkInsGrid } from "./walkins-grid";
 
 // Walk-ins are fixed workspaces (W1, W2, W3 …) that behave like tables — a slot stays
@@ -10,5 +11,5 @@ import { WalkInsGrid } from "./walkins-grid";
 // it live from there off the same "tables" realtime topic a session change already emits.
 export async function WalkInsSection({ restaurantUser }: { restaurantUser: RestaurantUserContext }) {
   const walkIns = await getWalkInStatusOverview(restaurantUser.restaurant_id);
-  return <WalkInsGrid initial={walkIns} />;
+  return <WalkInsGrid initial={walkIns} canManage={WALKIN_ACCESS.canManageWalkins(restaurantUser)} />;
 }

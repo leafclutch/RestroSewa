@@ -346,6 +346,10 @@ function TableGroupWaiterBar({
 
   if (employees.length === 0) return null;
 
+  // "Assign all" flips the whole group in one tap: everyone on, or everyone off.
+  const allIds = employees.map((e) => e.id);
+  const allAssigned = allIds.every((id) => localAssigned.includes(id));
+
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
       <button
@@ -364,6 +368,26 @@ function TableGroupWaiterBar({
       </button>
       {open && (
         <div className="flex flex-wrap gap-1">
+          {/* One-tap shortcut: assign the whole team, or clear it, without ticking each. */}
+          <button
+            type="button"
+            title={allAssigned ? "Remove every staff member from this group" : "Assign every staff member to this group"}
+            className="text-xs px-2 py-0.5 rounded-full border font-medium"
+            style={{
+              background: "rgba(99,102,241,0.08)",
+              borderColor: "var(--color-primary)",
+              color: "var(--color-primary)",
+            }}
+            onClick={() =>
+              startAssign(async () => {
+                const next = allAssigned ? [] : allIds;
+                setLocalAssigned(next);
+                await setTableGroupWaiters(groupId, next);
+              })
+            }
+          >
+            {allAssigned ? "Clear all" : "Assign all"}
+          </button>
           {employees.map((e) => {
             const active = localAssigned.includes(e.id);
             return (

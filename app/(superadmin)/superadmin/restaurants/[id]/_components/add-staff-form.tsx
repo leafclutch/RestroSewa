@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { X } from "lucide-react";
 import { PermissionPicker } from "./permission-picker";
+import type { BusinessType } from "@/lib/business-type";
 import { PresetPicker } from "./preset-picker";
 import { matchPreset } from "@/lib/permissions";
 
@@ -67,7 +68,7 @@ function PinEntry({ value, onChange }: { value: string; onChange: (v: string) =>
   );
 }
 
-export function AddStaffForm({ restaurantId }: { restaurantId: string }) {
+export function AddStaffForm({ restaurantId, businessType }: { restaurantId: string; businessType: BusinessType }) {
   const [open, setOpen] = useState(false);
   const [pin, setPin] = useState("");
   const [role, setRole] = useState<"restaurant_employee" | "restaurant_admin">("restaurant_employee");
@@ -230,7 +231,7 @@ export function AddStaffForm({ restaurantId }: { restaurantId: string }) {
             >
               <PresetPicker activeKey={matchPreset(permissions)} onApply={setPermissions} />
               <div className="border-t" style={{ borderColor: "var(--color-hairline)" }} />
-              <PermissionPicker selected={permissions} onChange={setPermissions} />
+              <PermissionPicker selected={permissions} onChange={setPermissions} businessType={businessType} />
             </div>
           </div>
         )}

@@ -1,8 +1,11 @@
+import { redirect } from "next/navigation";
 import { requireAdminOrPermission } from "@/lib/auth/guards";
 import { PERMISSIONS } from "@/lib/permissions";
 import { getRoomTypesWithRooms } from "@/app/actions/rooms-admin";
 import { getRestaurantSlug } from "@/app/actions/tables-admin";
 import { createServiceClient } from "@/lib/supabase/service";
+import { getRestaurantConfig } from "@/lib/restaurant-info";
+import { hasRooms } from "@/lib/business-type";
 import { RoomsClient } from "./_components/rooms-client";
 
 export type EmployeeOption = { id: string; display_name: string };
@@ -10,6 +13,12 @@ export type EmployeeOption = { id: string; display_name: string };
 export default async function RoomsPage() {
   const { restaurantUser } = await requireAdminOrPermission(PERMISSIONS.MANAGE_ROOMS);
   const { restaurant_id } = restaurantUser;
+
+  // A restaurant-only client has no hotel side — the Rooms module doesn't exist for
+  // it, so even a typed URL bounces to the dashboard.
+  const config = await getRestaurantConfig(restaurant_id);
+  if (!hasRooms(config.businessType)) redirect("/admin/dashboard");
+
   const service = createServiceClient();
 
   const [{ types, totalRooms }, restaurantSlug, employeesResult] = await Promise.all([

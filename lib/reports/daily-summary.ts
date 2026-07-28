@@ -70,8 +70,11 @@ export type DailySummaryModel = {
 
   estimatedProfit: number; // sales − purchase cost − salaries paid
 
+  mixedPayments: number; // bills settled part-cash + part-online
+
   totalBills: number;   // payments finalised in the day
   totalOrders: number;  // kitchen order batches placed in the day
+  inventoryValue: number; // closing stock valued at each product's last cost
   lowStock: number;
   outOfStock: number;
 };
@@ -106,7 +109,7 @@ export async function buildDailySummary(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("payments")
-      .select("discount_amount")
+      .select("discount_amount, payment_method, total_amount")
       .eq("restaurant_id", restaurantId)
       .gte("created_at", fromIso)
       .lt("created_at", toIso),
@@ -128,7 +131,7 @@ export async function buildDailySummary(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("products")
-      .select("id, low_stock_threshold, is_active")
+      .select("id, low_stock_threshold, last_unit_cost, is_active")
       .eq("restaurant_id", restaurantId),
   ]);
 
@@ -139,10 +142,18 @@ export async function buildDailySummary(
   const payments = (paymentsRes.data ?? []) as any[];
   const totalBills = payments.length;
   const discounts = payments.reduce((s, p) => s + num(p.discount_amount), 0);
+  // A "mixed" bill was tendered part-cash + part-online (see the mixed-payments
+  // model). Reported as its own line so the split tender is visible.
+  const mixedPayments = payments.reduce(
+    (s, p) => s + (p.payment_method === "mixed" ? num(p.total_amount) : 0),
+    0
+  );
 
   const totalOrders = ordersRes.count ?? 0;
 
-  // Low/out over ACTIVE products only, matching the Stock screen's summary.
+  // Low/out AND inventory value over ACTIVE products only, matching the Stock
+  // screen's summary. Value what's on the shelf at what it last cost to buy;
+  // negative (oversold) stock is valued at 0, never as a negative asset.
   const closingByProduct = new Map<string, number>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const r of ((stockRes.data ?? []) as any[])) {
@@ -150,10 +161,13 @@ export async function buildDailySummary(
   }
   let lowStock = 0;
   let outOfStock = 0;
+  let inventoryValue = 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const p of ((productsRes.data ?? []) as any[])) {
     if (!p.is_active) continue;
-    const st = stockStatus(closingByProduct.get(p.id) ?? 0, num(p.low_stock_threshold));
+    const closing = closingByProduct.get(p.id) ?? 0;
+    inventoryValue += Math.max(0, closing) * num(p.last_unit_cost);
+    const st = stockStatus(closing, num(p.low_stock_threshold));
     if (st === "low") lowStock += 1;
     else if (st === "out") outOfStock += 1;
   }
@@ -206,8 +220,11 @@ export async function buildDailySummary(
     // estimate in the email for exactly that reason.
     estimatedProfit: salesTotal - purchasesTotal - salaryPaid,
 
+    mixedPayments,
+
     totalBills,
     totalOrders,
+    inventoryValue,
     lowStock,
     outOfStock,
   };
@@ -234,147 +251,70 @@ function prettyDate(businessDate: string): string {
   });
 }
 
-type Row = { label: string; value: string; strong?: boolean };
-
-function section(title: string, rows: Row[]): string {
-  const body = rows
-    .map(
-      (r) => `
-      <tr>
-        <td style="padding:6px 0;color:#475569;font-size:14px;">${r.label}</td>
-        <td style="padding:6px 0;text-align:right;font-size:14px;color:#0f172a;font-weight:${r.strong ? 600 : 400};white-space:nowrap;">${r.value}</td>
-      </tr>`
-    )
-    .join("");
-  return `
-    <tr><td colspan="2" style="padding:18px 0 6px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#94a3b8;font-weight:600;">${title}</td></tr>
-    ${body}`;
-}
-
 /**
- * A self-contained, inline-styled HTML email plus a plain-text fallback. No
- * external CSS or images — email clients strip both.
+ * A SHORT, professional covering email. The full report is the attached PDF, so
+ * the body just orients the reader and highlights two headline numbers. Subject
+ * follows the requested format exactly. Self-contained inline styles (no external
+ * CSS/images — clients strip both); plain-text fallback included.
  */
 export function renderDailySummaryEmail(
   m: DailySummaryModel,
   restaurantName: string
 ): { subject: string; html: string; text: string } {
   const date = prettyDate(m.businessDate);
-  const subject = `${restaurantName} — Daily Summary, ${date}`;
+  // En-dash separators, per the requested subject format.
+  const subject = `Daily Financial Summary – ${restaurantName} – ${date}`;
   const profitColor = m.estimatedProfit >= 0 ? "#15803d" : "#b91c1c";
 
-  const html = `<!-- daily summary -->
-<div style="margin:0;padding:24px 12px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e2e8f0;">
+  const highlight = (label: string, value: string, color = "#0f172a") => `
+    <td style="padding:12px 14px;background:#f8fafc;border-radius:10px;">
+      <div style="font-size:12px;color:#64748b;">${label}</div>
+      <div style="font-size:18px;font-weight:700;color:${color};margin-top:2px;white-space:nowrap;">${value}</div>
+    </td>`;
+
+  const html = `<div style="margin:0;padding:24px 12px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e2e8f0;">
     <tr>
       <td style="padding:22px 24px;background:#0d253d;">
-        <div style="font-size:18px;font-weight:600;color:#ffffff;">${restaurantName}</div>
-        <div style="font-size:13px;color:#93c5fd;margin-top:2px;">Daily financial summary · ${date}</div>
+        <div style="font-size:17px;font-weight:600;color:#ffffff;">${restaurantName}</div>
+        <div style="font-size:13px;color:#93c5fd;margin-top:2px;">Daily Financial Summary · ${date}</div>
       </td>
     </tr>
     <tr>
-      <td style="padding:20px 24px 8px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${m.estimatedProfit >= 0 ? "#f0fdf4" : "#fef2f2"};border-radius:10px;">
+      <td style="padding:22px 24px 6px;">
+        <p style="margin:0 0 12px;font-size:14px;color:#334155;line-height:1.55;">Hello,</p>
+        <p style="margin:0 0 16px;font-size:14px;color:#334155;line-height:1.55;">
+          Your financial report for <strong>${date}</strong> is ready. The attached PDF has the full day's
+          figures — opening &amp; closing balances, sales, purchases, credit, estimated profit and stock —
+          formatted for printing or your accountant.
+        </p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
           <tr>
-            <td style="padding:14px 16px;font-size:13px;color:#475569;">Estimated profit <span style="color:#94a3b8;">(sales − purchases − salaries)</span></td>
-            <td style="padding:14px 16px;text-align:right;font-size:20px;font-weight:700;color:${profitColor};white-space:nowrap;">${money(m.estimatedProfit)}</td>
+            ${highlight("Total sales", money(m.salesTotal))}
+            <td style="width:12px;"></td>
+            ${highlight("Estimated profit", money(m.estimatedProfit), profitColor)}
           </tr>
         </table>
       </td>
     </tr>
     <tr>
-      <td style="padding:4px 24px 22px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-          ${section("Opening balance", [
-            { label: "Cash", value: money(m.openingCash) },
-            { label: "Online / bank", value: money(m.openingOnline) },
-            { label: "Owed to us", value: money(m.openingCreditToUs) },
-            { label: "Owed by us", value: money(m.openingCreditByUs) },
-          ])}
-          ${section("Sales", [
-            { label: "Cash", value: money(m.salesCash) },
-            { label: "Online", value: money(m.salesOnline) },
-            { label: "Card", value: money(m.salesCard) },
-            { label: "Credit (billed, not collected)", value: money(m.salesCredit) },
-            { label: "Total sales", value: money(m.salesTotal), strong: true },
-            { label: "Discounts given", value: money(m.discounts) },
-          ])}
-          ${section("Purchases & expenses", [
-            { label: "Purchases — cash", value: money(m.purchasesCash) },
-            { label: "Purchases — online", value: money(m.purchasesOnline) },
-            { label: "Purchases — credit", value: money(m.purchasesCredit) },
-            { label: "Total purchases", value: money(m.purchasesTotal), strong: true },
-            { label: "Vendor payments", value: money(m.vendorPayments) },
-            { label: "Salaries paid", value: money(m.salaryPaid) },
-            { label: "Salary advances", value: money(m.salaryAdvance) },
-          ])}
-          ${section("Credit", [
-            { label: "Customer credit collected", value: money(m.customerCreditCollected) },
-            { label: "New customer credit", value: money(m.customerCreditCreated) },
-            { label: "Owed to us (total)", value: money(m.customerCreditOutstanding) },
-            { label: "Owed by us (total)", value: money(m.vendorCreditOutstanding) },
-          ])}
-          ${section("Closing balance", [
-            { label: "Cash", value: money(m.closingCash) },
-            { label: "Online / bank", value: money(m.closingOnline) },
-            { label: "Net (cash + bank)", value: money(m.closingNet), strong: true },
-          ])}
-          ${section("Operations", [
-            { label: "Total bills", value: String(m.totalBills) },
-            { label: "Total orders", value: String(m.totalOrders) },
-            { label: "Low stock items", value: String(m.lowStock) },
-            { label: "Out of stock items", value: String(m.outOfStock) },
-          ])}
-        </table>
-        ${m.hasOpening ? "" : `<p style="margin:16px 0 0;font-size:12px;color:#b45309;">No opening balance is set, so balances start from zero. Set one in Finance for accurate carry-forward.</p>`}
-        <p style="margin:18px 0 0;font-size:11px;color:#94a3b8;">Sent automatically after your business day closed. Profit is an estimate based on stock purchased, not stock consumed.</p>
+      <td style="padding:14px 24px 22px;">
+        <p style="margin:0;font-size:11px;color:#94a3b8;">Sent automatically by HRestroSewa after your business day closed. Estimated profit is based on stock purchased, not stock consumed.</p>
       </td>
     </tr>
   </table>
 </div>`;
 
-  const line = (label: string, value: string) => `${label}: ${value}`;
   const text = [
-    `${restaurantName} — Daily financial summary`,
+    `${restaurantName} — Daily Financial Summary`,
     date,
     "",
-    `ESTIMATED PROFIT: ${money(m.estimatedProfit)} (sales − purchases − salaries)`,
+    `Your financial report for ${date} is ready. The full breakdown is in the attached PDF.`,
     "",
-    "OPENING BALANCE",
-    line("  Cash", money(m.openingCash)),
-    line("  Online/bank", money(m.openingOnline)),
-    line("  Owed to us", money(m.openingCreditToUs)),
-    line("  Owed by us", money(m.openingCreditByUs)),
+    `Total sales:      ${money(m.salesTotal)}`,
+    `Estimated profit: ${money(m.estimatedProfit)}`,
     "",
-    "SALES",
-    line("  Cash", money(m.salesCash)),
-    line("  Online", money(m.salesOnline)),
-    line("  Card", money(m.salesCard)),
-    line("  Credit (billed)", money(m.salesCredit)),
-    line("  Total sales", money(m.salesTotal)),
-    line("  Discounts given", money(m.discounts)),
-    "",
-    "PURCHASES & EXPENSES",
-    line("  Total purchases", money(m.purchasesTotal)),
-    line("  Vendor payments", money(m.vendorPayments)),
-    line("  Salaries paid", money(m.salaryPaid)),
-    line("  Salary advances", money(m.salaryAdvance)),
-    "",
-    "CREDIT",
-    line("  Customer credit collected", money(m.customerCreditCollected)),
-    line("  Owed to us (total)", money(m.customerCreditOutstanding)),
-    line("  Owed by us (total)", money(m.vendorCreditOutstanding)),
-    "",
-    "CLOSING BALANCE",
-    line("  Cash", money(m.closingCash)),
-    line("  Online/bank", money(m.closingOnline)),
-    line("  Net (cash + bank)", money(m.closingNet)),
-    "",
-    "OPERATIONS",
-    line("  Total bills", String(m.totalBills)),
-    line("  Total orders", String(m.totalOrders)),
-    line("  Low stock items", String(m.lowStock)),
-    line("  Out of stock items", String(m.outOfStock)),
+    "Sent automatically by HRestroSewa after your business day closed.",
   ].join("\n");
 
   return { subject, html, text };

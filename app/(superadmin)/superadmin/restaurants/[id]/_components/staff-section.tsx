@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { ExternalLink, ShieldCheck, Pencil, Trash2, PowerOff, Power } from "lucide-react";
 import type { StaffRow } from "@/app/actions/restaurants";
+import type { BusinessType } from "@/lib/business-type";
 import { EditPermissionsForm } from "./edit-permissions-form";
 import { EditStaffForm } from "./edit-staff-form";
 import { toggleStaffStatus, deleteStaffMember } from "@/app/actions/staff";
@@ -172,10 +173,12 @@ export function StaffSection({
   staff,
   restaurantSlug,
   restaurantId,
+  businessType,
 }: {
   staff: StaffRow[];
   restaurantSlug: string;
   restaurantId: string;
+  businessType: BusinessType;
 }) {
   const [editingPermissions, setEditingPermissions] = useState<StaffRow | null>(null);
   const [editingStaff, setEditingStaff] = useState<StaffRow | null>(null);
@@ -190,6 +193,7 @@ export function StaffSection({
           staffId={editingPermissions.id}
           staffName={editingPermissions.display_name}
           restaurantId={restaurantId}
+          businessType={businessType}
           initialPermissions={Array.isArray(editingPermissions.permissions) ? editingPermissions.permissions : []}
           onClose={() => setEditingPermissions(null)}
         />
@@ -215,6 +219,7 @@ export function StaffSection({
                     <EditStaffForm
                       staff={s}
                       restaurantId={restaurantId}
+                      businessType={businessType}
                       onClose={() => setEditingStaff(null)}
                     />
                   )}
@@ -243,6 +248,7 @@ export function StaffSection({
                     <EditStaffForm
                       staff={s}
                       restaurantId={restaurantId}
+                      businessType={businessType}
                       onClose={() => setEditingStaff(null)}
                     />
                   )}

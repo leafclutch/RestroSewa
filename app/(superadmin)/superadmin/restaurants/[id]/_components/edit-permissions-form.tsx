@@ -8,17 +8,20 @@ import { X } from "lucide-react";
 import { PermissionPicker } from "./permission-picker";
 import { PresetPicker } from "./preset-picker";
 import { matchPreset } from "@/lib/permissions";
+import type { BusinessType } from "@/lib/business-type";
 
 export function EditPermissionsForm({
   staffId,
   staffName,
   restaurantId,
+  businessType,
   initialPermissions,
   onClose,
 }: {
   staffId: string;
   staffName: string;
   restaurantId: string;
+  businessType: BusinessType;
   initialPermissions: string[];
   onClose: () => void;
 }) {
@@ -86,7 +89,7 @@ export function EditPermissionsForm({
         >
           <PresetPicker activeKey={matchPreset(permissions)} onApply={setPermissions} />
           <div className="border-t" style={{ borderColor: "var(--color-hairline)" }} />
-          <PermissionPicker selected={permissions} onChange={setPermissions} />
+          <PermissionPicker selected={permissions} onChange={setPermissions} businessType={businessType} />
         </div>
 
         {errorMsg && (

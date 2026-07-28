@@ -128,6 +128,7 @@ function NavLinks({
   showPurchases,
   showVendors,
   showFinance,
+  showRooms,
   showSettings,
   rail = false,
   onNavigate,
@@ -137,12 +138,16 @@ function NavLinks({
   showPurchases: boolean;
   showVendors: boolean;
   showFinance: boolean;
+  showRooms: boolean;
   showSettings: boolean;
   rail?: boolean;
   onNavigate?: () => void;
 }) {
   const stockItems = stockNavFor(showStock, showPurchases, showVendors, showFinance);
-  const baseItems = showSettings ? [...NAV, SETTINGS_ITEM] : NAV;
+  // Rooms only exist for a hotel / restaurant+hotel client — drop the link entirely
+  // for a restaurant-only client (the page also redirects).
+  const nav = showRooms ? NAV : NAV.filter((i) => i.href !== "/admin/rooms");
+  const baseItems = showSettings ? [...nav, SETTINGS_ITEM] : nav;
   return (
     <>
       {baseItems.map((item) => (
@@ -184,6 +189,7 @@ export function AdminSidebar({
   showPurchases = false,
   showVendors = false,
   showFinance = false,
+  showRooms = false,
   showSettings = false,
 }: {
   restaurantName: string;
@@ -192,6 +198,7 @@ export function AdminSidebar({
   showPurchases?: boolean;
   showVendors?: boolean;
   showFinance?: boolean;
+  showRooms?: boolean;
   showSettings?: boolean;
 }) {
   const pathname = usePathname();
@@ -259,7 +266,7 @@ export function AdminSidebar({
         {/* The nav itself scrolls if it ever outgrows the viewport, so Sign out
             can never be pushed off-screen. */}
         <nav className="flex-1 min-h-0 overflow-y-auto px-2 lg:px-3 py-4 flex flex-col gap-0.5">
-          <NavLinks pathname={pathname} showStock={showStock} showPurchases={showPurchases} showVendors={showVendors} showFinance={showFinance} showSettings={showSettings} rail />
+          <NavLinks pathname={pathname} showStock={showStock} showPurchases={showPurchases} showVendors={showVendors} showFinance={showFinance} showRooms={showRooms} showSettings={showSettings} rail />
         </nav>
 
         <div
@@ -366,6 +373,7 @@ export function AdminSidebar({
                 showPurchases={showPurchases}
                 showVendors={showVendors}
                 showFinance={showFinance}
+                showRooms={showRooms}
                 showSettings={showSettings}
                 onNavigate={() => setMobileOpen(false)}
               />

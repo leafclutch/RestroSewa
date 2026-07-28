@@ -14,6 +14,10 @@ export const PERMISSIONS = {
   // Tables
   VIEW_TABLES:      "view_tables",
   MANAGE_TABLES:    "manage_tables",
+  // Walk-ins — own group, so a walk-in (takeaway/phone/delivery) desk can be granted
+  // without dine-in tables. view = read-only; manage = open/edit/order/bill/close.
+  VIEW_WALKINS:     "view_walkins",
+  MANAGE_WALKINS:   "manage_walkins",
   // Rooms — three tiers. view_rooms is read-only; check_in starts stays without
   // granting room configuration; manage_rooms is the full CRUD (managers/admins).
   VIEW_ROOMS:       "view_rooms",
@@ -85,6 +89,14 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
     items: [
       { key: "view_tables",   label: "View Tables" },
       { key: "manage_tables", label: "Manage Tables" },
+    ],
+  },
+  {
+    label: "Walk-ins",
+    items: [
+      // Manage Walk-ins automatically includes View Walk-ins — see WALKIN_ACCESS.
+      { key: "view_walkins",   label: "View Walk-ins" },
+      { key: "manage_walkins", label: "Manage Walk-ins" },
     ],
   },
   {
@@ -301,6 +313,17 @@ export const NAV_ACCESS = {
 // This REPLACES the old model where check-in rode on view_rooms ("a Receptionist is just
 // a Cashier with view_rooms"). That is exactly what changed.
 
+// Walk-ins (takeaway / phone / delivery slots). Own group so a walk-in desk can be
+// granted without dine-in tables. Write implies read, like ROOM_ACCESS/STOCK_ACCESS.
+export const WALKIN_ACCESS = {
+  /** Sees the Walk-ins section, slots, sessions, customer & billing info (read-only). */
+  canViewWalkins: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.VIEW_WALKINS, P_.MANAGE_WALKINS]),
+  /** Opens/edits/orders/bills/closes walk-in sessions (every write). */
+  canManageWalkins: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.MANAGE_WALKINS),
+};
+
 export const ROOM_ACCESS = {
   /** Sees the Rooms section, folios and room bills (read-only is enough). */
   canViewRooms: (u: { role: string; permissions: string[] }) =>
@@ -408,6 +431,7 @@ export const STAFF_PRESETS: StaffPresetDef[] = [
       P.CREATE_ORDERS,
       P.VIEW_MENU,
       P.VIEW_TABLES,
+      P.MANAGE_WALKINS,
       P.CLOSE_BILLS,
       P.PROCESS_PAYMENTS,
       P.APPLY_DISCOUNTS,
@@ -423,6 +447,7 @@ export const STAFF_PRESETS: StaffPresetDef[] = [
       P.CREATE_ORDERS,
       P.VIEW_MENU,
       P.VIEW_TABLES,
+      P.MANAGE_WALKINS,
       P.VIEW_ROOMS,
       P.CHECK_IN,
       P.CLOSE_BILLS,
@@ -458,6 +483,7 @@ export const STAFF_PRESETS: StaffPresetDef[] = [
       P.MANAGE_MENU,
       P.VIEW_TABLES,
       P.MANAGE_TABLES,
+      P.MANAGE_WALKINS,
       P.VIEW_ROOMS,
       // Explicit for clarity; MANAGE_ROOMS already implies it via ROOM_ACCESS.canCheckIn.
       P.CHECK_IN,
