@@ -22,6 +22,9 @@ the reference for *what* and *how*.
 # Permission groups (constants)
 - Dashboard: `view_dashboard`
 - Orders: `view_orders`, `manage_orders`, `create_orders`, `edit_orders`, `cancel_orders`, `close_bills`
+- Custom items: `manage_custom_items` (own group) — add an off-menu line with a STAFF-TYPED price.
+  Held apart from `create_orders` because a normal order can never set its own price
+  (`lib/order-items.ts`); Cashier + Manager presets include it. See `modules/custom-items.md`.
 - Menu: `view_menu`, `manage_menu`
 - Tables: `view_tables`, `manage_tables`
 - Walk-ins: `view_walkins`, `manage_walkins`

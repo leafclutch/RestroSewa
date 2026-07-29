@@ -6,40 +6,42 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
-**Daily Finance Report — production rollout.** The feature is built, verified end-to-end on DEV
-(real data → PDF → live Gmail delivery confirmed). Remaining work is prod configuration only —
-no code changes.
+**Custom items (manual order lines).** Built and verified on DEV. `tsc` clean; DB smoke-test
+confirms a custom row inserts with `menu_item_id` NULL + `is_custom` true and moves no stock. See
+`modules/custom-items.md`, `docs/superpowers/specs/2026-07-29-custom-items-design.md`.
 
 ## Files involved
-- `lib/reports/*` (daily-summary, daily-summary-pdf, daily-summary-send, pdf/report-document)
-- `lib/email/mailer.ts`, `app/api/cron/daily-summary/route.ts`
-- `app/actions/settings.ts`, `app/(admin)/admin/settings/_components/daily-summary-client.tsx`
-- `supabase/migrations/20260727300000_report_deliveries.sql`,
-  `20260727500000_report_delivery_history.sql`
-- `supabase/cron/daily-summary-cron.sql`, `docs/daily-summary-setup.md`
+- `supabase/migrations/20260729200000_custom_items.sql` (`session_order_items.is_custom`).
+- `lib/custom-items.ts` (validate/snapshot); `lib/permissions.ts` (`manage_custom_items` + presets).
+- `app/actions/pos.ts` `submitOrder` (accepts `custom_items`, permission-gated) + `is_custom` on
+  `OrderItemRow`/`QueueOrderItem`/`PaidBillItem` and their selects.
+- `add/page.tsx` + `add/_components/menu-browser.tsx` (form + cart); markers in `order-item.tsx`,
+  `orders-queue.tsx`, `bill-ticket.tsx`, `print-tickets.tsx` (docket skip for station-less custom).
 
 ## Completed
-- Gmail SMTP verified (App Password); live test emails delivered.
-- PDF renderer + reusable report chrome; model incl. mixed payments + inventory value.
-- Orchestrator (cron + manual retry share one path); admin history + retry UI.
-- DEV: migrations applied; env vars set in `.env.local` (+ prod values in `.env.production`).
-- `tsc` + `next build` green.
+- DEV migration applied; `tsc --noEmit` clean; DB insert semantics smoke-tested.
+- Memory Bank updated.
 
-## Remaining (ops — user performs)
-1. Vercel (Production env): add `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `SUMMARY_FROM_NAME`,
-   `CRON_SECRET` (prod value), then redeploy.
-2. Prod DB: `node scripts/migrate.mjs up --prod` (adds `report_deliveries` + history columns).
-3. Prod Supabase: enable `pg_cron`+`pg_net`; Vault `app_base_url` + `cron_secret` (= prod
-   CRON_SECRET); run `supabase/cron/daily-summary-cron.sql`.
-4. Per restaurant: enable the report + add recipients in Admin → Settings.
+## Remaining
+1. **Prod DB migration (user triggers):** `node scripts/migrate.mjs up --prod` — applies BOTH
+   pending prod migrations: `20260729100000_security_pin.sql` and `20260729200000_custom_items.sql`.
+   Nothing else prod-side (no env/cron).
+2. Deploy the app code (user drives git; nothing committed this session).
+3. Manual in-app QA once deployed: grant a waiter `manage_custom_items`; add a custom item routed
+   to a station and one bill-only; confirm KOT shows only the routed one, the bill shows both marked
+   "Custom", discounts/sales include them, and stock is untouched.
 
 ## Risks
-- Prod `CRON_SECRET` in Vercel must equal the Vault `cron_secret` or the cron gets 404.
-- Gmail ~500 mails/day cap (ample); first-send may land in Spam until marked "Not spam".
+- Custom items let staff type any price — mitigated by the dedicated permission (server re-checked)
+  and the "CUSTOM" marking everywhere.
 
 ## Notes
-- The account password the owner first pasted is NOT the App Password (Gmail rejects it);
-  only the 16-char App Password works. Both were placed in env — App Password is the live one.
+- Two prior tasks still pending USER ops:
+  1. **Security PIN** — prod migration `20260729100000_security_pin.sql` (folded into step 1 above)
+     + in-app QA. See `modules/security-pin.md`.
+  2. **Daily Finance Report** prod rollout (Vercel env GMAIL_USER/GMAIL_APP_PASSWORD/
+     SUMMARY_FROM_NAME/CRON_SECRET; pg_cron/Vault per `docs/daily-summary-setup.md`; enable per
+     restaurant). No code left in either.
 
 ---
 

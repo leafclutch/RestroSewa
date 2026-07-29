@@ -14,7 +14,8 @@ almost everything is reached through the **service_role** client or **RPCs** (RL
   **`type`** (enum `restaurant | hotel | restaurant_hotel`, DB-checked — the business type set at
   creation; gates which modules exist, e.g. Rooms — read via `hasRooms`/`hasRestaurant`),
   `max_rooms`, `pan_vat_number`, `bill_number_next`, `discount_pin_hash` (never leaves the server),
-  `settings jsonb`. **`settings`** holds: `business_closing_hour`, `daily_summary {enabled,
+  `security_pin_hash` (bcrypt admin Security PIN; NULL = sensitive edits off; never leaves the
+  server — see `modules/security-pin.md`), `settings jsonb`. **`settings`** holds: `business_closing_hour`, `daily_summary {enabled,
   emails[]}`, `bill_number_pad`, `bill_number_label`, `print_paper_width`, tax/service percents.
   Rule: config is cached (`getRestaurantConfig`, 60s) — every writer calls
   `revalidateRestaurantInfo`.
@@ -39,6 +40,9 @@ almost everything is reached through the **service_role** client or **RPCs** (RL
   `created_at` = the stock **reservation**; `cancelled_at`/`cancel_reason`/`cancelled_by` = the
   **release** (rejects/force-close/cancel). Rule: a served item is never released; the row is
   the deduction, so never "simplify" cancellation into compensating adjustments (double-release).
+  **`is_custom`** flags a manual off-menu line (staff-typed name/price, `menu_item_id` NULL) — it
+  bills/discounts/reports like any item but moves no stock (no `menu_item_id` to join
+  `menu_item_products`). See `modules/custom-items.md`.
 - **order_tickets** — OT batching. An item is bound to **one ticket for life** (`ticket_id`);
   `ot_number` assigned at **print time**; `location_label`; per-workstation `ticket_code` prefix.
 
@@ -83,9 +87,17 @@ almost everything is reached through the **service_role** client or **RPCs** (RL
   `generated_at`, `sent_at`, `attempts`. `period_type='daily'` today; weekly/monthly reuse it
   (no schema change).
 
+## Security & audit
+- **security_audit_log** — every sensitive-edit attempt: `actor_user_id`/`actor_name`, `operation`
+  (`edit_payment_tender`/`edit_purchase`/future), `target_type`/`target_id`, `outcome`
+  (`success`|`failure`|`blocked`), `detail jsonb` (before→after). Written via `log_security_event`;
+  read owner-only in Settings. See `modules/security-pin.md`.
+
 ## Key RPCs (one transaction each, granted to service_role)
 `finance_report`, `stock_report`, `dashboard_stats`, `product_history`, `record_purchase`,
 `create_product`, `create_vendor`, `record_vendor_payment`, `delete_vendor`, `delete_product`,
-`set_finance_opening`, `set_discount_pin`, `transfer_session`, `reject_table_activation`,
-`force_close_session`, `cancel_order`, `cancel_order_item`. They raise **bare error codes**
+`set_finance_opening`, `set_discount_pin`, `set_security_pin`/`verify_security_pin`,
+`log_security_event`, `edit_payment_tender`, `edit_purchase` (reverses old vendor credit → new,
+recomputes `last_unit_cost`, raises `VENDOR_BALANCE_NEGATIVE`), `transfer_session`,
+`reject_table_activation`, `force_close_session`, `cancel_order`, `cancel_order_item`. They raise **bare error codes**
 (e.g. `VENDOR_HAS_PURCHASES`, `PRODUCT_HAS_LINKS`) that actions map to friendly text.

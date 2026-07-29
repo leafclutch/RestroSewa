@@ -93,3 +93,16 @@ follow-up. This exists so future work doesn't re-propose things already chosen o
 
 - **Don't export sync helpers from a `"use server"` module.** It typechecks but 500s the route
   at runtime. Keep pure helpers in plain modules; import them into actions.
+
+- **Security PIN & sensitive edits: in-place edit + audit, not reversal.** A separate admin-only
+  4-digit PIN (mirrors the Discount PIN's in-DB bcrypt storage) gates editing completed payments
+  (re-tender) and purchases. Chosen **in-place mutation + a before→after audit row** over
+  reversal/void entries. *Reason:* finance & stock are already DERIVED from `payments`/
+  `purchase_items`, so an edited row simply re-derives correctly — the audit log is the
+  immutability guarantee, and void semantics would have meant new bill/void numbers and teaching
+  every report to net voids. It's built as a **reusable authorization service**
+  (`verifySecurityPin` + `log_security_event` + a new `operation` string) so refunds/stock-reset/
+  finance-reset reuse it. Purchase edits reconcile vendor credit in-transaction and **block**
+  (`VENDOR_BALANCE_NEGATIVE`) rather than let a balance go negative; payment edits keep the
+  amount/bill-number frozen and only re-split the tender (method is derived from the split). No
+  PIN ⇒ these edits are OFF (no un-gated path). See `modules/security-pin.md`.

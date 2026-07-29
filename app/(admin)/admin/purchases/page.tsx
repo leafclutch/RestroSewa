@@ -3,6 +3,7 @@ import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { STOCK_ACCESS } from "@/lib/permissions";
 import { getPurchases, getPurchaseSummary, getVendorOptions } from "@/app/actions/purchases";
 import { getProductOptions } from "@/app/actions/stock";
+import { getRestaurantConfig } from "@/lib/restaurant-info";
 import { PurchasesClient } from "./_components/purchases-client";
 
 // Stock & Finance → Purchases. Viewing needs any stock/purchases right; recording
@@ -15,11 +16,12 @@ export default async function PurchasesPage() {
     redirect("/employee/dashboard");
   }
 
-  const [purchases, summary, vendors, products] = await Promise.all([
+  const [purchases, summary, vendors, products, config] = await Promise.all([
     getPurchases({ filter: "all" }),
     getPurchaseSummary(),
     getVendorOptions(),
     getProductOptions(),
+    getRestaurantConfig(restaurantUser.restaurant_id),
   ]);
 
   return (
@@ -29,6 +31,9 @@ export default async function PurchasesPage() {
       vendors={vendors}
       products={products}
       canManage={STOCK_ACCESS.canManagePurchases(restaurantUser)}
+      // Editing a completed purchase is an owner action, gated by the Security PIN.
+      canEdit={restaurantUser.role === "restaurant_admin"}
+      securityEnabled={config.securityEnabled}
     />
   );
 }

@@ -7,6 +7,7 @@ import { SETTLEMENT_COLOR, SETTLEMENT_LABEL } from "@/lib/credits";
 import type { CreditStats } from "@/lib/credits";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { PaidBillButton } from "./paid-bill";
+import { TenderEditButton } from "./tender-edit";
 
 // Fallback for a report that predates credits (a stale client-router payload).
 const EMPTY_CREDIT_STATS: CreditStats = {
@@ -123,7 +124,15 @@ function StatTile({
   );
 }
 
-function TxnCard({ txn }: { txn: SalesTxn }) {
+function TxnCard({
+  txn,
+  canEditTender,
+  onEdited,
+}: {
+  txn: SalesTxn;
+  canEditTender: boolean;
+  onEdited: () => void;
+}) {
   const location = txn.table_number
     ? `Table ${txn.table_number}`
     : txn.room_number
@@ -185,11 +194,24 @@ function TxnCard({ txn }: { txn: SalesTxn }) {
       </div>
       {/* Reprint the bill on demand — reuses the payment record. */}
       <PaidBillButton paymentId={txn.id} />
+      {/* Owner-only tender correction — only for a fully-settled, non-credit bill. */}
+      {canEditTender && !onCredit && txn.method !== "credit" && (
+        <TenderEditButton paymentId={txn.id} onEdited={onEdited} />
+      )}
     </div>
   );
 }
 
-export function SalesView({ initial, embedded = false }: { initial: SalesReport; embedded?: boolean }) {
+export function SalesView({
+  initial,
+  embedded = false,
+  canEditTender = false,
+}: {
+  initial: SalesReport;
+  embedded?: boolean;
+  /** Owner + Security PIN set → each settled bill gets a tender-edit control. */
+  canEditTender?: boolean;
+}) {
   const [report, setReport] = useState<SalesReport>(initial);
   const [period, setPeriod] = useState<SalesPeriod>(initial.period);
   const [customFrom, setCustomFrom] = useState<string>(initial.from ?? "");
@@ -474,7 +496,9 @@ export function SalesView({ initial, embedded = false }: { initial: SalesReport;
                   </p>
                 </div>
                 <div className="flex flex-col gap-2">
-                  {g.items.map((t) => <TxnCard key={t.id} txn={t} />)}
+                  {g.items.map((t) => (
+                    <TxnCard key={t.id} txn={t} canEditTender={canEditTender} onEdited={resync} />
+                  ))}
                 </div>
               </div>
             ))}

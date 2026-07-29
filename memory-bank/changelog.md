@@ -5,6 +5,19 @@ Versioning is informal (the app ships continuously); dates anchor the entries.
 
 ## [Unreleased] — 2026-07
 ### Added
+- **Custom items** — staff with the new **Add Custom Items** permission can add an off-menu line
+  while taking an order (name, price, quantity, optional note, optional station). It appears on the
+  bill, joins discounts/totals and sales/finance, moves no stock, and is clearly marked "Custom".
+  It prints on a KOT/BOT only when routed to a station; otherwise it's bill-only. Cashier and
+  Manager presets include the permission.
+- **Security PIN** — a separate admin-only 4-digit PIN (Admin → Settings) that authorizes editing
+  completed money records, with a **Security activity** audit log. Enables two edits that didn't
+  exist before: correcting a completed bill's **cash/online/card split** (Sales list; amount &
+  bill number stay frozen) and **editing a purchase** (vendor/method/lines/notes, from the detail
+  modal). Every attempt is logged (success / wrong-PIN / blocked). Purchase edits refuse to corrupt
+  a vendor balance. No PIN set ⇒ these edits are off. The **payment split** edit is available to
+  billing staff (Process Payments) as well as the owner — still PIN-gated and audited with who did
+  it; the **purchase** edit stays owner-only. Staff without the permission never see the controls.
 - **Walk-in permission** (`view_walkins` / `manage_walkins`) — the Walk-ins section now needs its
   own permission (View = read-only, Manage = operate); enforced front and back. Cashier /
   Receptionist / Manager presets include Manage; Waiter does not.

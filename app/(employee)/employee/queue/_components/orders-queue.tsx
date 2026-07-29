@@ -68,6 +68,14 @@ function ItemRow({
             <span className="mr-1 text-xs font-medium" style={{ color: "var(--color-ink-mute)" }}>×{item.quantity}</span>
           )}
           {item.item_name}
+          {item.is_custom && (
+            <span
+              className="ml-1.5 px-1 rounded align-middle"
+              style={{ fontSize: "9px", lineHeight: "14px", background: "var(--color-canvas-soft)", color: "var(--color-primary)", letterSpacing: "0.04em" }}
+            >
+              CUSTOM
+            </span>
+          )}
         </p>
         {item.workstation_name && (
           <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>{item.workstation_name}</p>

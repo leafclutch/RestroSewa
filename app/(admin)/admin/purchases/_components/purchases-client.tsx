@@ -23,13 +23,15 @@ import type {
   PurchaseSummary,
   VendorOption,
 } from "@/app/actions/purchases";
+import { updatePurchase, type PurchaseEditInput } from "@/app/actions/security";
 import { qty } from "@/lib/stock";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PaymentMethodPicker, splitIsValid } from "@/components/ui/payment-method-picker";
+import { SecurityPinDialog } from "@/components/security-pin-dialog";
 import { Modal } from "../../_components/modal";
-import { ChevronLeft, ChevronRight, Loader2, Plus, Search, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
 const PAGE_SIZE = 10;
 
@@ -74,24 +76,44 @@ function StatCard({ label, value, tone }: { label: string; value: string; tone?:
 
 type Line = { key: number; product_id: string; quantity: string; unit_cost: string };
 
+export type PurchaseFormInitial = {
+  vendorId: string;
+  method: "cash" | "online" | "credit" | "mixed";
+  notes: string;
+  lines: Line[];
+  paidNow: string;
+  paidTender: "cash" | "online";
+  mixCash: string;
+  mixOnline: string;
+};
+
+// Records a new purchase, or — in `edit` mode — edits a completed one behind the Security
+// PIN. Same fields either way; only submission differs: a new purchase POSTs the record
+// action, an edit opens the Security-PIN dialog and calls `updatePurchase`.
 function PurchaseForm({
   vendors,
   products,
   onDone,
+  edit,
 }: {
   vendors: VendorOption[];
   products: ProductOption[];
   onDone: () => void;
+  edit?: { purchaseId: string; initial: PurchaseFormInitial };
 }) {
   const [state, action, pending] = useActionState<ActionResult, FormData>(recordPurchase, null);
-  const [vendorId, setVendorId] = useState("");
-  const [method, setMethod] = useState<"cash" | "online" | "credit" | "mixed">("cash");
-  const [paidNow, setPaidNow] = useState("");
-  const [paidTender, setPaidTender] = useState<"cash" | "online">("cash");
-  const nextKey = useRef(1);
-  const [lines, setLines] = useState<Line[]>([
-    { key: 0, product_id: "", quantity: "", unit_cost: "" },
-  ]);
+  const [vendorId, setVendorId] = useState(edit?.initial.vendorId ?? "");
+  const [method, setMethod] = useState<"cash" | "online" | "credit" | "mixed">(edit?.initial.method ?? "cash");
+  const [paidNow, setPaidNow] = useState(edit?.initial.paidNow ?? "");
+  const [paidTender, setPaidTender] = useState<"cash" | "online">(edit?.initial.paidTender ?? "cash");
+  const [notes, setNotes] = useState(edit?.initial.notes ?? "");
+  const [mixCash, setMixCash] = useState(edit?.initial.mixCash ?? "");
+  const [mixOnline, setMixOnline] = useState(edit?.initial.mixOnline ?? "");
+  const [pinOpen, setPinOpen] = useState(false);
+  const nextKey = useRef((edit?.initial.lines.length ?? 1) + 1);
+  const [lines, setLines] = useState<Line[]>(
+    edit?.initial.lines ?? [{ key: 0, product_id: "", quantity: "", unit_cost: "" }]
+  );
 
   const wasPending = useRef(false);
   useEffect(() => {
@@ -116,8 +138,6 @@ function PurchaseForm({
   );
 
   const paidNowNum = parseFloat(paidNow) || 0;
-  const [mixCash, setMixCash] = useState("");
-  const [mixOnline, setMixOnline] = useState("");
   const onCredit = method === "credit" ? Math.max(0, total - paidNowNum) : 0;
   // A mixed purchase must be settled in full: cash + online = the line total the
   // server will recompute. The server re-checks, so this only stops a doomed submit.
@@ -129,8 +149,30 @@ function PurchaseForm({
 
   const vendor = vendors.find((s) => s.id === vendorId);
 
+  const isEdit = !!edit;
+  // The payload for an edit — assembled the same way the record action maps its FormData,
+  // so an edit and a fresh record reconcile identically on the server.
+  const editPayload: PurchaseEditInput = {
+    vendorId,
+    method,
+    cash:
+      method === "mixed" ? (parseFloat(mixCash) || 0)
+      : method === "credit" ? (paidTender === "cash" ? paidNowNum : 0)
+      : 0,
+    online:
+      method === "mixed" ? (parseFloat(mixOnline) || 0)
+      : method === "credit" ? (paidTender === "online" ? paidNowNum : 0)
+      : 0,
+    items: validLines.map((l) => ({
+      product_id: l.product_id,
+      quantity: parseFloat(l.quantity),
+      unit_cost: parseFloat(l.unit_cost),
+    })),
+    notes: notes.trim() || null,
+  };
+
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form action={isEdit ? undefined : action} className="flex flex-col gap-4">
       <input type="hidden" name="vendor_id" value={vendorId} />
       <input type="hidden" name="method" value={method} />
       <input type="hidden" name="paid_now" value={method === "credit" ? paidNow : ""} />
@@ -376,30 +418,69 @@ function PurchaseForm({
         </p>
       )}
 
-      <Input name="notes" placeholder="Note (optional) — e.g. invoice #1234" autoComplete="off" />
+      <Input
+        name="notes"
+        placeholder="Note (optional) — e.g. invoice #1234"
+        autoComplete="off"
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+      />
 
-      {state?.error && (
+      {!isEdit && state?.error && (
         <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
           {state.error}
         </p>
       )}
 
-      <Button type="submit" variant="primary" disabled={!canSubmit}>
-        {pending
-          ? "Recording…"
-          : method === "credit" && onCredit > 0
-          ? `Record & add ${money(onCredit)} to vendor credit`
-          : `Record purchase ${total > 0 ? money(total) : ""}`}
-      </Button>
+      {isEdit ? (
+        <>
+          <Button type="button" variant="primary" disabled={!canSubmit} onClick={() => setPinOpen(true)}>
+            {`Save changes${total > 0 ? " · " + money(total) : ""}`}
+          </Button>
+          <SecurityPinDialog
+            open={pinOpen}
+            onClose={() => setPinOpen(false)}
+            onSuccess={onDone}
+            title="Confirm purchase edit"
+            description="Editing a completed purchase updates stock and the vendor's balance. Enter your Security PIN to continue."
+            confirmLabel="Save changes"
+            extraValid={canSubmit}
+            onConfirm={(pin) => updatePurchase(pin, edit!.purchaseId, editPayload)}
+          />
+        </>
+      ) : (
+        <Button type="submit" variant="primary" disabled={!canSubmit}>
+          {pending
+            ? "Recording…"
+            : method === "credit" && onCredit > 0
+            ? `Record & add ${money(onCredit)} to vendor credit`
+            : `Record purchase ${total > 0 ? money(total) : ""}`}
+        </Button>
+      )}
     </form>
   );
 }
 
 // ── Detail ────────────────────────────────────────────────────────────────────
 
-function PurchaseDetailView({ purchaseId }: { purchaseId: string }) {
+function PurchaseDetailView({
+  purchaseId,
+  vendors,
+  products,
+  canEdit,
+  securityEnabled,
+  onEdited,
+}: {
+  purchaseId: string;
+  vendors: VendorOption[];
+  products: ProductOption[];
+  canEdit: boolean;
+  securityEnabled: boolean;
+  onEdited: () => void;
+}) {
   const [detail, setDetail] = useState<PurchaseDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -417,6 +498,39 @@ function PurchaseDetailView({ purchaseId }: { purchaseId: string }) {
       <div className="flex items-center justify-center py-8" style={{ color: "var(--color-ink-mute)" }}>
         <Loader2 size={18} className="animate-spin" />
       </div>
+    );
+  }
+
+  if (editing) {
+    // `method` is stored more widely than the read-type admits ('mixed' is a real DB value
+    // the PurchaseMethod type omits), so widen it to the form's method set for prefill.
+    const m = detail.method as PurchaseFormInitial["method"];
+    return (
+      <PurchaseForm
+        vendors={vendors}
+        products={products}
+        onDone={onEdited}
+        edit={{
+          purchaseId,
+          initial: {
+            vendorId: detail.vendor_id,
+            method: m,
+            notes: detail.notes ?? "",
+            lines: detail.items.map((i, idx) => ({
+              key: idx,
+              product_id: i.product_id,
+              quantity: String(i.quantity),
+              unit_cost: String(i.unit_cost),
+            })),
+            // For a credit purchase the "paid now" is whatever was tendered up front
+            // (one of cash/online is zero); mixed carries the full cash/online split.
+            paidNow: m === "credit" ? String(detail.cash_amount + detail.online_amount) : "",
+            paidTender: detail.online_amount > 0 && detail.cash_amount === 0 ? "online" : "cash",
+            mixCash: m === "mixed" ? String(detail.cash_amount) : "",
+            mixOnline: m === "mixed" ? String(detail.online_amount) : "",
+          },
+        }}
+      />
     );
   }
 
@@ -497,11 +611,24 @@ function PurchaseDetailView({ purchaseId }: { purchaseId: string }) {
         )}
       </div>
 
-      <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-        This purchase already added its items to stock
-        {detail.credit_amount > 0 ? " and raised the vendor's balance" : ""}. Purchases are never
-        edited or deleted — record a stock adjustment or a vendor payment instead, so the trail stays intact.
-      </p>
+      {canEdit ? (
+        <div className="flex flex-col gap-2">
+          <Button type="button" variant="secondary" onClick={() => setEditing(true)} disabled={!securityEnabled}>
+            <Pencil size={14} /> Edit purchase
+          </Button>
+          <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+            {securityEnabled
+              ? "Editing updates stock and the vendor's balance. It needs your Security PIN, and every change is logged."
+              : "Set a Security PIN in Settings to enable editing completed purchases."}
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+          This purchase already added its items to stock
+          {detail.credit_amount > 0 ? " and raised the vendor's balance" : ""}. Purchases are never
+          edited or deleted — record a stock adjustment or a vendor payment instead, so the trail stays intact.
+        </p>
+      )}
     </div>
   );
 }
@@ -514,12 +641,18 @@ export function PurchasesClient({
   vendors,
   products,
   canManage,
+  canEdit,
+  securityEnabled,
 }: {
   initialPurchases: PurchaseRow[];
   initialSummary: PurchaseSummary;
   vendors: VendorOption[];
   products: ProductOption[];
   canManage: boolean;
+  /** Owner: may edit completed purchases (behind the Security PIN). */
+  canEdit: boolean;
+  /** Whether a Security PIN is configured — editing is impossible without it. */
+  securityEnabled: boolean;
 }) {
   const [rows, setRows] = useState(initialPurchases);
   const [summary, setSummary] = useState(initialSummary);
@@ -806,8 +939,18 @@ export function PurchasesClient({
         onClose={() => setDetailOf(null)}
         title={detailOf?.purchase_code ?? "Purchase"}
         subtitle={detailOf?.vendor_name}
+        wide
       >
-        {detailOf && <PurchaseDetailView purchaseId={detailOf.id} />}
+        {detailOf && (
+          <PurchaseDetailView
+            purchaseId={detailOf.id}
+            vendors={vendors}
+            products={products}
+            canEdit={canEdit}
+            securityEnabled={securityEnabled}
+            onEdited={() => { setDetailOf(null); refresh(); }}
+          />
+        )}
       </Modal>
     </div>
   );

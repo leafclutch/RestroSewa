@@ -7,6 +7,7 @@ import {
   getMenuItemsByCategory,
   getAvailableVariants,
 } from "@/app/actions/menu";
+import { getWorkstations } from "@/app/actions/workstations";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { MenuItemRow } from "@/app/actions/menu";
 import { MenuBrowser } from "./_components/menu-browser";
@@ -49,6 +50,13 @@ export default async function AddItemsPage({
   // needs to pick the size at the counter, same as a guest does on their phone.
   const variants = await getAvailableVariants(restaurant_id);
 
+  // Custom (off-menu) items are gated by their own permission and can be routed to a
+  // workstation. Fetch the stations for the picker only when the user may add them.
+  const canAddCustom = hasPermission(restaurantUser, PERMISSIONS.MANAGE_CUSTOM_ITEMS);
+  const workstations = canAddCustom
+    ? (await getWorkstations(restaurant_id)).map((w) => ({ id: w.id, name: w.name }))
+    : [];
+
   return (
     <div className="flex flex-col h-[calc(100vh-56px)]">
       {/* Header */}
@@ -77,6 +85,8 @@ export default async function AddItemsPage({
         categories={activeCategories}
         items={allItems}
         variants={variants}
+        canAddCustom={canAddCustom}
+        workstations={workstations}
       />
     </div>
   );

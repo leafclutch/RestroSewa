@@ -10,6 +10,7 @@ import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignme
 import { computeCreditStats, settlementOf } from "@/lib/credits";
 import type { BillSettlement, CreditStats } from "@/lib/credits";
 import { resolveOrderItems } from "@/lib/order-items";
+import { resolveCustomItems, type CustomItemRequest } from "@/lib/custom-items";
 import { businessDate, businessPeriodBounds, businessToday } from "@/lib/business-day";
 import { span } from "@/lib/perf/timing";
 import { getRestaurantConfig } from "@/lib/restaurant-info";
@@ -60,6 +61,8 @@ export type OrderItemRow = {
   notes: string | null;
   created_at: string;
   order_id: string;
+  /** A manual off-menu line (staff-typed name/price, no menu item, no stock movement). */
+  is_custom: boolean;
   /**
    * The Order Ticket this item was sent to the station on, or null if it has not
    * been sent yet. This is what stops a second OT reprinting the first one's items:
@@ -676,7 +679,7 @@ export async function getSessionDetail(
            session_orders ( id,
              session_order_items ( id, item_name, item_price, workstation_id,
                workstation_name, quantity, item_status, notes, created_at, order_id,
-               ticket_id, cancelled_at ) )`
+               ticket_id, is_custom, cancelled_at ) )`
         )
         .eq("id", sessionId)
         .is("session_orders.session_order_items.cancelled_at", null)
@@ -790,24 +793,42 @@ export async function submitOrder(
 
   const sessionId = formData.get("session_id") as string;
   const itemsJson = formData.get("items") as string;
+  const customJson = (formData.get("custom_items") as string) || "";
 
-  let cartItems: CartItem[];
+  let cartItems: CartItem[] = [];
+  let customLines: CustomItemRequest[] = [];
   try {
-    cartItems = JSON.parse(itemsJson);
+    cartItems = itemsJson ? JSON.parse(itemsJson) : [];
+    customLines = customJson ? JSON.parse(customJson) : [];
   } catch {
     return { error: "Invalid order data." };
   }
 
-  if (!cartItems?.length) return { error: "No items selected." };
+  // An order may be all menu items, all custom items, or a mix — but not empty.
+  if (!cartItems?.length && !customLines?.length) return { error: "No items selected." };
 
   if (await walkInWriteBlocked(service, ru, sessionId)) {
     return { error: "You don't have permission to manage walk-ins." };
   }
 
-  // Name, price, variant and workstation are all resolved from the menu — the
+  // Menu items: name, price, variant and workstation are all resolved from the menu — the
   // cart only ever chooses WHAT and HOW MANY. See lib/order-items.ts.
-  const resolved = await resolveOrderItems(service, ru.restaurant_id, cartItems);
-  if (!resolved.ok) return { error: resolved.error };
+  const resolvedMenu = cartItems.length
+    ? await resolveOrderItems(service, ru.restaurant_id, cartItems)
+    : ({ ok: true, items: [] } as const);
+  if (!resolvedMenu.ok) return { error: resolvedMenu.error };
+
+  // Custom items are the deliberate exception — a STAFF-TYPED price — so they take their own
+  // validated path AND their own permission. Re-checked here because the form is a POST endpoint
+  // any logged-in staff member can hit directly; hiding the button client-side protects nothing.
+  if (customLines.length > 0 && !hasPermission(ru, PERMISSIONS.MANAGE_CUSTOM_ITEMS)) {
+    return { error: "You don't have permission to add custom items." };
+  }
+  const resolvedCustom = await resolveCustomItems(service, ru.restaurant_id, customLines);
+  if (!resolvedCustom.ok) return { error: resolvedCustom.error };
+
+  const allItems = [...resolvedMenu.items, ...resolvedCustom.items];
+  if (allItems.length === 0) return { error: "No items selected." };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: order, error: orderErr } = await (service as any)
@@ -825,7 +846,7 @@ export async function submitOrder(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: itemsErr } = await (service as any)
     .from("session_order_items")
-    .insert(resolved.items.map((item) => ({ order_id: order.id, ...item })));
+    .insert(allItems.map((item) => ({ order_id: order.id, ...item })));
 
   if (itemsErr) return { error: "Failed to add items." };
 
@@ -993,7 +1014,7 @@ export async function generateOrderTicket(
   const { data: items } = await (service as any)
     .from("session_order_items")
     .select(
-      "id, item_name, item_price, workstation_id, workstation_name, quantity, item_status, notes, created_at, order_id, ticket_id"
+      "id, item_name, item_price, workstation_id, workstation_name, quantity, item_status, notes, created_at, order_id, ticket_id, is_custom"
     )
     .eq("ticket_id", ticket.id)
     .order("created_at");
@@ -1489,6 +1510,7 @@ export type QueueOrderItem = {
   notes: string | null;
   workstation_name: string | null;
   item_price: number;
+  is_custom: boolean;
 };
 
 export type QueueOrder = {
@@ -1534,7 +1556,7 @@ export async function getMyOrderQueue(): Promise<QueueOrder[]> {
            restaurant_tables ( number ), rooms ( number ), credit_customers ( name, phone ),
            session_orders ( id, session_id, created_at,
              session_order_items ( id, order_id, item_name, quantity, item_status, notes,
-               workstation_id, workstation_name, item_price, created_at, cancelled_at ) )`
+               workstation_id, workstation_name, item_price, is_custom, created_at, cancelled_at ) )`
         )
         .eq("restaurant_id", restaurantId)
         .eq("status", "active")
@@ -1631,6 +1653,7 @@ export async function getMyOrderQueue(): Promise<QueueOrder[]> {
       notes: it.notes,
       workstation_name: it.workstation_name,
       item_price: Number(it.item_price),
+      is_custom: !!it.is_custom,
     }));
 
     // An order is pending while anything on it still is; once every item has gone
@@ -2124,7 +2147,7 @@ export async function exportSalesCsv(params?: {
 // row + its session's orders/items — no new bill or record is created. Used by
 // the Sales dashboard to reprint a bill after payment. Sales-permission gated.
 
-export type PaidBillItem = { id: string; item_name: string; item_price: number; quantity: number };
+export type PaidBillItem = { id: string; item_name: string; item_price: number; quantity: number; is_custom: boolean };
 
 export type PaidBill = {
   payment_id: string;
@@ -2214,7 +2237,7 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: its } = await (service as any)
         .from("session_order_items")
-        .select("id, item_name, item_price, quantity, created_at")
+        .select("id, item_name, item_price, quantity, is_custom, created_at")
         .in("order_id", order_ids)
         // Never print a cancelled item on the bill.
         .is("cancelled_at", null)
@@ -2225,6 +2248,7 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
         item_name: it.item_name,
         item_price: Number(it.item_price),
         quantity: it.quantity,
+        is_custom: !!it.is_custom,
       }));
     }
   }
