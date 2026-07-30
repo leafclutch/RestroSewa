@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { hasPermission, hasAnyPermission, PERMISSIONS, NAV_ACCESS, WALKIN_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { WALK_IN_SLOT_COUNT } from "@/lib/walk-ins";
-import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignments";
+import { buildVisibilityFilter, getAssignedWorkstationIds, resolveViewerScope } from "@/lib/assignments";
 import { computeCreditStats, settlementOf } from "@/lib/credits";
 import type { BillSettlement, CreditStats } from "@/lib/credits";
 import { resolveOrderItems } from "@/lib/order-items";
@@ -175,14 +175,24 @@ export async function getTableStatusOverview(
 ): Promise<TableStatus[]> {
   const service = createServiceClient();
 
+  // Assignment is the source of truth: scope the table query itself so the rows a
+  // non-admin may see never leave the database. A viewer with no group assignment
+  // (empty groupIds) matches no tables — the strict "nothing until assigned" model.
+  // The in-memory canSeeTable filter in TablesSection stays as defense-in-depth.
+  const ru = await getRestaurantUser();
+  const scope = await resolveViewerScope(restaurantId, ru);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let tablesQuery = (service as any)
+    .from("restaurant_tables")
+    .select("id, number, group_id, cleaning_since")
+    .eq("restaurant_id", restaurantId)
+    .eq("is_active", true);
+  if (!scope.seesAll) tablesQuery = tablesQuery.in("group_id", scope.groupIds);
+  tablesQuery = tablesQuery.order("number");
+
   const [tablesRes, sessionsRes] = await Promise.all([
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (service as any)
-      .from("restaurant_tables")
-      .select("id, number, group_id, cleaning_since")
-      .eq("restaurant_id", restaurantId)
-      .eq("is_active", true)
-      .order("number"),
+    tablesQuery,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("sessions")
@@ -1122,6 +1132,18 @@ export async function closeSessionWithPayment(
     return { error: "This is a room stay — settle it from the guest's folio, so the room nights are billed too." };
   }
 
+  // Assignment is the source of truth: staff may only bill tables/rooms assigned to
+  // them (only the admin bills anything). Enforced here — not just in the UI — because
+  // this close-bill form is a POST endpoint any logged-in staff member could hit
+  // directly for another group's table.
+  const billVisibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  if (
+    !billVisibility.seesAll &&
+    !(billVisibility.canSeeTable(sess?.table_id ?? null) && billVisibility.canSeeRoom(sess?.room_id ?? null))
+  ) {
+    return { error: "You can only bill tables assigned to you." };
+  }
+
   if (method === "mixed") {
     if (Math.abs(cashAmount + onlineAmount - totalAmount) > 0.01) {
       return { error: "The combined Cash and Online amounts must equal the total payable amount." };
@@ -1327,14 +1349,33 @@ async function sessionHasOrders(service: any, sessionId: string): Promise<boolea
   return ((items ?? []) as unknown[]).length > 0;
 }
 
+// Assignment gate for an action that already loaded a session's `{ table_id, room_id }`
+// (as a PostgREST embed, object or 1-element array). Only the admin bypasses it; every
+// other staff member may act only on a session whose table-group / room they're assigned
+// to. Walk-ins (no table + no room) have no group boundary, so they stay accessible.
+async function canAccessSession(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ru: { id: string; role: string; permissions: string[]; restaurant_id: string },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sessionEmbed: any
+): Promise<boolean> {
+  const s = Array.isArray(sessionEmbed) ? sessionEmbed[0] ?? null : sessionEmbed ?? null;
+  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  return (
+    visibility.seesAll ||
+    (visibility.canSeeTable(s?.table_id ?? null) && visibility.canSeeRoom(s?.room_id ?? null))
+  );
+}
+
 // Force close (deactivate) a table/room session without taking payment.
 //
-// Access rules:
-//  - Cashiers / managers (CLOSE_BILLS or MANAGE_TABLES) may force close ANY of
-//    their sessions, orders or not — existing behavior, unchanged.
-//  - Any assigned staff member (table-group / room visibility) may force close a
-//    session ONLY while it has no orders — e.g. a table opened by mistake. Once
-//    an order exists, closing is reserved for the Cashier.
+// Access rules (assignment is the source of truth — no permission bypasses it):
+//  - You may only act on a session whose table-group / room you are ASSIGNED to
+//    (only the admin sees everything). CLOSE_BILLS / MANAGE_TABLES no longer grant
+//    cross-assignment access.
+//  - WITHIN your assigned area: Cashiers / managers (CLOSE_BILLS or MANAGE_TABLES) may
+//    close a session with orders; anyone else assigned may deactivate an EMPTY one
+//    (e.g. a table opened by mistake) but not one that already has orders.
 export async function forceCloseSession(sessionId: string): Promise<ActionResult> {
   const ru = await getRestaurantUser();
   const service = createServiceClient();
@@ -1354,22 +1395,21 @@ export async function forceCloseSession(sessionId: string): Promise<ActionResult
   if (!session || session.restaurant_id !== ru.restaurant_id)
     return { error: "Permission denied." };
 
-  const privileged =
-    hasPermission(ru, PERMISSIONS.CLOSE_BILLS) ||
-    hasPermission(ru, PERMISSIONS.MANAGE_TABLES);
-
-  // Table-group isolation: non-privileged staff may only act on tables/rooms they
-  // are assigned to (admins / managers see all).
+  // Assignment is the source of truth: you may only act on a session you can see.
+  // This gate applies to EVERYONE except the admin — CLOSE_BILLS / MANAGE_TABLES no
+  // longer bypass it.
   const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
   const isAssigned =
     visibility.seesAll ||
     (visibility.canSeeTable(session.table_id) && visibility.canSeeRoom(session.room_id));
+  if (!isAssigned) return { error: "Permission denied." };
 
-  if (!privileged && !isAssigned) return { error: "Permission denied." };
-
-  // Non-privileged staff may only deactivate an empty (accidentally opened)
-  // session — a table with orders is the Cashier's to close.
-  if (!privileged && (await sessionHasOrders(service, sessionId))) {
+  // Within their assigned area, only a Cashier/Manager may close a table that HAS
+  // orders; anyone else assigned may only deactivate an empty (mis-opened) session.
+  const canCloseWithOrders =
+    hasPermission(ru, PERMISSIONS.CLOSE_BILLS) ||
+    hasPermission(ru, PERMISSIONS.MANAGE_TABLES);
+  if (!canCloseWithOrders && (await sessionHasOrders(service, sessionId))) {
     return { error: "This table contains active orders and can only be closed by the Cashier." };
   }
 
@@ -1410,9 +1450,13 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: co } = await (service as any)
-    .from("session_orders").select("session_id").eq("id", orderId).maybeSingle();
+    .from("session_orders").select("session_id, sessions ( table_id, room_id )").eq("id", orderId).maybeSingle();
   if (co?.session_id && (await walkInWriteBlocked(service, ru, co.session_id))) {
     return { error: "You don't have permission to manage walk-ins." };
+  }
+  // Assignment is the source of truth — you may only cancel orders on your tables/rooms.
+  if (!(await canAccessSession(ru, co?.sessions))) {
+    return { error: "You can only cancel orders for tables assigned to you." };
   }
 
   // Capture what the stations are working on BEFORE the cancel lands. Afterwards
@@ -1460,9 +1504,13 @@ export async function cancelOrderItem(itemId: string): Promise<ActionResult> {
   if (item?.order_id) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: co } = await (service as any)
-      .from("session_orders").select("session_id").eq("id", item.order_id).maybeSingle();
+      .from("session_orders").select("session_id, sessions ( table_id, room_id )").eq("id", item.order_id).maybeSingle();
     if (co?.session_id && (await walkInWriteBlocked(service, ru, co.session_id))) {
       return { error: "You don't have permission to manage walk-ins." };
+    }
+    // Assignment is the source of truth — only cancel items on your tables/rooms.
+    if (!(await canAccessSession(ru, co?.sessions))) {
+      return { error: "You can only cancel items for tables assigned to you." };
     }
   }
 
@@ -1824,12 +1872,14 @@ export async function getSalesReport(params?: {
   const canSeeCredits = NAV_ACCESS.canManageCredits(ru);
 
   // Outstanding is counted over ACCOUNTS (who owes), credit-extended over BILLS.
-  const [paymentsRes, accountsRes, creditsRes, repaymentsRes] = await Promise.all([
+  const [paymentsRes, accountsRes, creditsRes, repaymentsRes, salesVisibility] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("payments")
+      // table_id / room_id (+ room_stays.room_id for a room folio) come along so the
+      // report can be scoped to the viewer's assigned tables/rooms — see the filter below.
       .select(
-        "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, sessions ( type, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), credits ( id, credit_number, customer_name, down_payment )"
+        "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, sessions ( type, table_id, room_id, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), room_stays ( room_id ), credits ( id, credit_number, customer_name, down_payment )"
       )
       .eq("restaurant_id", ru.restaurant_id)
       .order("created_at", { ascending: false }),
@@ -1854,10 +1904,33 @@ export async function getSalesReport(params?: {
           .select("amount, created_at")
           .eq("restaurant_id", ru.restaurant_id)
       : Promise.resolve({ data: [] }),
+    // Assignment scope for this viewer (admin ⇒ sees all; else assigned groups/rooms).
+    buildVisibilityFilter(ru.restaurant_id, ru),
   ]);
 
+  // ── Assignment scoping ────────────────────────────────────────────────────────
+  // Every figure below is derived from `rows`, so filtering the payments here scopes
+  // the WHOLE report — overview cards, period totals, cash/online/card/credit
+  // breakdown, discounts, bill count, revenue and the transaction list — to the
+  // viewer's assigned tables/rooms. Walk-ins (no table + no room) are shared among
+  // staff who hold the walk-in permission. Only the admin (seesAll) is unscoped.
+  // This runs server-side, so a scoped cashier never RECEIVES another group's sales.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = (paymentsRes.data ?? []) as any[];
+  const oneEmbed = (v: any) => (Array.isArray(v) ? v[0] ?? null : v ?? null);
+  const includeWalkinSales = WALKIN_ACCESS.canViewWalkins(ru);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const allPaymentRows = (paymentsRes.data ?? []) as any[];
+  const rows = salesVisibility.seesAll
+    ? allPaymentRows
+    : allPaymentRows.filter((p) => {
+        const s = oneEmbed(p.sessions);
+        const rs = oneEmbed(p.room_stays);
+        const tableId = (s?.table_id as string | null) ?? null;
+        const roomId = (s?.room_id as string | null) ?? (rs?.room_id as string | null) ?? null;
+        // Neither a table nor a room ⇒ a walk-in / off-floor bill: shared among walk-in staff.
+        if (tableId === null && roomId === null) return includeWalkinSales;
+        return salesVisibility.canSeeTable(tableId) && salesVisibility.canSeeRoom(roomId);
+      });
 
   // The overview cards come from the SAME resolver as the selected period, so a
   // card's total always equals the detail you get by clicking it. They used to be
@@ -2035,16 +2108,34 @@ export async function exportSalesCsv(params?: {
   const service = createServiceClient();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any)
-    .from("payments")
-    .select(
-      "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, sessions ( type, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), credits ( credit_number, customer_name )"
-    )
-    .eq("restaurant_id", ru.restaurant_id)
-    .order("created_at", { ascending: false });
+  const [{ data }, csvVisibility] = await Promise.all([
+    (service as any)
+      .from("payments")
+      .select(
+        "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, sessions ( type, table_id, room_id, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), room_stays ( room_id ), credits ( credit_number, customer_name )"
+      )
+      .eq("restaurant_id", ru.restaurant_id)
+      .order("created_at", { ascending: false }),
+    buildVisibilityFilter(ru.restaurant_id, ru),
+  ]);
 
+  // Same assignment scoping as getSalesReport — the CSV must never contain a bill from
+  // a table the viewer isn't assigned to (it exports the exact rows the screen shows).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = (data ?? []) as any[];
+  const oneEmbed = (v: any) => (Array.isArray(v) ? v[0] ?? null : v ?? null);
+  const includeWalkinSales = WALKIN_ACCESS.canViewWalkins(ru);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const allRows = (data ?? []) as any[];
+  const rows = csvVisibility.seesAll
+    ? allRows
+    : allRows.filter((p) => {
+        const s = oneEmbed(p.sessions);
+        const rs = oneEmbed(p.room_stays);
+        const tableId = (s?.table_id as string | null) ?? null;
+        const roomId = (s?.room_id as string | null) ?? (rs?.room_id as string | null) ?? null;
+        if (tableId === null && roomId === null) return includeWalkinSales;
+        return csvVisibility.canSeeTable(tableId) && csvVisibility.canSeeRoom(roomId);
+      });
   const { fromMs, toMs } = resolveSalesRange(period, ru.closingHour, params?.from, params?.to);
   const inRange = rows.filter((p) => {
     const ts = new Date(p.created_at).getTime();

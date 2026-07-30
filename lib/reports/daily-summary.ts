@@ -70,8 +70,6 @@ export type DailySummaryModel = {
 
   estimatedProfit: number; // sales − purchase cost − salaries paid
 
-  mixedPayments: number; // bills settled part-cash + part-online
-
   totalBills: number;   // payments finalised in the day
   totalOrders: number;  // kitchen order batches placed in the day
   inventoryValue: number; // closing stock valued at each product's last cost
@@ -109,7 +107,7 @@ export async function buildDailySummary(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("payments")
-      .select("discount_amount, payment_method, total_amount")
+      .select("discount_amount")
       .eq("restaurant_id", restaurantId)
       .gte("created_at", fromIso)
       .lt("created_at", toIso),
@@ -142,12 +140,6 @@ export async function buildDailySummary(
   const payments = (paymentsRes.data ?? []) as any[];
   const totalBills = payments.length;
   const discounts = payments.reduce((s, p) => s + num(p.discount_amount), 0);
-  // A "mixed" bill was tendered part-cash + part-online (see the mixed-payments
-  // model). Reported as its own line so the split tender is visible.
-  const mixedPayments = payments.reduce(
-    (s, p) => s + (p.payment_method === "mixed" ? num(p.total_amount) : 0),
-    0
-  );
 
   const totalOrders = ordersRes.count ?? 0;
 
@@ -219,8 +211,6 @@ export async function buildDailySummary(
     // heavy-stocking day reads low and a run-down day reads high. Labelled as an
     // estimate in the email for exactly that reason.
     estimatedProfit: salesTotal - purchasesTotal - salaryPaid,
-
-    mixedPayments,
 
     totalBills,
     totalOrders,

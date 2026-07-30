@@ -6,42 +6,56 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
-**Custom items (manual order lines).** Built and verified on DEV. `tsc` clean; DB smoke-test
-confirms a custom row inserts with `menu_item_id` NULL + `is_custom` true and moves no stock. See
-`modules/custom-items.md`, `docs/superpowers/specs/2026-07-29-custom-items-design.md`.
+**Assignment-scoped Staff Dashboard.** Made table/room assignment the SINGLE source of truth for
+dashboard visibility + actions. Built and verified on DEV (`tsc --noEmit` clean; read-only prod DB
+check confirms no ungrouped tables + the 4 staff who flip ALL→NONE). No new migration. See the
+`decisions.md` "Assignment is the SINGLE source of truth" entry + `modules/permissions.md`.
 
 ## Files involved
-- `supabase/migrations/20260729200000_custom_items.sql` (`session_order_items.is_custom`).
-- `lib/custom-items.ts` (validate/snapshot); `lib/permissions.ts` (`manage_custom_items` + presets).
-- `app/actions/pos.ts` `submitOrder` (accepts `custom_items`, permission-gated) + `is_custom` on
-  `OrderItemRow`/`QueueOrderItem`/`PaidBillItem` and their selects.
-- `add/page.tsx` + `add/_components/menu-browser.tsx` (form + cart); markers in `order-item.tsx`,
-  `orders-queue.tsx`, `bill-ticket.tsx`, `print-tickets.tsx` (docket skip for station-less custom).
+- `lib/assignments.ts` — core rule (`viewerSeesAllGroups` → admin-only) + new `resolveViewerScope`
+  (ID-set scope for DB-level filtering; `includeWalkins` from walk-in perms).
+- `app/actions/pos.ts` — `getTableStatusOverview` (`.in("group_id", groupIds)` when `!seesAll`);
+  `getSalesReport`/`exportSalesCsv` (in-action row filter by assignment predicate — scopes every
+  figure); `submitPayment`, `forceCloseSession`, `cancelOrder`, `cancelOrderItem` gated
+  (`canAccessSession`); `getMyOrderQueue` left in-memory-scoped (shared with workstation staff).
+- `app/actions/rooms.ts` — `getRoomsOverview` (`.or(id.in / room_type_id.in)`; empty ⇒ no rooms).
+- `app/actions/{rooms,transfer}.ts` — audited, already pure assignment checks (no change).
 
 ## Completed
-- DEV migration applied; `tsc --noEmit` clean; DB insert semantics smoke-tested.
+- All code edits applied; `tsc --noEmit` clean.
+- Read-only prod verification: no ungrouped active tables anywhere; 4 non-admin `manage_tables`
+  holders with zero assignments will see a blank board until assigned (Shining Crown `Cashier`;
+  siddhatha `bijay`/`shivam`/`shubham`).
+- Decisions locked with user: (a) ship strict model as-is platform-wide, admins assign those 4;
+  (b) keep Sales in-action filtering (no `sales_report_scoped` RPC/migration).
 - Memory Bank updated.
 
 ## Remaining
-1. **Prod DB migration (user triggers):** `node scripts/migrate.mjs up --prod` — applies BOTH
-   pending prod migrations: `20260729100000_security_pin.sql` and `20260729200000_custom_items.sql`.
-   Nothing else prod-side (no env/cron).
-2. Deploy the app code (user drives git; nothing committed this session).
-3. Manual in-app QA once deployed: grant a waiter `manage_custom_items`; add a custom item routed
-   to a station and one bill-only; confirm KOT shows only the routed one, the bill shows both marked
-   "Custom", discounts/sales include them, and stock is untouched.
+1. Deploy the app code (user drives git; nothing committed this session).
+2. **User assigns the 4 affected staff** to their table-groups so they don't see a blank board.
+3. Manual in-app QA once deployed: as an assigned cashier — Tables/Orders/Sessions/Sales show only
+   assigned groups and Sales totals match only those tables; billing/closing an unassigned table is
+   refused. As admin — everything still visible. Kitchen staff still see their station's orders;
+   walk-in staff still see walk-ins.
 
 ## Risks
-- Custom items let staff type any price — mitigated by the dedicated permission (server re-checked)
-  and the "CUSTOM" marking everywhere.
+- Platform-wide behaviour change: any non-admin who relied on `manage_tables → sees everything` now
+  sees nothing until assigned. Mitigated by (2) above; no ungrouped tables exist so nothing else
+  regresses.
 
 ## Notes
-- Two prior tasks still pending USER ops:
-  1. **Security PIN** — prod migration `20260729100000_security_pin.sql` (folded into step 1 above)
-     + in-app QA. See `modules/security-pin.md`.
-  2. **Daily Finance Report** prod rollout (Vercel env GMAIL_USER/GMAIL_APP_PASSWORD/
-     SUMMARY_FROM_NAME/CRON_SECRET; pg_cron/Vault per `docs/daily-summary-setup.md`; enable per
-     restaurant). No code left in either.
+- **Daily Finance Report scheduler — NOW LIVE in prod (2026-07-29).** Root cause of "automatic
+  email never sent": the pg_cron scheduler was never provisioned in ANY environment (no pg_cron/
+  pg_net extensions, no `cron.job`, no Vault secrets) — manual "Retry" worked only because it calls
+  `sendDailySummary` directly, bypassing the whole scheduler. Fixed by installing `pg_cron`+`pg_net`,
+  storing Vault `app_base_url`=https://hrestrosewa.leafclutch.com.np + `cron_secret`(=Vercel
+  CRON_SECRET), and scheduling `daily-summary-emails` (`0 * * * *`). Verified: a live test POST sent
+  the 2026-07-28 report to Sanjib's 3 recipients (`report_deliveries` status=sent). The code was
+  never at fault. Business-day/timezone logic (`lib/business-day.ts`) is correct. NOTE: the enabled
+  restaurant is **"Sanjib"** (id e1c3b58a, was briefly "Leaf Clutch"); "testSanjib" is an unrelated
+  decoy that is NOT opted in.
+- Still pending USER ops: **Security PIN** + **Custom items** prod migrations
+  (`node scripts/migrate.mjs up --prod` — both pending) + in-app QA. See those module docs.
 
 ---
 
