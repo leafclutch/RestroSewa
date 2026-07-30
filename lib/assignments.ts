@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { createServiceClient } from "@/lib/supabase/service";
-import { hasPermission, PERMISSIONS } from "@/lib/permissions";
+import { hasAnyPermission, PERMISSIONS } from "@/lib/permissions";
 
 // ─── Table-Group based order/notification visibility ──────────────────────────
 //
@@ -10,7 +10,11 @@ import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 // that table's group. Staff in different groups are completely isolated.
 //
 //   • A staff member sees a table's activity  ⇔  they belong to the table's group.
-//   • Admins and staff with MANAGE_TABLES see everything (managers/owners).
+//   • ONLY the restaurant admin (owner) sees everything. Assignment is the single
+//     source of truth for every other role — a manager, cashier or receptionist sees
+//     ONLY the groups/rooms they are assigned to, nothing until assigned. (This used to
+//     also exempt MANAGE_TABLES holders; that blanket bypass was removed so "a manager
+//     assigned to one floor sees only that floor" holds for any permission combination.)
 //   • Sessions with no table (walk-in) have no group boundary, so they stay
 //     visible to all staff — there is nothing to isolate.
 //   • Rooms mirror tables: a room's group is its room type. Staff may also be
@@ -18,7 +22,7 @@ import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 //
 // This is intentionally strict: there is no "individual table" override and no
 // "unassigned table falls back to everyone" loophole. An ungrouped table is only
-// visible to admins/managers until an admin puts it in a group.
+// visible to the admin until an admin puts it in a group.
 
 export type StaffViewer = {
   id: string;
@@ -36,10 +40,9 @@ export type VisibilityFilter = {
 };
 
 export function viewerSeesAllGroups(viewer: StaffViewer): boolean {
-  return (
-    viewer.role === "restaurant_admin" ||
-    hasPermission(viewer, PERMISSIONS.MANAGE_TABLES)
-  );
+  // ONLY the owner is unrestricted. Every other role is scoped to its assignments,
+  // regardless of permission — so assignment is the single source of truth.
+  return viewer.role === "restaurant_admin";
 }
 
 // ─── Workstation assignment ───────────────────────────────────────────────────
@@ -145,10 +148,49 @@ export async function buildVisibilityFilter(
   restaurantId: string,
   viewer: StaffViewer
 ): Promise<VisibilityFilter> {
-  // Managers and admins bypass all group filtering — and don't touch the database.
+  // Only the admin bypasses all group filtering — and doesn't touch the database.
   if (viewerSeesAllGroups(viewer)) return SEES_EVERYTHING;
 
   return makeFilter(await loadAssignments(restaurantId, viewer.id));
+}
+
+/**
+ * The viewer's scope as ID SETS, for filtering at the QUERY/DB level rather than in
+ * memory. Same rules as buildVisibilityFilter's predicate, expressed as the arrays a
+ * query (or an RPC) can filter on: only load the rows the viewer may see.
+ *
+ * `includeWalkins`: walk-ins belong to no table group, so there's nothing to scope them
+ * by — they stay shared among staff who hold the walk-in permission.
+ */
+export type ViewerScope = {
+  seesAll: boolean;
+  groupIds: string[];
+  roomTypeIds: string[];
+  roomIds: string[];
+  includeWalkins: boolean;
+};
+
+export async function resolveViewerScope(
+  restaurantId: string,
+  viewer: StaffViewer
+): Promise<ViewerScope> {
+  const includeWalkins = hasAnyPermission(viewer, [
+    PERMISSIONS.VIEW_WALKINS,
+    PERMISSIONS.MANAGE_WALKINS,
+  ]);
+
+  if (viewerSeesAllGroups(viewer)) {
+    return { seesAll: true, groupIds: [], roomTypeIds: [], roomIds: [], includeWalkins: true };
+  }
+
+  const a = await loadAssignments(restaurantId, viewer.id);
+  return {
+    seesAll: false,
+    groupIds: [...a.myGroups],
+    roomTypeIds: [...a.myRoomTypes],
+    roomIds: [...a.myRooms],
+    includeWalkins,
+  };
 }
 
 /**

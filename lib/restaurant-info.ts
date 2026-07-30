@@ -15,9 +15,9 @@ import { normalizeBusinessType, type BusinessType } from "@/lib/business-type";
  * `revalidateRestaurantInfo`, so 60s is only the backstop for a mutation someone forgets
  * to wire up — short enough that the wrong tax rate can't outlive a single table's meal.
  *
- * `discount_pin_hash` NEVER leaves this function. It is collapsed to a boolean here, so a
- * password hash cannot end up in Vercel's Data Cache (shared across regions, persists
- * across deploys) nor be serialised toward a client component.
+ * `discount_pin_hash` and `security_pin_hash` NEVER leave this function. Each is collapsed
+ * to a boolean here, so a password hash cannot end up in Vercel's Data Cache (shared across
+ * regions, persists across deploys) nor be serialised toward a client component.
  */
 export type RestaurantConfig = {
   name: string;
@@ -35,6 +35,9 @@ export type RestaurantConfig = {
   service_charge_percent: number | undefined;
   /** Whether an admin has set a discount PIN. The hash itself never leaves the server. */
   discountEnabled: boolean;
+  /** Whether an admin has set a Security PIN — sensitive edits are possible only when true.
+   *  The hash itself never leaves the server. */
+  securityEnabled: boolean;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -56,7 +59,7 @@ export async function getRestaurantConfig(restaurantId: string): Promise<Restaur
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: rest } = await (service as any)
         .from("restaurants")
-        .select("name, address, contact_phone, pan_vat_number, logo_url, type, settings, qr_mode, discount_pin_hash")
+        .select("name, address, contact_phone, pan_vat_number, logo_url, type, settings, qr_mode, discount_pin_hash, security_pin_hash")
         .eq("id", restaurantId)
         .maybeSingle();
 
@@ -75,6 +78,7 @@ export async function getRestaurantConfig(restaurantId: string): Promise<Restaur
         tax_percent: numFromSettings(s, "tax_percent", "tax_rate", "gst_percent"),
         service_charge_percent: numFromSettings(s, "service_charge_percent", "service_charge"),
         discountEnabled: !!rest?.discount_pin_hash,
+        securityEnabled: !!rest?.security_pin_hash,
       } satisfies RestaurantConfig;
     },
     { revalidate: 60 }
@@ -94,9 +98,9 @@ export async function getRestaurantConfig(restaurantId: string): Promise<Restaur
  * column. If you ever add `bill_number_next` here, that stops being true and the cache
  * becomes worse than useless.
  *
- * The one write that ISN'T a `.from("restaurants").update(` is `set_discount_pin`, an RPC
- * — so a grep alone would have missed it. Grep for `update restaurants` in
- * supabase/migrations too when adding fields.
+ * The writes that AREN'T a `.from("restaurants").update(` are the RPCs `set_discount_pin`
+ * and `set_security_pin` — so a grep alone would have missed them. Grep for
+ * `update restaurants` in supabase/migrations too when adding fields.
  */
 export function revalidateRestaurantInfo(restaurantId: string): void {
   revalidateTenant(CACHE.restaurantInfo, restaurantId);

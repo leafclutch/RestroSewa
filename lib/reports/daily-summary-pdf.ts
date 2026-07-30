@@ -41,11 +41,14 @@ export async function renderDailySummaryPdf(
   pdf.row("Credit to us (receivable)", money(m.openingCreditToUs));
   pdf.row("Credit by us (payable)", money(m.openingCreditByUs));
 
+  // A mixed (cash + online) bill is NOT its own line: its cash part is already in
+  // "Cash sales" and its online part in "Online sales" (finance_report sums the
+  // cash_amount / online_amount columns across every payment, mixed included). A
+  // separate "Mixed" row would double-count it and break the section's total.
   pdf.sectionTitle("Sales");
   pdf.row("Cash sales", money(m.salesCash));
   pdf.row("Online sales", money(m.salesOnline));
   pdf.row("Card sales", money(m.salesCard));
-  pdf.row("Mixed payments (cash + online)", money(m.mixedPayments));
   pdf.row("Credit sales (billed, not collected)", money(m.salesCredit));
   pdf.row("Total sales", money(m.salesTotal), { strong: true });
   pdf.row("Total discounts", money(m.discounts));

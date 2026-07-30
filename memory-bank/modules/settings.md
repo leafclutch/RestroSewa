@@ -17,6 +17,9 @@ setting is its own card + its own Server Action so an unrelated "Save" never rid
 - **OT numbering** — per-workstation prefix (`ticket_code`) + next number (see `modules/printing.md`).
 - **Discount PIN** — set/clear the PIN that gates discounts (hashed in-DB via `set_discount_pin`;
   hash never leaves the server). No PIN ⇒ discounts impossible.
+- **Security PIN + Security activity** — independent admin PIN that gates editing completed
+  payments/purchases (and future sensitive ops), plus a read-only audit list. See
+  `modules/security-pin.md`. No PIN ⇒ those edits are OFF.
 - **Daily Finance Report Recipients** — up to 3 emails (add/edit/remove, validated, deduped) +
   **Report history** table with per-row Retry. See `modules/finance.md`, `lib/reports/*`.
 - **Logo** — restaurant logo in Supabase Storage (branding system).
@@ -29,7 +32,8 @@ setting is its own card + its own Server Action so an unrelated "Save" never rid
 
 # Important Components
 - `app/actions/settings.ts` (billing, business-day, discount PIN, OT numbering, daily-summary
-  get/update, `getReportHistory`, `retryReportDelivery`).
+  get/update, `getReportHistory`, `retryReportDelivery`); `app/actions/security.ts` +
+  `security-pin-client`/`security-activity-client` (Security PIN + audit).
 - `app/(admin)/admin/settings/page.tsx` + `_components/*` (settings, business-day, discount-pin,
   workstation-numbering, daily-summary clients).
 - `lib/restaurant-info.ts` (`getRestaurantConfig`, `revalidateRestaurantInfo`), `lib/business-day.ts`.

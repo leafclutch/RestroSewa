@@ -26,7 +26,7 @@ export type RestaurantInfo = {
   bill_number_label?: "bill" | "order";
 };
 
-export type BillItem = { id: string; item_name: string; item_price: number; quantity: number };
+export type BillItem = { id: string; item_name: string; item_price: number; quantity: number; is_custom?: boolean };
 
 // Present only for a bill that has been closed — drives the PAID / ON CREDIT block.
 export type BillPayment = {
@@ -429,12 +429,18 @@ export function BillTicket({
       ) : (
         items.map((it) => (
           <div key={it.id} style={{ display: "flex", alignItems: "flex-start", marginTop: 2 }}>
-            <span style={{ flex: 1, overflowWrap: "anywhere" }}>{it.item_name}</span>
+            <span style={{ flex: 1, overflowWrap: "anywhere" }}>
+              {it.item_name}
+              {it.is_custom && <span style={{ fontSize: 9, marginLeft: 3 }}>*</span>}
+            </span>
             <span style={{ width: 28, textAlign: "center" }}>{it.quantity}</span>
             <span style={{ width: 54, textAlign: "right" }}>{Number(it.item_price).toFixed(2)}</span>
             <span style={{ width: 62, textAlign: "right" }}>{(Number(it.item_price) * it.quantity).toFixed(2)}</span>
           </div>
         ))
+      )}
+      {items.some((i) => i.is_custom) && (
+        <div style={{ fontSize: 10, marginTop: 3 }}>* custom item</div>
       )}
       <Divider />
 

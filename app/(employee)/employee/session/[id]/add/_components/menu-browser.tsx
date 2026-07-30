@@ -1,13 +1,28 @@
 "use client";
 
-import { useState, useActionState, useTransition, useMemo } from "react";
+import { useState, useActionState, useTransition, useMemo, useRef } from "react";
 import { submitOrder } from "@/app/actions/pos";
 import type { ActionResult, CartItem } from "@/app/actions/pos";
 import type { CategoryRow, MenuItemRow, VariantRow } from "@/app/actions/menu";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { FoodMark } from "@/components/ui/food-mark";
 import { assignCategoryHues, styleOf } from "@/lib/category-colors";
-import { Minus, Plus, Search, ShoppingBag, X } from "lucide-react";
+import { Minus, Plus, Search, ShoppingBag, SquarePen, X } from "lucide-react";
+
+// A staff-typed off-menu line held in the cart before submit. `price` is a string while
+// being typed; it's parsed to a number only when the order is placed. `workstation_id` null
+// means bill-only (no KOT/BOT).
+type CustomLine = {
+  key: number;
+  name: string;
+  price: string;
+  quantity: number;
+  notes: string;
+  workstation_id: string | null;
+};
+
+type Workstation = { id: string; name: string };
 
 // A cart line is an item AND the variant chosen for it: a Large Coffee and a
 // Small Coffee are two lines, not one line of quantity 2. The map is therefore
@@ -28,11 +43,17 @@ export function MenuBrowser({
   categories,
   items,
   variants,
+  canAddCustom = false,
+  workstations = [],
 }: {
   sessionId: string;
   categories: CategoryRow[];
   items: MenuItemRow[];
   variants: VariantRow[];
+  /** Whether this user holds `manage_custom_items` — gates the whole custom-item affordance. */
+  canAddCustom?: boolean;
+  /** Stations a custom item can be routed to (empty ⇒ bill-only is the only choice). */
+  workstations?: Workstation[];
 }) {
   const [activeCategoryId, setActiveCategoryId] = useState<string>(categories[0]?.id ?? "");
   const [query, setQuery] = useState("");
@@ -40,6 +61,16 @@ export function MenuBrowser({
   const [picking, setPicking] = useState<MenuItemRow | null>(null);
   const [state, dispatch, pending] = useActionState<ActionResult, FormData>(submitOrder, null);
   const [, startTransition] = useTransition();
+
+  // Custom (off-menu) lines and the "Add custom item" form.
+  const customKey = useRef(1);
+  const [customLines, setCustomLines] = useState<CustomLine[]>([]);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [cName, setCName] = useState("");
+  const [cPrice, setCPrice] = useState("");
+  const [cQty, setCQty] = useState(1);
+  const [cNote, setCNote] = useState("");
+  const [cStation, setCStation] = useState<string>("");
 
   const variantsOf = useMemo(() => {
     const m = new Map<string, VariantRow[]>();
@@ -116,6 +147,27 @@ export function MenuBrowser({
   }, 0);
   const cartCount = cartEntries.reduce((a, [, qty]) => a + qty, 0);
 
+  // Custom lines add to the same order and the same running total.
+  const customCount = customLines.reduce((a, l) => a + l.quantity, 0);
+  const customTotal = customLines.reduce((a, l) => a + (parseFloat(l.price) || 0) * l.quantity, 0);
+  const totalCount = cartCount + customCount;
+  const grandTotal = cartTotal + customTotal;
+  const stationName = (id: string | null) => workstations.find((w) => w.id === id)?.name ?? null;
+
+  const cPriceNum = parseFloat(cPrice);
+  const customValid = cName.trim().length > 0 && Number.isFinite(cPriceNum) && cPriceNum >= 0 && cQty >= 1;
+
+  function addCustomLine() {
+    if (!customValid) return;
+    setCustomLines((l) => [
+      ...l,
+      { key: customKey.current++, name: cName.trim(), price: cPrice, quantity: cQty, notes: cNote.trim(), workstation_id: cStation || null },
+    ]);
+    setCName(""); setCPrice(""); setCQty(1); setCNote(""); setCStation("");
+    setCustomOpen(false);
+  }
+  const removeCustom = (key: number) => setCustomLines((l) => l.filter((x) => x.key !== key));
+
   function handlePlaceOrder() {
     // Only ids and quantities travel to the server; it prices the order itself.
     const cartItems: CartItem[] = cartEntries.map(([key, quantity]) => {
@@ -123,9 +175,20 @@ export function MenuBrowser({
       return { menu_item_id: itemId, variant_id: variantId, quantity, notes: null };
     });
 
+    // Custom lines carry a staff-typed name/price — the server re-validates and re-checks the
+    // permission, so this is a request, not a fact.
+    const custom = customLines.map((l) => ({
+      name: l.name,
+      price: parseFloat(l.price) || 0,
+      quantity: l.quantity,
+      notes: l.notes || null,
+      workstation_id: l.workstation_id,
+    }));
+
     const fd = new FormData();
     fd.set("session_id", sessionId);
     fd.set("items", JSON.stringify(cartItems));
+    fd.set("custom_items", JSON.stringify(custom));
     // dispatch must be called inside startTransition (React 19 rule)
     startTransition(() => dispatch(fd));
   }
@@ -167,6 +230,18 @@ export function MenuBrowser({
             </button>
           )}
         </div>
+
+        {/* Off-menu line — only for staff with `manage_custom_items`. */}
+        {canAddCustom && (
+          <button
+            type="button"
+            onClick={() => setCustomOpen(true)}
+            className="mt-2 inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border"
+            style={{ borderColor: "var(--color-hairline-input)", color: "var(--color-primary)", background: "var(--color-canvas)" }}
+          >
+            <SquarePen size={14} /> Add custom item
+          </button>
+        )}
       </div>
 
       {/* Category tabs — EVERY tab wears its category colour by default (tinted chip + coloured
@@ -396,8 +471,83 @@ export function MenuBrowser({
         </div>
       )}
 
+      {/* Add custom item */}
+      {customOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.4)" }}
+          onClick={() => setCustomOpen(false)}
+        >
+          <div
+            className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-4 flex flex-col gap-3"
+            style={{ background: "var(--color-canvas)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2">
+              <p className="flex-1 text-sm font-medium" style={{ color: "var(--color-ink)" }}>
+                Custom item
+              </p>
+              <button type="button" onClick={() => setCustomOpen(false)} style={{ color: "var(--color-ink-mute)" }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Item name</span>
+              <Input value={cName} maxLength={80} placeholder="e.g. Special platter" autoFocus onChange={(e) => setCName(e.target.value)} />
+            </label>
+
+            <div className="flex gap-2">
+              <label className="flex flex-col gap-1 flex-1">
+                <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Price (₹)</span>
+                <Input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0" value={cPrice} onChange={(e) => setCPrice(e.target.value)} />
+              </label>
+              <label className="flex flex-col gap-1 w-28">
+                <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Quantity</span>
+                <div className="flex items-center gap-1">
+                  <button type="button" aria-label="One less" onClick={() => setCQty((q) => Math.max(1, q - 1))}
+                    className="w-9 h-9 rounded-lg flex items-center justify-center border shrink-0"
+                    style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline-input)" }}>
+                    <Minus size={14} style={{ color: "var(--color-ink)" }} />
+                  </button>
+                  <span className="flex-1 text-center text-base font-medium tabular" style={{ color: "var(--color-ink)" }}>{cQty}</span>
+                  <button type="button" aria-label="One more" onClick={() => setCQty((q) => Math.min(99, q + 1))}
+                    className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: "var(--color-primary)" }}>
+                    <Plus size={14} style={{ color: "#fff" }} />
+                  </button>
+                </div>
+              </label>
+            </div>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Note (optional)</span>
+              <Input value={cNote} maxLength={120} placeholder="e.g. no onions" onChange={(e) => setCNote(e.target.value)} />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Send to station (optional)</span>
+              <select
+                value={cStation}
+                onChange={(e) => setCStation(e.target.value)}
+                className="w-full text-sm rounded-lg border px-3 py-2"
+                style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline-input)", color: "var(--color-ink)" }}
+              >
+                <option value="">Bill only (no kitchen ticket)</option>
+                {workstations.map((w) => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <Button type="button" variant="primary" className="w-full" disabled={!customValid} onClick={addCustomLine}>
+              Add to order
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Cart bar */}
-      {cartCount > 0 && (
+      {totalCount > 0 && (
         <div
           className="shrink-0 border-t px-4 py-3 flex flex-col gap-2"
           style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
@@ -426,16 +576,45 @@ export function MenuBrowser({
                 </div>
               );
             })}
+
+            {/* Custom lines — marked, with their station if routed to one. */}
+            {customLines.map((l) => (
+              <div key={`c-${l.key}`} className="flex items-center gap-2 text-xs">
+                <span className="flex-1 truncate" style={{ color: "var(--color-ink-mute)" }}>
+                  {l.quantity} × {l.name}
+                  <span
+                    className="ml-1 px-1 rounded align-middle"
+                    style={{ fontSize: "9px", lineHeight: "14px", background: "var(--color-canvas-soft)", color: "var(--color-primary)" }}
+                  >
+                    CUSTOM
+                  </span>
+                  {l.workstation_id && (
+                    <span className="ml-1" style={{ color: "var(--color-ink-mute)" }}>· {stationName(l.workstation_id)}</span>
+                  )}
+                </span>
+                <span className="tabular" style={{ color: "var(--color-ink-mute)" }}>
+                  ₹{((parseFloat(l.price) || 0) * l.quantity).toFixed(0)}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${l.name}`}
+                  onClick={() => removeCustom(l.key)}
+                  style={{ color: "var(--color-ink-mute)" }}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
           </div>
 
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 flex-1 min-w-0">
               <ShoppingBag size={16} style={{ color: "var(--color-primary)" }} />
               <span className="text-sm" style={{ color: "var(--color-ink)" }}>
-                {cartCount} item{cartCount !== 1 ? "s" : ""}
+                {totalCount} item{totalCount !== 1 ? "s" : ""}
               </span>
               <span className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>
-                · ₹{cartTotal.toFixed(0)}
+                · ₹{grandTotal.toFixed(0)}
               </span>
             </div>
             {state?.error && (

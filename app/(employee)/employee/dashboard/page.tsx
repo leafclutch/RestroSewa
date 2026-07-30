@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import type { RestaurantUserContext } from "@/lib/auth/guards";
-import { getStaffNav, NAV_ACCESS, ROOM_ACCESS, STOCK_ACCESS, WALKIN_ACCESS } from "@/lib/permissions";
+import { getStaffNav, hasPermission, PERMISSIONS, NAV_ACCESS, ROOM_ACCESS, STOCK_ACCESS, WALKIN_ACCESS } from "@/lib/permissions";
 import { getRestaurantConfig } from "@/lib/restaurant-info";
 import { hasRooms } from "@/lib/business-type";
 import { getMyOrderQueue, getSalesReport } from "@/app/actions/pos";
@@ -44,9 +44,9 @@ async function OrdersBody({ ru }: { ru: RestaurantUserContext }) {
   return <OrdersSection initialOrders={orders} canManage={NAV_ACCESS.canManageOrders(ru)} />;
 }
 
-async function SalesBody() {
+async function SalesBody({ canEditTender }: { canEditTender: boolean }) {
   const report = await getSalesReport({ period: "today" });
-  return <SalesView initial={report} embedded />;
+  return <SalesView initial={report} embedded canEditTender={canEditTender} />;
 }
 
 async function CreditsBody({ openId }: { openId: string | null }) {
@@ -96,6 +96,9 @@ export default async function EmployeeDashboardPage({
   // Rooms only exist for a hotel / restaurant+hotel client.
   const config = await getRestaurantConfig(restaurantUser.restaurant_id);
   const roomsEnabled = hasRooms(config.businessType);
+  // Billing staff (process_payments) may correct a bill's tender once a Security PIN is set —
+  // the PIN is the real gate (verified + audited server-side); admin passes the permission too.
+  const canEditTender = config.securityEnabled && hasPermission(restaurantUser, PERMISSIONS.PROCESS_PAYMENTS);
 
   const SCROLLABLE: SectionKey[] = ["orders", "tables", "walkins", "rooms", "sales", "credits", "menu", "stock", "purchases", "vendors"];
   const focusSection: SectionKey | null = openCreditId
@@ -176,7 +179,7 @@ export default async function EmployeeDashboardPage({
       subtitle: "Takings, breakdown & CSV export",
       body: (
         <Suspense fallback={<SectionSkeleton />}>
-          <SalesBody />
+          <SalesBody canEditTender={canEditTender} />
         </Suspense>
       ),
     });

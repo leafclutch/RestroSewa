@@ -5,6 +5,7 @@ import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { STOCK_ACCESS } from "@/lib/permissions";
 import { getPurchases, getPurchaseSummary, getVendorOptions } from "@/app/actions/purchases";
 import { getProductOptions } from "@/app/actions/stock";
+import { getRestaurantConfig } from "@/lib/restaurant-info";
 import { PurchasesClient } from "@/app/(admin)/admin/purchases/_components/purchases-client";
 
 // The staff-surface Purchases page. Renders the SAME PurchasesClient the admin surface
@@ -18,11 +19,12 @@ export default async function EmployeePurchasesPage() {
     redirect("/employee/dashboard");
   }
 
-  const [purchases, summary, vendors, products] = await Promise.all([
+  const [purchases, summary, vendors, products, config] = await Promise.all([
     getPurchases({ filter: "all" }),
     getPurchaseSummary(),
     getVendorOptions(),
     getProductOptions(),
+    getRestaurantConfig(restaurantUser.restaurant_id),
   ]);
 
   return (
@@ -42,6 +44,8 @@ export default async function EmployeePurchasesPage() {
         vendors={vendors}
         products={products}
         canManage={STOCK_ACCESS.canManagePurchases(restaurantUser)}
+        canEdit={restaurantUser.role === "restaurant_admin"}
+        securityEnabled={config.securityEnabled}
       />
     </div>
   );

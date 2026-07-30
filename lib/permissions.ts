@@ -8,6 +8,10 @@ export const PERMISSIONS = {
   EDIT_ORDERS:      "edit_orders",
   CANCEL_ORDERS:    "cancel_orders",
   CLOSE_BILLS:      "close_bills",
+  // Custom items — adding a manual, off-menu line with a STAFF-TYPED price. Held apart from
+  // create_orders on purpose: a normal order can never set its own price (lib/order-items.ts),
+  // so putting an arbitrary amount on a bill is a distinct, more-trusted act.
+  MANAGE_CUSTOM_ITEMS: "manage_custom_items",
   // Menu
   VIEW_MENU:        "view_menu",
   MANAGE_MENU:      "manage_menu",
@@ -75,6 +79,14 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
       { key: "edit_orders",    label: "Edit Orders" },
       { key: "cancel_orders",  label: "Cancel Orders" },
       { key: "close_bills",    label: "Close Bills" },
+    ],
+  },
+  {
+    label: "Custom Items",
+    items: [
+      // Adding a manual/off-menu line with a staff-typed price. Separate from Create Orders
+      // because it lets staff put an arbitrary amount on a bill.
+      { key: "manage_custom_items", label: "Add Custom Items" },
     ],
   },
   {
@@ -435,6 +447,7 @@ export const STAFF_PRESETS: StaffPresetDef[] = [
       P.CLOSE_BILLS,
       P.PROCESS_PAYMENTS,
       P.APPLY_DISCOUNTS,
+      P.MANAGE_CUSTOM_ITEMS,
     ],
   },
   {
@@ -479,6 +492,7 @@ export const STAFF_PRESETS: StaffPresetDef[] = [
       P.EDIT_ORDERS,
       P.CANCEL_ORDERS,
       P.CLOSE_BILLS,
+      P.MANAGE_CUSTOM_ITEMS,
       P.VIEW_MENU,
       P.MANAGE_MENU,
       P.VIEW_TABLES,

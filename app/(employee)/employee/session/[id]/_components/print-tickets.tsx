@@ -109,6 +109,9 @@ function splitDockets(items: OrderItemRow[], workstations: PrintStation[]): Dock
   const buckets = new Map<string, Docket>();
   for (const it of items) {
     const st = stationFor(it);
+    // A custom line that isn't routed to a station is bill-only — it must never reach a
+    // KOT/BOT (including the "General" no-station docket). Menu items keep their old behaviour.
+    if (!st && it.is_custom) continue;
     const key = st ? st.id : NO_STATION;
     if (!buckets.has(key)) {
       buckets.set(
@@ -195,7 +198,10 @@ function StationTicket({
           <div key={it.id} style={{ marginTop: 4 }}>
             <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
               <span style={{ fontWeight: 700, minWidth: 28, fontSize: 15 }}>{it.quantity}×</span>
-              <span style={{ flex: 1, overflowWrap: "anywhere" }}>{it.item_name}</span>
+              <span style={{ flex: 1, overflowWrap: "anywhere" }}>
+                {it.item_name}
+                {it.is_custom && <span style={{ fontSize: 11, fontWeight: 700 }}> (custom)</span>}
+              </span>
             </div>
             {it.notes && <div style={{ paddingLeft: 36, fontStyle: "italic", overflowWrap: "anywhere" }}>↳ {it.notes}</div>}
           </div>
@@ -287,6 +293,7 @@ export function SessionPrintButtons({
     item_name: it.item_name,
     item_price: Number(it.item_price),
     quantity: it.quantity,
+    is_custom: it.is_custom,
   }));
 
   const openPreview = (key: string) => {

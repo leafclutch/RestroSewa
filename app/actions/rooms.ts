@@ -2,7 +2,7 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
-import { buildVisibilityFilter } from "@/lib/assignments";
+import { buildVisibilityFilter, resolveViewerScope } from "@/lib/assignments";
 import { hasPermission, NAV_ACCESS, PERMISSIONS, ROOM_ACCESS } from "@/lib/permissions";
 import { buildFolio, CHARGE_TYPES } from "@/lib/room-billing";
 import type { RoomChargeType, RoomFolio } from "@/lib/room-billing";
@@ -68,9 +68,26 @@ export async function getRoomsOverview(): Promise<RoomOverview[]> {
   const svc = service as any;
   const rid = ru.restaurant_id;
 
+  // Assignment is the source of truth: scope the rooms query itself so a non-admin
+  // never receives rooms outside their assigned rooms / room-types. A viewer with no
+  // room assignment matches nothing — the strict "nothing until assigned" model. The
+  // in-memory canSeeRoom filter below stays as defense-in-depth.
+  const scope = await resolveViewerScope(rid, ru);
+  let roomsQuery = svc.from("rooms").select("id, number, status, room_type_id").eq("restaurant_id", rid);
+  if (!scope.seesAll) {
+    const clauses: string[] = [];
+    if (scope.roomIds.length > 0) clauses.push(`id.in.(${scope.roomIds.join(",")})`);
+    if (scope.roomTypeIds.length > 0) clauses.push(`room_type_id.in.(${scope.roomTypeIds.join(",")})`);
+    // No assignment at all → match no rooms (a filter that can never be true).
+    roomsQuery = clauses.length > 0
+      ? roomsQuery.or(clauses.join(","))
+      : roomsQuery.eq("id", "00000000-0000-0000-0000-000000000000");
+  }
+  roomsQuery = roomsQuery.order("number");
+
   const [roomsRes, typesRes, staysRes, sessionsRes, byRoomRes, byTypeRes, staffRes] =
     await Promise.all([
-      svc.from("rooms").select("id, number, status, room_type_id").eq("restaurant_id", rid).order("number"),
+      roomsQuery,
       svc.from("room_types").select("id, name, base_price").eq("restaurant_id", rid),
       svc
         .from("room_stays")

@@ -22,6 +22,9 @@ the reference for *what* and *how*.
 # Permission groups (constants)
 - Dashboard: `view_dashboard`
 - Orders: `view_orders`, `manage_orders`, `create_orders`, `edit_orders`, `cancel_orders`, `close_bills`
+- Custom items: `manage_custom_items` (own group) — add an off-menu line with a STAFF-TYPED price.
+  Held apart from `create_orders` because a normal order can never set its own price
+  (`lib/order-items.ts`); Cashier + Manager presets include it. See `modules/custom-items.md`.
 - Menu: `view_menu`, `manage_menu`
 - Tables: `view_tables`, `manage_tables`
 - Walk-ins: `view_walkins`, `manage_walkins`
@@ -46,6 +49,26 @@ Helpers encode tiers so a manager needn't tick a read box under a write box:
 - **PAYROLL_ACCESS**: `canViewPayroll` (view|manage) · `canManagePayroll`.
 - **NAV_ACCESS**: `canSeeOrders`, `canManageOrders`, `canSeeSales`, `canManageCredits`
   (credits require BOTH `process_payments` + `close_bills`).
+
+# Assignment scoping (who sees WHICH tables/rooms) — distinct from permissions
+Permissions decide WHAT you may do; **assignment** decides WHICH tables/rooms you may do it to.
+`lib/assignments.ts` is the single source of truth. Staff are assigned to **table-groups**
+(`restaurant_user_table_groups`), **room-types** (`restaurant_user_room_types`), **pinned rooms**
+(`restaurant_user_rooms`), or **workstations** (`restaurant_user_workstations`).
+- `viewerSeesAllGroups` → **true ONLY for `restaurant_admin`**. Every other staff member (managers
+  included) is scoped to their assignments, nothing until assigned. `manage_tables` no longer grants
+  blanket visibility (that bypass was removed — see `decisions.md`).
+- `buildVisibilityFilter(restaurantId, viewer)` → `{ seesAll, canSeeTable(id), canSeeRoom(id) }` —
+  the predicate every screen + write-action uses. `resolveViewerScope(...)` → the same rules as ID
+  arrays (`groupIds`/`roomTypeIds`/`roomIds`/`includeWalkins`) for **DB-level** filtering.
+- Reads enforced at the DB: `getTableStatusOverview` (`.in("group_id", groupIds)`), `getRoomsOverview`
+  (`.or(id.in / room_type_id.in)`). `getMyOrderQueue` filters in memory (its query is shared with
+  workstation staff who need all active sessions). **Sales** (`getSalesReport`/`exportSalesCsv`) filter
+  payment rows by the predicate in the server action before deriving any figure — no RPC.
+- Writes: `submitPayment`, `forceCloseSession`, `cancelOrder`, `cancelOrderItem` gate on the predicate
+  (`canAccessSession`); room + transfer actions already do.
+- **Walk-ins** (no table/room) have no group boundary → **restaurant-wide** among staff with
+  `view_walkins`/`manage_walkins`. **Workstation staff** (kitchen/bar) route by station, not group.
 
 # Enforcement
 - **Backend (the security boundary):** every Server Action re-checks via `hasPermission` /

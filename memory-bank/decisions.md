@@ -93,3 +93,40 @@ follow-up. This exists so future work doesn't re-propose things already chosen o
 
 - **Don't export sync helpers from a `"use server"` module.** It typechecks but 500s the route
   at runtime. Keep pure helpers in plain modules; import them into actions.
+
+- **Assignment is the SINGLE source of truth for dashboard visibility — strict, admin-only bypass.**
+  `viewerSeesAllGroups` (`lib/assignments.ts`) now returns true ONLY for `restaurant_admin`; the old
+  `manage_tables → seesAll` blanket bypass is gone. Every other staff member — managers included —
+  sees and can act on ONLY their assigned table-groups / room-types / pinned rooms, nothing until
+  assigned. This single rule re-scopes every surface already using the predicate (Tables, Orders,
+  Sessions, Rooms display + the order/billing write-gates). *Reason:* the requirement "a cashier/
+  manager assigned to one floor sees only that floor" must hold for ANY permission combo, not be
+  defeated by holding `manage_tables`. Capability perms (`close_bills`, `process_payments`) still
+  gate WHAT you may do, but no longer WIDEN what you can see/touch. **Reads enforced at the DB:**
+  `getTableStatusOverview` (`.in("group_id", groupIds)`) and `getRoomsOverview` (`.or(id.in /
+  room_type_id.in)`); a viewer with no assignment matches nothing. `getMyOrderQueue` stays
+  in-memory-scoped (its query is shared with workstation staff who need all active sessions; the
+  non-workstation branch drops unseen sessions server-side before the result is built). **Sales
+  scoped in the server action, not via an RPC** — `getSalesReport`/`exportSalesCsv` load the
+  restaurant's payments (with `sessions(table_id,room_id)` + `room_stays(room_id)` embeds) and filter
+  rows by the assignment predicate before deriving ANY figure; chosen over a `sales_report_scoped`
+  SQL function to reuse the existing aggregation and ship no migration, still fully server-enforced.
+  **Write-bypass removed:** `forceCloseSession` no longer lets `close_bills||manage_tables` skip the
+  assignment check; `submitPayment`/`cancelOrder`/`cancelOrderItem` gate on the predicate
+  (`canAccessSession`). **Walk-ins stay restaurant-wide** among walk-in-permitted staff (no group to
+  scope by). *Deploy note:* a non-admin with `manage_tables` but no assignments now sees a blank
+  board until assigned (4 such staff existed platform-wide at rollout — chosen: ship as-is, admins
+  assign them). See `modules/permissions.md`.
+
+- **Security PIN & sensitive edits: in-place edit + audit, not reversal.** A separate admin-only
+  4-digit PIN (mirrors the Discount PIN's in-DB bcrypt storage) gates editing completed payments
+  (re-tender) and purchases. Chosen **in-place mutation + a before→after audit row** over
+  reversal/void entries. *Reason:* finance & stock are already DERIVED from `payments`/
+  `purchase_items`, so an edited row simply re-derives correctly — the audit log is the
+  immutability guarantee, and void semantics would have meant new bill/void numbers and teaching
+  every report to net voids. It's built as a **reusable authorization service**
+  (`verifySecurityPin` + `log_security_event` + a new `operation` string) so refunds/stock-reset/
+  finance-reset reuse it. Purchase edits reconcile vendor credit in-transaction and **block**
+  (`VENDOR_BALANCE_NEGATIVE`) rather than let a balance go negative; payment edits keep the
+  amount/bill-number frozen and only re-split the tender (method is derived from the split). No
+  PIN ⇒ these edits are OFF (no un-gated path). See `modules/security-pin.md`.
