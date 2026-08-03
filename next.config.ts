@@ -3,9 +3,15 @@ import type { NextConfig } from "next";
 // Restaurant logos live in Supabase Storage, so `next/image` has to be told the
 // bucket's host is trusted — otherwise every logo throws at render. Derived from
 // the project URL rather than hard-coded, so a new Supabase project just works.
-const supabaseHost = (() => {
+//
+// The PROTOCOL has to be derived too, not assumed. Hosted Supabase is always
+// https, but a self-hosted stack behind its own gateway may serve plain http —
+// and `next/image` matches remotePatterns on protocol as well as host, so an
+// assumed "https" silently rejects every logo on such a deployment.
+const supabaseImageHost = (() => {
   try {
-    return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").hostname;
+    const url = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "");
+    return { hostname: url.hostname, protocol: url.protocol.replace(":", "") as "http" | "https" };
   } catch {
     return null;
   }
@@ -42,8 +48,8 @@ const nextConfig: NextConfig = {
   skipProxyUrlNormalize: true,
 
   images: {
-    remotePatterns: supabaseHost
-      ? [{ protocol: "https", hostname: supabaseHost, pathname: "/storage/v1/object/public/**" }]
+    remotePatterns: supabaseImageHost
+      ? [{ ...supabaseImageHost, pathname: "/storage/v1/object/public/**" }]
       : [],
   },
 

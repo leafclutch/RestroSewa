@@ -187,7 +187,8 @@ function StationTicket({
         </div>
       )}
       <Line label={number.label} value={number.value} />
-      <Line label="Date" value={at.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} />
+      <Line label="Date" value={at.toLocaleDateString("en-IN", { dateStyle: "medium" })} />
+      <Line label="Time" value={at.toLocaleTimeString("en-IN", { timeStyle: "short" })} />
       {staffName && <Line label="Staff" value={staffName} />}
       <Divider />
 

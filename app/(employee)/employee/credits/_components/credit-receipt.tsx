@@ -55,7 +55,15 @@ export function CreditReceiptButton({ customerId }: { customerId: string }) {
       </Button>
 
       {receipt && (
-        <PrintModal open={open} onClose={() => setOpen(false)} title="Credit receipt — preview">
+        // paperWidthMm is NOT optional in practice: omitting it silently defaulted this
+        // receipt to 80mm, so every 58mm restaurant printed a credit receipt at the wrong
+        // width while all their other tickets were correct.
+        <PrintModal
+          open={open}
+          onClose={() => setOpen(false)}
+          title="Credit receipt — preview"
+          paperWidthMm={receipt.restaurant.paper_width_mm ?? 80}
+        >
           <CreditReceiptTicket
             restaurant={receipt.restaurant}
             creditNumber={receipt.customer.customer_code}

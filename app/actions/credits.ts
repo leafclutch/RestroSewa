@@ -7,6 +7,7 @@ import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { computeCreditStats } from "@/lib/credits";
 import { resolveSplit } from "@/lib/payment-split";
 import { businessPeriodBounds } from "@/lib/business-day";
+import { getRestaurantConfig } from "@/lib/restaurant-info";
 import type { CreditStats, CreditStatus } from "@/lib/credits";
 
 export type ActionResult = { error: string } | null;
@@ -399,6 +400,9 @@ export type CreditReceipt = {
     address: string | null;
     contact_phone: string | null;
     pan_vat_number: string | null;
+    /** Thermal roll width. Without it the receipt silently printed at 80mm on every
+     *  restaurant configured for 58mm — see getCreditReceipt. */
+    paper_width_mm: 58 | 80;
   };
 };
 
@@ -413,21 +417,21 @@ export async function getCreditReceipt(
   const customer = await getCreditDetail(customerId);
   if ("error" in customer) return customer;
 
-  const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: rest } = await (service as any)
-    .from("restaurants")
-    .select("name, address, contact_phone, pan_vat_number")
-    .eq("id", ru.restaurant_id)
-    .maybeSingle();
+  // Use the shared, cached config rather than a private query. The private one selected
+  // four columns and so never saw `settings.print_paper_width` — which is exactly how this
+  // receipt ended up printing at 80mm for restaurants set to 58mm while all their other
+  // tickets were right. Going through getRestaurantConfig also means it now picks up a
+  // settings change through the same invalidation path as every other printed document.
+  const rest = await getRestaurantConfig(ru.restaurant_id);
 
   return {
     customer,
     restaurant: {
-      name: rest?.name ?? "Restaurant",
-      address: rest?.address ?? null,
-      contact_phone: rest?.contact_phone ?? null,
-      pan_vat_number: rest?.pan_vat_number ?? null,
+      name: rest.name,
+      address: rest.address,
+      contact_phone: rest.contact_phone,
+      pan_vat_number: rest.pan_vat_number,
+      paper_width_mm: rest.paper_width_mm,
     },
   };
 }

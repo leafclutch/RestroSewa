@@ -130,3 +130,72 @@ follow-up. This exists so future work doesn't re-propose things already chosen o
   (`VENDOR_BALANCE_NEGATIVE`) rather than let a balance go negative; payment edits keep the
   amount/bill-number frozen and only re-split the tender (method is derived from the split). No
   PIN ⇒ these edits are OFF (no un-gated path). See `modules/security-pin.md`.
+
+- **Self-hosted migration: replay migrations, copy data over Kong, never touch a password.**
+  Moving to self-hosted Supabase on DigitalOcean/Coolify (2026-08-01). Four decisions worth keeping.
+  **(1) Reach the database through `postgres-meta` at Kong's `/pg/query`, not SSH or an exposed
+  port.** The container's Postgres has no published port and a Docker-internal hostname
+  (`supabase-db-<id>`), so the obvious routes are an SSH tunnel or publishing 5432. Kong is already
+  public, already authenticates the service-role key, and reaches the DB as `supabase_admin`
+  (superuser) — so `scripts/lib/pg-http.mjs` wraps it in a `pg.Client` shape and nothing else had to
+  change. No key on anyone's laptop, no database on the internet. *Its one constraint:* `/pg/query`
+  takes a SQL string with **no bind parameters**, and one request is one connection (so a
+  transaction cannot span requests — migrations and insert-chunks each carry their own
+  `begin…commit`). **(2) Bulk rows travel as dollar-quoted JSON through
+  `jsonb_populate_recordset`, not as escaped literals.** Hand-rendering ~7k rows into SQL is exactly
+  where a data migration corrupts itself; instead Postgres parses the JSON and coerces from the
+  table's own row type, so quotes, backslashes, newlines, emoji and Devanagari all survive
+  untouched, `text[]` vs `jsonb` stops being a guess, and the 7 `GENERATED ALWAYS` columns are
+  simply excluded from the column list. **(3) Schema comes from replaying the 72 migrations, not a
+  dump** — so the new server's `supabase_migrations` ledger is truthful, and `pg_dump` version
+  skew (source 17.6, destination 15.8) never enters the picture. **(4) Superadmin and every staff
+  login migrate by COPYING THE BCRYPT HASH** from `auth.users`. Hashes are portable between
+  servers, so the exact live password keeps working and no one — including whoever runs the
+  migration — ever sees or resets it. Verified by comparing `md5(encrypted_password)` on both sides.
+  *Proof of faithfulness is derived values, not row counts:* `dashboard_stats`/`finance_report`/
+  `finance_transactions`/`stock_report` recomputed independently for all 7 restaurants return
+  identical output (`scripts/verify-parity.mjs`) — counts agree perfectly on a database whose
+  foreign keys all point at the wrong parents.
+
+- **Enum ADD VALUE and its first use cannot share a migration.** `20260721000000` added
+  `restaurant_hotel` to `restaurant_type` AND a CHECK constraint using it; Postgres rejects that
+  (`55P04 unsafe use of new value … HINT: New enum values must be committed before they can be
+  used`) because each migration runs in one transaction. It had never surfaced because that file was
+  **baselined** — recorded as applied without ever running — on both existing projects, which had
+  been changed by hand; a genuinely empty database was the first thing to execute it. Fixed by
+  splitting the constraint into `20260721000001`, which keeps BOTH migrations atomic. Rejected the
+  alternative (running the file outside a transaction) because it trades a real guarantee for
+  nothing. **Baselining hides bugs — a baselined migration is untested SQL.**
+
+- **Grants and the anon lockdown belong in migrations, not in the platform.** Two gaps that only a
+  from-scratch build could expose. **(a)** No migration ever granted anything: hosted Supabase's
+  default privileges silently supplied them, so a fresh database came out complete and unusable
+  (`permission denied for table finance_openings`). Now `20260801000000` grants `service_role`
+  explicitly, including `alter default privileges` so the next new table cannot reintroduce it.
+  **(b)** The self-hosted image does the opposite — it grants `anon` and `authenticated` **full CRUD
+  on every table**, from two grantor roles (`postgres` and `supabase_admin`), where hosted
+  production grants them nothing. Three tables (`restaurant_user_rooms`, `restaurant_user_room_types`,
+  `restaurant_user_table_groups`) had also never been RLS-enabled — the repo could not reproduce
+  what production had set by hand. Since **the anon key ships inside the client bundle**, those two
+  together meant a public key could read and rewrite staff-to-table assignment. `20260801000001`
+  enables RLS on the three and revokes anon/authenticated, iterating `pg_default_acl` under
+  `pg_has_role` so it also works where the migration runs as `postgres` (which is not a member of
+  `supabase_admin`). Safe to revoke because there is **no client-side table access anywhere** —
+  every server path uses the service-role client.
+
+- **The self-hosted stack's "unhealthy" status was a data bug in Coolify, so we fixed Coolify's
+  records — not the symptom.** Ten rows in Coolify's `local_file_volumes` table carried
+  `is_directory = true` for bind-mount paths that must be files (`volumes/api/kong.yml`, the seven
+  `volumes/db/*.sql`, both `volumes/functions/*/index.ts`). Docker creates a **directory** when a
+  bind-mount source is missing, and once a directory occupies the path a file can never be written
+  there — so the deploy was permanently broken and *no redeploy could fix it*. The proof was the
+  sibling Supabase stack on the same droplet with the identical rows set to `false`. We rejected the
+  tempting local fixes — patching the running database by hand (leaves a permanently
+  half-initialised cluster, because `/docker-entrypoint-initdb.d` only ever runs on an empty
+  PGDATA) and editing the compose to `entrypoint: ["/bin/sh", …]` (treats the symptom and leaves
+  `kong.yml` and the init SQL still missing). Instead: restore the ten templates from the healthy
+  stack — they are pure `$VAR` templates carrying no secrets and no stack-specific values, verified
+  before copying — then delete the half-initialised volume so initdb re-runs correctly, and correct
+  the `is_directory` flags so redeploys stop recreating the fault. **The lesson worth keeping: when
+  a managed platform's output is wrong, look for the platform's own record of what it intended to
+  build — and diff it against a working instance.**

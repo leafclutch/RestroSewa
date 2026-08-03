@@ -783,11 +783,9 @@ export function FolioClient({
       )}
 
       <PrintModal open={billOpen} onClose={() => setBillOpen(false)} title="Room bill — preview" paperWidthMm={restaurant.paper_width_mm ?? 80}>
+        {/* No logo on paper — a thermal head is one-bit black, so a logo smears; the
+            restaurant's name is the branding. Same rule as every other receipt. */}
         <div style={{ textAlign: "center" }}>
-          {restaurant.logo_url && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={restaurant.logo_url} alt="" style={{ maxHeight: 48, maxWidth: "100%", margin: "0 auto 4px", display: "block", objectFit: "contain" }} />
-          )}
           <div style={{ fontWeight: 700, fontSize: 15 }}>{restaurant.name}</div>
           {restaurant.address && <div style={{ fontSize: 11 }}>{restaurant.address}</div>}
           {restaurant.contact_phone && <div style={{ fontSize: 11 }}>Ph: {restaurant.contact_phone}</div>}
@@ -813,6 +811,7 @@ export function FolioClient({
         <TicketLine label="TOTAL" value={rupee(f.grandTotal)} bold />
         <Divider />
         <div style={{ textAlign: "center", fontSize: 11 }}>Served by {staffName}</div>
+        <Divider />
         <PoweredBy />
       </PrintModal>
     </div>

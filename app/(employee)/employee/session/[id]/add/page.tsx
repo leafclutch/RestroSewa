@@ -1,4 +1,4 @@
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
@@ -12,6 +12,68 @@ import { createServiceClient } from "@/lib/supabase/service";
 import type { MenuItemRow } from "@/app/actions/menu";
 import { MenuBrowser } from "./_components/menu-browser";
 import { ChevronLeft } from "lucide-react";
+
+/**
+ * Why this screen cannot show the menu — in words, not a 404.
+ *
+ * Two things can be true, and they need different actions from the person holding the
+ * till, so they are worded differently rather than collapsed into one apology. The status
+ * is shown because "closed" vs "pending_activation" is the difference between reopening
+ * the table and approving a customer's request.
+ */
+function AddItemsUnavailable({
+  sessionId,
+  reason,
+  status,
+}: {
+  sessionId: string;
+  reason: "not-found" | "not-open";
+  status: string | null;
+}) {
+  const title =
+    reason === "not-found"
+      ? "This order isn't open any more"
+      : "This table's order is no longer open";
+  const detail =
+    reason === "not-found"
+      ? "It may have been closed, or moved to another table, on a different till."
+      : `Reopen the table to add more items${status ? ` (status: ${status})` : ""}.`;
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-56px)]">
+      <div
+        className="flex items-center gap-3 px-4 py-3 border-b shrink-0"
+        style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+      >
+        <Link
+          href={`/employee/session/${sessionId}`}
+          className="flex items-center gap-1 text-sm"
+          style={{ color: "var(--color-ink-mute)" }}
+        >
+          <ChevronLeft size={14} />
+          Back
+        </Link>
+        <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
+          Add items
+        </span>
+      </div>
+
+      <div className="flex-1 flex items-center justify-center px-6">
+        <div className="text-center max-w-xs">
+          <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>{title}</p>
+          <p className="text-sm mt-1.5" style={{ color: "var(--color-ink-mute)" }}>{detail}</p>
+          <Link
+            href={`/employee/session/${sessionId}`}
+            className="inline-block mt-4 text-sm px-4 py-2 rounded-pill border"
+            style={{ borderColor: "var(--color-hairline)", color: "var(--color-ink)" }}
+          >
+            Back to the table
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default async function AddItemsPage({
   params,
@@ -36,7 +98,20 @@ export default async function AddItemsPage({
     .eq("restaurant_id", restaurant_id)
     .maybeSingle();
 
-  if (!session || session.status !== "active") notFound();
+  // A 404 is the wrong answer here, and it is why this was impossible to diagnose from
+  // the floor: "page not found" tells a cashier nothing about a table sitting in front of
+  // them, and it looks identical to a broken route. Say which of the two things is
+  // actually true and give them the way back. Neither message leaks anything — whoever
+  // asked already holds the session id.
+  if (!session || session.status !== "active") {
+    return (
+      <AddItemsUnavailable
+        sessionId={sessionId}
+        reason={!session ? "not-found" : "not-open"}
+        status={session?.status ?? null}
+      />
+    );
+  }
 
   const categories = await getMenuCategories(restaurant_id);
   const activeCategories = categories.filter((c) => c.is_active);
