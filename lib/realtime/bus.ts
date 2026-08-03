@@ -61,7 +61,11 @@ function listenerConfig() {
   // talks to Supabase over HTTP, not this URL).
   const url = raw.trim().replace(/^["']|["']$/g, "");
 
-  const m = url.match(/^postgres(?:ql)?:\/\/([^:]+):(.*)@([^:/]+):(\d+)\/(.+)$/);
+  // The database name stops at `?` so a libpq query string (`?sslmode=…`) is read
+  // as parameters rather than swallowed into the name.
+  const m = url.match(
+    /^postgres(?:ql)?:\/\/([^:]+):(.*)@([^:/]+):(\d+)\/([^?]+)(?:\?(.*))?$/
+  );
   if (!m) {
     console.error(
       "[realtime] SUPABASE_DB_URL is not a parseable connection string " +
@@ -69,7 +73,20 @@ function listenerConfig() {
     );
     return null;
   }
-  const [, user, password, host, port, database] = m;
+  const [, user, password, host, port, database, query] = m;
+
+  // TLS is decided by the connection string, using libpq's own `sslmode` — one
+  // source of truth, travelling with the URL it applies to, rather than a second
+  // env var that can drift out of step with it.
+  //
+  // The default MUST stay on: Supabase's hosted databases require TLS and carry
+  // no sslmode. But a self-hosted Postgres container normally runs with
+  // `ssl = off` (the DigitalOcean/Coolify one does — measured), and asking for
+  // TLS there makes node-postgres throw "The server does not support SSL
+  // connections". On this code path that is the worst kind of failure: the
+  // listener never connects, every dashboard quietly falls back to its slow
+  // poll, and nothing on screen says so.
+  const sslmode = new URLSearchParams(query ?? "").get("sslmode");
 
   return {
     user,
@@ -78,7 +95,7 @@ function listenerConfig() {
     // 6543 (transaction pooler) cannot deliver NOTIFY across connections.
     port: process.env.REALTIME_DB_URL ? Number(port) : 5432,
     database,
-    ssl: { rejectUnauthorized: false },
+    ssl: sslmode === "disable" ? false : { rejectUnauthorized: false },
     keepAlive: true,
   };
 }

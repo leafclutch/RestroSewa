@@ -92,26 +92,24 @@ grant all on table restaurant_user_tables to service_role;
 
 
 -- ── 4. The restaurant type used by hotels that also run a restaurant ──────────
+-- The CHECK constraint that USES this value lives in the next migration, not
+-- here. PostgreSQL refuses to let a new enum value be used in the same
+-- transaction that added it ("unsafe use of new value ... of enum type"), and
+-- since each migration is applied as one transaction, the two cannot share a
+-- file. This is a server restriction, not a style choice.
+--
+-- It went unnoticed until 2026-08-01 because this file had only ever been
+-- BASELINED — recorded as applied without being run — on both existing
+-- projects, which had already been changed by hand. Replaying it into a genuinely
+-- empty database was what surfaced it.
 alter type restaurant_type add value if not exists 'restaurant_hotel';
 
 
 -- ── 5. CHECK constraints and indexes that only production had ─────────────────
 -- Found by comparing constraints and indexes, not just columns — a column-level
 -- diff reported the two schemas as identical while these five were still missing.
---
--- `restaurants_type_check` is the one with teeth: `restaurant_type` has seven
--- values but production only PERMITS three, so without this a dev database would
--- happily create a 'cafe' that production would reject — a difference that would
--- only surface on deploy.
 do $$
 begin
-  if not exists (select 1 from pg_constraint where conname = 'restaurants_type_check') then
-    alter table restaurants add constraint restaurants_type_check
-      check (type = any (array['restaurant'::restaurant_type,
-                               'hotel'::restaurant_type,
-                               'restaurant_hotel'::restaurant_type]));
-  end if;
-
   -- These two columns are `text` in production, not enums; the CHECK is what
   -- constrains them.
   if not exists (select 1 from pg_constraint where conname = 'menu_items_food_type_check') then
