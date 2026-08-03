@@ -1,7 +1,21 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { hasPermission } from "@/lib/permissions";
 import type { Permission } from "@/lib/permissions";
 import { getAuthUser, getStaffRow, isSuperAdmin } from "@/lib/auth/current-user";
+
+/**
+ * Where a signed-out staff member belongs: their OWN restaurant's sign-in.
+ *
+ * `proxy.ts` does the same thing for the routes it matches; this covers the rest — a
+ * transient auth error that let the proxy pass through, or a deactivated staff row found
+ * only once the page renders. Both doors have to lead to the same place, or a staff member
+ * still lands on the admin email form some of the time, which inside a PWA is a dead end.
+ */
+async function staffLoginTarget(): Promise<string> {
+  const slug = (await cookies()).get("rs_last_slug")?.value;
+  return slug ? `/login?mode=staff&slug=${encodeURIComponent(slug)}` : "/login";
+}
 
 // Every guard resolves the caller through the request-memoised helpers in
 // current-user.ts. The checks themselves are unchanged — same auth, same role,
@@ -34,10 +48,10 @@ export async function requireSuperAdmin() {
 
 export async function requireRestaurantStaff() {
   const user = await getAuthUser();
-  if (!user) redirect("/login");
+  if (!user) redirect(await staffLoginTarget());
 
   const restaurantUser = await getStaffRow(user.id);
-  if (!restaurantUser) redirect("/login");
+  if (!restaurantUser) redirect(await staffLoginTarget());
 
   return { user, restaurantUser: restaurantUser as RestaurantUserContext };
 }

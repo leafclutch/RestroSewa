@@ -4,7 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { AdminLoginForm } from "./_components/admin-form";
 import { StaffLogin } from "./_components/staff-login";
-import { getRestaurantStaff } from "@/app/actions/auth";
+import { RestaurantSearch } from "./_components/restaurant-search";
+import { getRestaurantStaff, lastRestaurantSlug } from "@/app/actions/auth";
 import { PlatformLogo, PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
 import { InstallPrompt } from "@/components/pwa/install-prompt";
 
@@ -40,12 +41,22 @@ export default async function LoginPage({
   }
 
   const { mode, slug } = await searchParams;
-  const isStaffMode = mode === "staff" && typeof slug === "string" && slug.length > 0;
 
-  let staff = null;
-  if (isStaffMode) {
-    staff = await getRestaurantStaff(slug!);
-  }
+  // Fall back to the restaurant this DEVICE last signed into.
+  //
+  // Without this, a staff member whose session ended lands on the admin email form with no
+  // route to their own name-picker and PIN pad — they had to go and find the manager's
+  // link again, which is the "rejoin the restaurant" complaint. An explicit `?slug=` still
+  // wins, so a manager's link for a DIFFERENT restaurant behaves exactly as before.
+  const explicitStaffMode = mode === "staff" && typeof slug === "string" && slug.length > 0;
+  const effectiveSlug = explicitStaffMode ? slug! : mode ? null : await lastRestaurantSlug();
+
+  const staff = effectiveSlug ? await getRestaurantStaff(effectiveSlug) : null;
+
+  // An EXPLICIT link keeps staff mode even when the lookup fails, so a wrong or deactivated
+  // slug still says "Restaurant not found" instead of quietly showing the admin form. A
+  // REMEMBERED slug that no longer resolves degrades silently — the device simply forgets.
+  const isStaffMode = explicitStaffMode || !!staff;
 
   return (
     <div className="w-full max-w-[420px] mx-auto">
@@ -106,18 +117,11 @@ export default async function LoginPage({
               Admin &amp; restaurant manager access
             </p>
             <AdminLoginForm />
+            {/* The way back in for staff who have no manager's link — see RestaurantSearch. */}
+            <RestaurantSearch />
           </>
         )}
       </div>
-
-      {!isStaffMode && (
-        <p className="text-xs text-center mt-5 sm:mt-6 px-2" style={{ color: "rgba(255,255,255,0.35)" }}>
-          Staff?{" "}
-          <span style={{ color: "rgba(255,255,255,0.5)" }}>
-            Use the PIN login link from your manager.
-          </span>
-        </p>
-      )}
 
       <div className="flex justify-center mt-6">
         <PoweredBy height={13} tone="light" />

@@ -57,10 +57,47 @@ export async function proxy(request: NextRequest) {
   // the page-level guards will enforce auth correctly on the next render.
   if (!error && !user) {
     if (isTenantProtected) {
-      return NextResponse.redirect(new URL("/login", request.url));
+      // Send them back to THEIR restaurant's sign-in, never the generic admin form.
+      //
+      // This is the moment that hurt most: a session ends mid-shift, and the person is
+      // dropped on an email/password screen they have no credentials for and no route off.
+      // Inside an installed PWA there is not even a URL bar to fix it with, which is what
+      // made "delete the app and reinstall" look like the only way back.
+      //
+      // The slug goes in the URL rather than being left to the cookie fallback on /login,
+      // so the destination survives even if the cookie is evicted a moment later — which
+      // on iOS is a real possibility, not a hypothetical.
+      const slug = request.cookies.get("rs_last_slug")?.value;
+      const target = slug
+        ? `/login?mode=staff&slug=${encodeURIComponent(slug)}`
+        : "/login";
+      return NextResponse.redirect(new URL(target, request.url));
     }
     if (isSuperAdminProtected) {
       return NextResponse.redirect(new URL("/superadmin/login", request.url));
+    }
+  }
+
+  // Remember the restaurant the moment its sign-in link is OPENED — before any login.
+  //
+  // This is what makes an installed PWA land on the right restaurant. The web app manifest
+  // is fetched at install time, and the install happens on this screen while the staff
+  // member is still signed out, so waiting until a successful PIN login would be too late
+  // for the manifest to know which restaurant to start on. Writing it here also means a
+  // manager's link only has to be followed once per device, ever.
+  //
+  // Harmless if forged: it selects which sign-in screen to show, and a PIN is still
+  // required. `getRestaurantStaff` validates the slug before anything is rendered.
+  if (pathname === "/login" && request.nextUrl.searchParams.get("mode") === "staff") {
+    const slug = request.nextUrl.searchParams.get("slug");
+    if (slug && slug.length <= 100) {
+      supabaseResponse.cookies.set("rs_last_slug", slug, {
+        path: "/",
+        maxAge: 400 * 24 * 60 * 60,
+        sameSite: "lax",
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+      });
     }
   }
 

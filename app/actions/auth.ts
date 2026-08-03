@@ -4,8 +4,64 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+
+/**
+ * The restaurant this DEVICE last signed into.
+ *
+ * `/login` only shows the staff name-picker and PIN pad when it is given `?slug=`, so a
+ * staff member whose session ends has no way back to their own till screen — which is the
+ * "open the manager's link again and rejoin the restaurant" step people were complaining
+ * about. Remembering it here turns that into one tap.
+ *
+ * Set SERVER-side deliberately. A value written from JavaScript is capped at 7 days by
+ * Safari's tracking prevention, which is the class of bug this whole change is unpicking.
+ * It is not a credential and grants nothing on its own — a PIN is still required.
+ */
+const LAST_SLUG_COOKIE = "rs_last_slug";
+const LAST_SLUG_MAX_AGE = 400 * 24 * 60 * 60; // the browser cap; effectively "remember it"
+
+async function rememberRestaurant(slug: string) {
+  const store = await cookies();
+  store.set(LAST_SLUG_COOKIE, slug, {
+    path: "/",
+    maxAge: LAST_SLUG_MAX_AGE,
+    sameSite: "lax",
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+  });
+}
+
+/** The remembered restaurant, for `/login` to fall back to. */
+export async function lastRestaurantSlug(): Promise<string | null> {
+  const store = await cookies();
+  return store.get(LAST_SLUG_COOKIE)?.value ?? null;
+}
 
 export type AuthResult = { error: string } | { redirectTo: string } | null;
+
+/**
+ * Sign out THIS device only.
+ *
+ * `supabase.auth.signOut()` defaults to `{ scope: "global" }`, which revokes every refresh
+ * token the user holds — on every device — server-side. That default is what made the iOS
+ * PWA unusable: an iPhone Home Screen web app has its OWN storage container, seeded from
+ * Safari at install and never resynchronised, so logging out in Safari killed the PWA's
+ * token remotely while a later Safari login landed only in Safari's container. The PWA was
+ * then permanently signed out with no way back except deleting and reinstalling it.
+ *
+ * It also meant that logging out at the till signed the same staff member out on their
+ * phone, and that merely using the wrong login form revoked every session they had.
+ *
+ * Local scope is what "log out" means to the person pressing it: this browser, this device.
+ * Revoking a lost device is a deliberate admin action, not a side effect of a library
+ * default.
+ */
+async function signOutThisDevice(supabase: {
+  auth: { signOut: (options?: { scope?: "global" | "local" | "others" }) => Promise<unknown> };
+}) {
+  await supabase.auth.signOut({ scope: "local" });
+}
 
 export async function loginWithEmail(
   _prevState: AuthResult,
@@ -37,7 +93,7 @@ export async function loginWithEmail(
     .maybeSingle();
 
   if (sa) {
-    await supabase.auth.signOut();
+    await signOutThisDevice(supabase);
     return { error: "Super Admin accounts must use the Super Admin login page." };
   }
 
@@ -51,7 +107,7 @@ export async function loginWithEmail(
     .maybeSingle();
 
   if (!ru) {
-    await supabase.auth.signOut();
+    await signOutThisDevice(supabase);
     return { error: "No account found. Please contact your administrator." };
   }
 
@@ -91,7 +147,7 @@ export async function loginWithEmailSuperAdmin(
     .maybeSingle();
 
   if (!sa) {
-    await supabase.auth.signOut();
+    await signOutThisDevice(supabase);
     return { error: "This login is for Super Admins only." };
   }
 
@@ -124,13 +180,25 @@ export async function loginWithPin(
   // Route by role so restaurant admins land on their management dashboard, not the
   // employee POS. Both admins and staff authenticate with the same synthetic-email + PIN.
   const service = createServiceClient();
+  // The restaurant's slug comes back on the same query as the role — it costs nothing here
+  // and is what lets this device find its way back to the right till screen next time.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: ru } = await (service as any)
     .from("restaurant_users")
-    .select("role")
+    .select("role, restaurants ( slug )")
     .eq("id", restaurantUserId)
     .eq("is_active", true)
     .maybeSingle();
+
+  // PostgREST returns a to-one embed as an object, but tolerate an array so a
+  // relationship-shape change cannot break signing in.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rest = Array.isArray((ru as any)?.restaurants)
+    ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ru as any).restaurants[0]
+    : // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ru as any)?.restaurants;
+  if (rest?.slug) await rememberRestaurant(rest.slug);
 
   revalidatePath("/", "layout");
   if (ru?.role === "restaurant_admin") {
@@ -170,14 +238,53 @@ export async function logout() {
     }
   }
 
-  await supabase.auth.signOut();
+  // Remember it across the sign-out, so the next person at this till gets the name picker
+  // straight away rather than a generic login form.
+  if (slug) await rememberRestaurant(slug);
+
+  await signOutThisDevice(supabase);
   redirect(slug ? `/login?mode=staff&slug=${encodeURIComponent(slug)}` : "/login");
 }
 
 export async function logoutSuperAdmin() {
   const supabase = await createClient();
-  await supabase.auth.signOut();
+  await signOutThisDevice(supabase);
   redirect("/superadmin/login");
+}
+
+/**
+ * Find a restaurant by name, so staff can reach their own sign-in without a manager.
+ *
+ * The slug is the only route to the staff name-picker + PIN pad, and slugs are up to 34
+ * characters ("shining-crown-hotel-and-restaurant") — nobody is typing that on a phone
+ * mid-shift. Searching by the name on the sign board is the one thing a staff member
+ * always knows, and it is what removes the dependency on the manager's link for good.
+ *
+ * Deliberately narrow: active restaurants only, a minimum query length so it cannot be
+ * used to list every tenant on the platform, a small result cap, and nothing returned but
+ * the name and the slug. Knowing a slug grants nothing on its own — a PIN is still needed.
+ */
+export async function searchRestaurants(
+  query: string
+): Promise<Array<{ slug: string; name: string }>> {
+  // `%` and `_` are ILIKE wildcards; stripping them keeps a typo from matching everything.
+  const q = query.trim().replace(/[%_]/g, "");
+  if (q.length < 2) return [];
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("restaurants")
+    .select("name, slug")
+    .eq("is_active", true)
+    .ilike("name", `%${q}%`)
+    .order("name")
+    .limit(8);
+
+  return ((data ?? []) as Array<{ name: string; slug: string }>).map((r) => ({
+    name: r.name,
+    slug: r.slug,
+  }));
 }
 
 export type StaffMember = {
