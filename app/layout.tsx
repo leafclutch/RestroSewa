@@ -20,7 +20,9 @@ export const metadata: Metadata = {
   title: "HRestroSewa",
   description: "Hospitality Management Platform",
   applicationName: "HRestroSewa",
-  manifest: "/manifest.webmanifest",
+  // No `manifest:` here — it would emit a SECOND <link rel="manifest"> without the
+  // `crossorigin` attribute, and the browser would use whichever it saw first. The single
+  // authoritative link is declared in <head> below.
   icons: {
     // `?v=2` cache-busts the HRestroSewa rebrand. Browsers cache favicons by URL and won't
     // re-fetch an unchanged path even after the file's bytes change — so the old cloche icon
@@ -79,6 +81,16 @@ export default async function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} ${theme}`} suppressHydrationWarning>
       <head>
+        {/*
+          Declared by hand, NOT via `metadata.manifest`, for one attribute:
+          `crossOrigin="use-credentials"`. A web app manifest is fetched WITHOUT cookies by
+          default, and app/manifest.ts reads `rs_last_slug` to decide which restaurant the
+          installed app should start on. Without this the manifest request arrives
+          anonymous, the cookie is invisible, and every installed app would silently start
+          on the generic login — the exact failure this is meant to prevent.
+        */}
+        <link rel="manifest" href="/manifest.webmanifest" crossOrigin="use-credentials" />
+
         {/* Anti-theme-flash inline script */}
         <script
           dangerouslySetInnerHTML={{
