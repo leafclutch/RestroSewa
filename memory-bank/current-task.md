@@ -6,6 +6,47 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
+**Thermal printing fixes (2026-08-03).** Six reported defects in printed KOT/BOT/bill output reduced
+to **three** real causes. Every receipt in the app goes through one `PrintModal`, so the fixes land
+on the session bill, station tickets, room folio bill and credit receipt at once.
+
+**A. Short tickets printed SIDEWAYS.** `@page { size: <w> <h> }` takes no orientation keyword — the
+larger value decides. `measureAndSetPage` emitted the paper width × *measured content height*, so a
+one-item KOT produced `80mm × 62mm`, i.e. **landscape**, and the browser rotated it 90°. A bill
+measured `80mm × 93mm` and came out upright **from the same line of code**. Verified by rendering
+both tickets in a real browser: KOT 216px→62mm, bill 335px→93mm. Fixed by clamping
+`heightMm = Math.max(contentMm, paperWidthMm + 1)`. Cost: a tiny ticket now feeds ~81mm. There is no
+way to ask for "portrait, shorter than wide", and `size: 80mm auto` is invalid CSS that is dropped
+wholesale (the Letter fallback the old comment describes).
+
+**B. The "duplicate date/time/branding" and the URL + `1/1` are the BROWSER's print header/footer.**
+`app/layout.tsx:20` sets `title: "HRestroSewa"`; Chrome prints date+title at the top and URL+page
+number at the bottom. **No stylesheet can remove them.** Code-side lever: the `@page` rule (with
+`margin: 0`) now lives in a `<style>` created via `document.createElement` in `<head>` instead of a
+React-rendered one inside the portal — React can never reconcile it away, and a zero page margin makes
+Chrome default Margins to "None". The rest is a one-time dialog setting, now surfaced as an
+`rs-no-print` hint beside the Print button.
+
+**C. Wasted height** was partly ours (logo, 8px divider margins, line-height 1.45, and a preview
+padding that differed from print padding so preview ≠ print) and partly the printer's paper size.
+Ours is fixed: one-item bill 93mm → **85mm**.
+
+Also removed the logo from all printed receipts (thermal heads are one-bit — a logo smears), split
+`Date` into `Date` + `Time`, moved `PoweredBy` under a divider as a footer block, and fixed a real
+data bug: `getCreditReceipt` ran its own 4-column query and so never read
+`settings.print_paper_width`, silently printing credit receipts at 80mm for 58mm restaurants. It now
+uses the shared cached `getRestaurantConfig`.
+
+Files: `app/(employee)/employee/_components/bill-ticket.tsx` (engine + bill + credit ticket),
+`session/[id]/_components/print-tickets.tsx`, `room/[stayId]/_components/folio-client.tsx`,
+`credits/_components/credit-receipt.tsx`, `app/actions/credits.ts`.
+
+**Remaining:** in-app QA on a real thermal printer at both 58mm and 80mm — especially that a
+one-item KOT now comes out portrait. `tsc --noEmit` is clean.
+
+---
+
+## Previous task — awaiting cutover
 **Migration to self-hosted Supabase on DigitalOcean (Coolify).** Schema, all production data and the
 superadmin login now exist on the new stack
 (`supabasekong-lvs0ylfrwhzhnrsinuobbqt8.139.59.237.233.sslip.io`, `.env.production001`,

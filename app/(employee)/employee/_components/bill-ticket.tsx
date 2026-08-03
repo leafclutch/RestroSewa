@@ -65,8 +65,16 @@ const rupee = (n: number) => `₹${n.toFixed(2)}`;
 // then matches the physical output. On a plain A4 printer the same rules simply print a
 // tidy W-mm column down the left edge, so A4 stays a valid fallback.
 
+// The ticket's geometry lives here ONCE, because three places have to agree exactly or
+// the printed page is the wrong height: the print stylesheet, the height measurement, and
+// the on-screen preview. They used to disagree — the preview padded `14px 12px` while
+// print padded `0 2mm` — so the measured page never quite matched what came out.
+const TICKET_PADDING = "0 2mm";
+const TICKET_LINE_HEIGHT = 1.45;
+const fontPxFor = (widthMm: 58 | 80) => (widthMm === 58 ? 11 : 12);
+
 function PrintStyles({ widthMm }: { widthMm: 58 | 80 }) {
-  const fontPx = widthMm === 58 ? 11 : 12;
+  const fontPx = fontPxFor(widthMm);
   return (
     <style
       dangerouslySetInnerHTML={{
@@ -115,13 +123,13 @@ function PrintStyles({ widthMm }: { widthMm: 58 | 80 }) {
     width: ${widthMm}mm !important;
     max-width: ${widthMm}mm !important;
     margin: 0 auto !important;
-    padding: 0 2mm !important;
+    padding: ${TICKET_PADDING} !important;
     box-shadow: none !important;
     background: #fff !important;
     font-size: ${fontPx}px !important;
+    line-height: ${TICKET_LINE_HEIGHT} !important;
     overflow-wrap: anywhere;
   }
-  .rs-ticket-print img { max-width: 100% !important; }
 }
 `,
       }}
@@ -174,7 +182,24 @@ export function PrintModal({
 
   // The ticket, and a dedicated <style> that owns the @page size.
   const ticketRef = useRef<HTMLDivElement>(null);
-  const pageRef = useRef<HTMLStyleElement>(null);
+  const pageRef = useRef<HTMLStyleElement | null>(null);
+
+  // The @page rule lives in a <style> we create ourselves and put in <head> — NOT in a
+  // React-rendered <style> inside the portal. `@page` is a document-level at-rule and
+  // belongs in the document's stylesheet, and an element React does not own can never have
+  // imperatively-set text reconciled away mid-print. It matters beyond tidiness: `margin: 0`
+  // actually landing is the only lever we have on Chrome's print header/footer — with a zero
+  // page margin Chrome defaults the dialog's Margins to "None" and omits them.
+  useEffect(() => {
+    const el = document.createElement("style");
+    el.setAttribute("data-rs-page", "");
+    document.head.appendChild(el);
+    pageRef.current = el;
+    return () => {
+      el.remove();
+      pageRef.current = null;
+    };
+  }, []);
 
   // A thermal roll has a fixed WIDTH but no fixed height — it prints continuously and
   // cuts at the end of the content. So the printed page must be `<width>mm × <content>mm`.
@@ -190,18 +215,34 @@ export function PrintModal({
     const prevP = el.style.padding;
     // Lay the ticket out at the exact print geometry, measure, then restore.
     el.style.width = `${paperWidthMm}mm`;
-    el.style.padding = "0 2mm";
+    el.style.padding = TICKET_PADDING;
     const heightPx = el.getBoundingClientRect().height;
     el.style.width = prevW;
     el.style.padding = prevP;
     // +4mm tail so the last line never clips and the auto-cutter has a little margin.
-    const heightMm = Math.max(1, Math.ceil(pxToMm(heightPx)) + 4);
+    const contentMm = Math.ceil(pxToMm(heightPx)) + 4;
+    // NEVER emit a page wider than it is tall. `@page { size: <w> <h> }` takes no
+    // orientation keyword — the LARGER value decides — so 80mm × 63mm is not a short
+    // portrait receipt, it is a LANDSCAPE one, and the browser rotates the content 90°.
+    // That is exactly why short tickets printed sideways while longer bills came out
+    // upright from this same line: a one-item KOT measures ~63mm on an 80mm roll, a bill
+    // ~94mm. Nothing about the printer differed — only the content height.
+    //
+    // The cost is that a very short ticket feeds ~81mm of paper rather than ~63mm. There
+    // is no way to ask for "portrait, shorter than wide", and `size: 80mm auto` is invalid
+    // CSS which is dropped wholesale (that is the Letter fallback described above).
+    const heightMm = Math.max(contentMm, paperWidthMm + 1);
     pageEl.textContent = `@page { size: ${paperWidthMm}mm ${heightMm}mm; margin: 0; }`;
   }, [paperWidthMm]);
 
-  // Size the page whenever the preview opens (covers Ctrl+P as well as the Print button).
+  // Size the page whenever the preview opens (covers Ctrl+P as well as the Print button),
+  // and BLANK it again on close. The blanking is not tidiness: a session screen mounts one
+  // PrintModal per docket plus one for the bill, so several of these <style> elements sit
+  // in <head> at once. If a closed modal kept its rule, two @page rules would be live and
+  // the later one in document order would win — printing the bill at the KOT's page size.
   useEffect(() => {
     if (open && mounted) measureAndSetPage();
+    else if (pageRef.current) pageRef.current.textContent = "";
     if (open) setErr(null);
   }, [open, mounted, measureAndSetPage]);
 
@@ -249,8 +290,6 @@ export function PrintModal({
       onClick={onClose}
     >
       <PrintStyles widthMm={paperWidthMm} />
-      {/* Owns the @page size — set dynamically to the roll width × measured content height. */}
-      <style ref={pageRef} />
       <div
         className="w-full max-w-sm my-6 rounded-2xl overflow-hidden"
         style={{ background: "var(--color-canvas)" }}
@@ -268,7 +307,11 @@ export function PrintModal({
           <div
             ref={ticketRef}
             className="rs-ticket-print mx-auto bg-white"
-            style={{ width: previewPx, padding: "14px 12px", color: "#000", fontFamily: "ui-monospace, 'SF Mono', Menlo, Consolas, monospace", fontSize: paperWidthMm === 58 ? 11 : 12, lineHeight: 1.45, overflowWrap: "anywhere" }}
+            // The preview keeps a comfortable padding for the modal; `measureAndSetPage`
+            // swaps in the PRINT padding for the duration of the measurement, so this does
+            // not skew the page height. Font size and line height must match print though —
+            // those are NOT swapped, and a mismatch there would size the page wrongly.
+            style={{ width: previewPx, padding: "14px 12px", color: "#000", fontFamily: "ui-monospace, 'SF Mono', Menlo, Consolas, monospace", fontSize: fontPxFor(paperWidthMm), lineHeight: TICKET_LINE_HEIGHT, overflowWrap: "anywhere" }}
           >
             {children}
           </div>
@@ -289,6 +332,14 @@ export function PrintModal({
               <Printer size={14} /> {busy ? "Preparing…" : printLabel}
             </Button>
           </div>
+          {/* The date, page number and web address that appear on paper are printed by the
+              BROWSER, not by us — no stylesheet can remove them. They are two one-time
+              checkboxes in the print dialog, so the instruction belongs next to the button
+              the person holding the printer is about to press. */}
+          <p className="text-[11px] mt-2 text-center leading-snug" style={{ color: "var(--color-ink-mute)" }}>
+            First time on this device: in the print dialog set <strong>Margins: None</strong> and
+            untick <strong>Headers and footers</strong> to remove the date, web address and page number.
+          </p>
         </div>
       </div>
     </div>,
@@ -311,17 +362,22 @@ export function Line({ label, value, bold }: { label: string; value: string; bol
   );
 }
 
-// Discreet software credit at the very foot of a receipt — well below the restaurant's
-// own name/logo/thank-you, in small muted type, so it never competes with their branding.
+// Software credit at the very foot of a receipt, below the restaurant's own thank-you.
 // Printed once per receipt (each receipt component renders it a single time).
+//
+// BLACK, not grey. A thermal head is ONE BIT — it can only burn a dot or not — so `#555`
+// is not printed as lighter text, it is DITHERED into sparse dots, which on 203dpi paper
+// came out as a smudge nobody could read. Grey is a screen idea; on a receipt the only
+// way to be "quieter" than the rest is to be SMALLER, which is what the type sizes below
+// do. Never reintroduce a grey here.
 export function PoweredBy() {
   return (
     <div
       className="rs-powered-by"
-      style={{ textAlign: "center", marginTop: 10, fontSize: 9, lineHeight: 1.35, color: "#555" }}
+      style={{ textAlign: "center", marginTop: 6, fontSize: 10, lineHeight: 1.3, color: "#000" }}
     >
-      <div style={{ letterSpacing: 0.3 }}>Powered by HRestroSewa</div>
-      <div style={{ fontSize: 8, color: "#777" }}>Restaurant &amp; Hotel Management System</div>
+      <div style={{ letterSpacing: 0.3, fontWeight: 700 }}>HRestroSewa</div>
+      <div style={{ fontSize: 9 }}>Hotel &amp; Restaurant Management System</div>
     </div>
   );
 }
@@ -382,15 +438,10 @@ export function BillTicket({
 
   return (
     <>
+      {/* No logo: a thermal head prints one-bit black on grey paper, so a colour or
+          photographic logo reproduces as a smear — and it cost up to 48px (~13mm) of every
+          roll. The restaurant's NAME is the branding on paper. */}
       <div style={{ textAlign: "center" }}>
-        {restaurant.logo_url && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={restaurant.logo_url}
-            alt=""
-            style={{ maxHeight: 48, maxWidth: "100%", margin: "0 auto 4px", display: "block", objectFit: "contain" }}
-          />
-        )}
         <div style={{ fontWeight: 700, fontSize: 15 }}>{restaurant.name}</div>
         {restaurant.address && <div style={{ fontSize: 11 }}>{restaurant.address}</div>}
         {restaurant.contact_phone && <div style={{ fontSize: 11 }}>Ph: {restaurant.contact_phone}</div>}
@@ -401,7 +452,8 @@ export function BillTicket({
       {/* The table/room is what staff match the bill to — make it prominent. */}
       <div style={{ textAlign: "center", fontWeight: 700, fontSize: 18, marginBottom: 4 }}>{location}</div>
       <Line label={billLabel ?? (payment ? "Receipt No" : "Bill No")} value={billNo} />
-      <Line label="Date" value={at.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} />
+      <Line label="Date" value={at.toLocaleDateString("en-IN", { dateStyle: "medium" })} />
+      <Line label="Time" value={at.toLocaleTimeString("en-IN", { timeStyle: "short" })} />
       {payment?.cashier && <Line label="Cashier" value={payment.cashier} />}
       {credit && <Line label="Credit ID" value={credit.credit_number} />}
       {credit && <Line label="Customer" value={credit.customer_name} />}
@@ -484,6 +536,9 @@ export function BillTicket({
       {!credit && (
         <div style={{ textAlign: "center", fontSize: 11, marginTop: 6 }}>Thank you! Please visit again.</div>
       )}
+      {/* Rule + credit as one footer block, so the software name reads as a "powered by"
+          sign-off under the restaurant's own thank-you rather than competing with it. */}
+      <Divider />
       <PoweredBy />
     </>
   );
@@ -568,8 +623,10 @@ export function CreditReceiptTicket({
               </span>
               <span>{rupee(h.amount)}</span>
             </div>
+            {/* Black for the same reason as PoweredBy: grey dithers to an unreadable
+                smudge on a 1-bit thermal head. Smaller type is the only "quieter". */}
             {h.staff_name && (
-              <div style={{ fontSize: 10, color: "#444" }}>Received by {h.staff_name}</div>
+              <div style={{ fontSize: 10 }}>Received by {h.staff_name}</div>
             )}
           </div>
         ))
@@ -588,6 +645,7 @@ export function CreditReceiptTicket({
           ? "This credit is fully settled. Thank you!"
           : "Please retain this receipt until the balance is settled."}
       </div>
+      <Divider />
       <PoweredBy />
     </>
   );
