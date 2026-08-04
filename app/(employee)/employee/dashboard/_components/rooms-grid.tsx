@@ -446,6 +446,10 @@ export function RoomsGrid({
 
   useRealtime(["tables", "orders"], resync);
 
+  // `useState` seeds once, so a route refresh (pull-to-refresh) would re-run this
+  // section's query and then discard it. Adopt the fresh props — see tables-grid.
+  useEffect(() => setRooms(initial), [initial]);
+
   // Stable identity, so memoised cards aren't invalidated on every render.
   const onError = useCallback((msg: string) => setError(msg), []);
   const onShift = useCallback(

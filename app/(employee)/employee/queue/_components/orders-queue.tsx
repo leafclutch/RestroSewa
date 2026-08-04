@@ -189,6 +189,10 @@ export function OrdersQueue({
   // immediately instead of up to 8s later.
   useRealtime(["orders"], refresh);
 
+  // `useState` seeds once, so a route refresh (pull-to-refresh) would re-run this
+  // section's query and then discard it. Adopt the fresh props — see tables-grid.
+  useEffect(() => setOrders(initialOrders), [initialOrders]);
+
   useEffect(() => {
     activeRef.current = true;
     refresh();

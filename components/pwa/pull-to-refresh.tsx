@@ -19,10 +19,33 @@ import { RefreshCw } from "lucide-react";
  * the current route. So it goes through the same permission-checked server actions
  * as every other read: pulling cannot show a staff member anything they could not
  * already see, and there is no second data path to keep in sync.
+ *
+ * ─── WHY ONE `router.refresh()` AND NOT A PER-SECTION FAN-OUT ─────────────────
+ *
+ * The obvious fix for "the dashboard's ten sections re-render on every pull" is to
+ * have each section refetch itself instead. MEASURED, on the dashboard, that is
+ * markedly worse: **Next.js serialises server-action requests** — one in flight at a
+ * time — so waking nine live sections fires nine QUEUED round trips (13 with the
+ * per-topic contract), each starting the millisecond the last one ends: ~3.9s in
+ * dev against ~0.9s for a single refresh, which renders all its sections
+ * concurrently server-side. The route re-render is one round trip and stays.
+ *
+ * What WAS broken is that the refreshed data landed nowhere: the sections are client
+ * components seeded from `initial*` props, and React never re-seeds `useState` from
+ * props, so the pull re-ran every query and then discarded it (the same trap noted
+ * in tables-grid.tsx). Those sections now adopt fresh props — see the `initial`
+ * effects there — so the one refresh actually updates them.
  */
 
 const THRESHOLD = 70; // px of pull before it commits
 const MAX_PULL = 110; // past this the rubber band stops giving
+
+// The arrow reports "a refresh is running", NOT "the route finished rendering".
+// Tying it to the latter is what made it spin for seconds: it waited on the slowest
+// section of a ten-section route. Below the floor a refresh reads as "nothing
+// happened"; above the cap, one slow section holds the arrow hostage.
+const SPIN_MIN_MS = 400;
+const SPIN_MAX_MS = 1500;
 
 /** Would this touch scroll something else? Then it isn't a page pull. */
 function insideScrolledContainer(start: EventTarget | null): boolean {
@@ -43,6 +66,7 @@ function insideScrolledContainer(start: EventTarget | null): boolean {
 export function PullToRefresh({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [spinning, setSpinning] = useState(false);
   const [pull, setPull] = useState(0);
 
   // Touch bookkeeping lives in refs: it changes on every frame of a drag, and
@@ -59,9 +83,40 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
   const pullRef = useRef(0);
   pullRef.current = pull;
 
+  // When the current refresh started, so the floor and the cap below measure from
+  // the gesture rather than from whenever an effect happens to run.
+  const startedAt = useRef(0);
+  const spinningRef = useRef(false);
+  spinningRef.current = spinning;
+
   const refresh = useCallback(() => {
+    // A second pull on top of a running one just queues a duplicate route render.
+    if (spinningRef.current) return;
+    // With no network a pull can only queue work behind a dead connection, and
+    // OfflineGate is already saying so on screen. Snap back instead.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+
+    startedAt.current = Date.now();
+    setSpinning(true);
     startTransition(() => router.refresh());
   }, [router]);
+
+  // Stop the arrow once the refresh has landed, but never before the floor — a 90ms
+  // flash reads as "my pull did nothing".
+  useEffect(() => {
+    if (!spinning || pending) return;
+    const wait = Math.max(0, SPIN_MIN_MS - (Date.now() - startedAt.current));
+    const t = setTimeout(() => setSpinning(false), wait);
+    return () => clearTimeout(t);
+  }, [spinning, pending]);
+
+  // The cap, independent of the transition: a slow section may keep rendering, but
+  // it does so behind a still page rather than under an arrow that never stops.
+  useEffect(() => {
+    if (!spinning) return;
+    const t = setTimeout(() => setSpinning(false), SPIN_MAX_MS);
+    return () => clearTimeout(t);
+  }, [spinning]);
 
   useEffect(() => {
     const onTouchStart = (e: TouchEvent) => {
@@ -125,7 +180,7 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
     };
   }, [refresh]);
 
-  const active = pull > 0 || pending;
+  const active = pull > 0 || spinning;
   const ready = pull >= THRESHOLD;
 
   return (
@@ -134,7 +189,7 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
         aria-hidden
         className="fixed inset-x-0 top-0 z-50 flex justify-center pointer-events-none pt-safe"
         style={{
-          transform: `translateY(${pending ? 20 : Math.max(0, pull - 24)}px)`,
+          transform: `translateY(${spinning ? 20 : Math.max(0, pull - 24)}px)`,
           opacity: active ? 1 : 0,
           transition: pull === 0 ? "transform 220ms ease, opacity 220ms ease" : "none",
         }}
@@ -145,12 +200,12 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
         >
           <RefreshCw
             size={16}
-            className={pending ? "animate-spin" : undefined}
+            className={spinning ? "animate-spin" : undefined}
             style={{
-              color: ready || pending ? "var(--color-primary)" : "var(--color-ink-mute)",
+              color: ready || spinning ? "var(--color-primary)" : "var(--color-ink-mute)",
               // Before it commits, the icon winds up with the pull — so the gesture
               // tells you how much further to go without any text.
-              transform: pending ? undefined : `rotate(${(pull / THRESHOLD) * 270}deg)`,
+              transform: spinning ? undefined : `rotate(${(pull / THRESHOLD) * 270}deg)`,
               transition: "color 120ms ease",
             }}
           />

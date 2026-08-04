@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { memo, useCallback, useState, useTransition } from "react";
+import { memo, useCallback, useEffect, useState, useTransition } from "react";
 import { getMyWalkIns, openWalkInSlot } from "@/app/actions/pos";
 import type { WalkInStatus } from "@/app/actions/pos";
 import { walkInLabel } from "@/lib/walk-ins";
@@ -109,6 +109,10 @@ export function WalkInsGrid({ initial, canManage }: { initial: WalkInStatus[]; c
   // A walk-in session opening/closing emits the "tables" topic (same sessions trigger),
   // so this stays live across devices exactly like the Tables grid.
   useRealtime(["tables", "orders"], resync);
+
+  // `useState` seeds once, so a route refresh (pull-to-refresh) would re-run this
+  // section's query and then discard it. Adopt the fresh props — see tables-grid.
+  useEffect(() => setWalkIns(initial), [initial]);
 
   const onError = useCallback((msg: string) => setError(msg), []);
   const active = walkIns.filter((w) => w.session_id).length;

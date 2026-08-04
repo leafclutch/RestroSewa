@@ -3,6 +3,32 @@
 Chronological log of meaningful shipped features (newest first). Not every commit — only
 features worth remembering. Dates are approximate to the work, not necessarily merge dates.
 
+## 2026-08 — Pull-to-refresh: bounded spinner, and the pull now actually updates the dashboard
+Two separate faults behind "the loader spins too long".
+**(1) The arrow was tied to the whole route render.** `startTransition(() => router.refresh())` +
+`isPending` means the spinner waits on the SLOWEST of the dashboard's ten sections. It now reports
+"a refresh is running": 400ms floor (below that a refresh reads as "nothing happened"), stops when
+the transition lands, 1.5s hard cap.
+**(2) The refresh updated almost nothing.** Tables/Walk-ins/Rooms/Orders are client components
+seeded from `initial*` props, and React never re-seeds `useState` from props — so the pull re-ran
+every query and discarded it (the trap already noted in `tables-grid.tsx:174-178`). Each now
+adopts fresh props via `useEffect(() => setX(initial), [initial])`. **Proven A/B** with the SSE
+stream blocked so only the pull could surface a change: renamed a table in the DB with the page
+open → old code still showed the stale name after pulling; new code picked it up.
+**MEASURED, and it killed the obvious design:** the tempting fix is per-section refetch
+(`resyncAll()` waking every `useRealtime` subscriber). **Next.js serialises server actions** — one
+in flight at a time — so that fired 13 QUEUED round trips, each starting the millisecond the last
+ended: **~3.9s vs ~0.85s** for one `router.refresh()`, which renders its sections concurrently
+server-side. Built it, measured it, threw it away. Do not re-propose the fan-out.
+**Also found and reverted:** the realtime contract is ONE CALL PER TOPIC, not per subscriber.
+Collapsing a batch per subscriber looks free (finance-client listens for six topics and refetches
+six times) but `customer-menu.tsx:1451` branches on the topic — re-reading the session only on
+`"tables"` is how a guest's header follows a table shift.
+*Files:* `components/pwa/pull-to-refresh.tsx`, `app/(employee)/employee/dashboard/_components/
+{tables,walkins,rooms}-grid.tsx`, `app/(employee)/employee/queue/_components/orders-queue.tsx`.
+*Not covered:* Sales/Credits keep their own filter state deliberately, so they refresh on the
+realtime stream rather than on a pull.
+
 ## 2026-08 — Daily Finance Report: 45-minute delay fixed (pg_cron runs in GMT)
 Reports were arriving **exactly 45 minutes** after closing. Root cause was the schedule, not the
 code: **pg_cron schedules in GMT** (`cron.timezone`) and **Nepal is UTC+05:45**, so `0 * * * *`
