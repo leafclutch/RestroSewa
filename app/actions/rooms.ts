@@ -709,6 +709,10 @@ export async function checkOutRoom(
     p_restaurant_id: ru.restaurant_id,
     p_stay_id: stayId,
     p_total: total,
+    // `total` is already net of this — buildFolio subtracted it. This records WHAT was
+    // given away, so Sales and the Finance discount total can see it; without it the
+    // discount reduced the cash taken and left no trace anywhere.
+    p_discount: discountRaw,
     p_cash: cash,
     p_online: online,
     p_card: card,
