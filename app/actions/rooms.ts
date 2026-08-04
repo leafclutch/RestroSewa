@@ -286,9 +286,20 @@ export async function checkInRoom(
   const guestPhone = String(formData.get("guest_phone") ?? "").trim();
   const guestCount = parseInt(String(formData.get("guest_count") ?? "1"), 10) || 1;
   const notes = String(formData.get("notes") ?? "").trim();
+  const idType = String(formData.get("guest_id_type") ?? "").trim();
+  const idNumber = String(formData.get("guest_id_number") ?? "").trim();
+  const address = String(formData.get("guest_address") ?? "").trim();
 
   if (!roomId) return { error: "No room selected." };
   if (!guestName) return { error: "Enter the guest's name." };
+
+  // Identity is required for every new check-in — a hotel register is not optional, and
+  // the room bill prints it. Each field names ITSELF in the error: "invalid input" at a
+  // busy front desk tells the receptionist nothing about which box to go back to.
+  // (Stays created before this existed keep NULLs; only new check-ins are gated.)
+  if (idType !== "citizenship" && idType !== "nid") return { error: "Choose an ID type." };
+  if (!idNumber) return { error: "Enter the guest's ID number." };
+  if (!address) return { error: "Enter the guest's permanent address." };
 
   // The same room isolation that governs tables: staff may only work the rooms
   // they are assigned to.
@@ -322,6 +333,11 @@ export async function checkInRoom(
     p_notes: notes || null,
     p_customer_pin: pin,
     p_created_by: ru.id,
+    // By NAME, never positionally — see the drop/create note in migration
+    // 20260804000000, and 20260717140000 for what a positional room RPC call cost before.
+    p_guest_id_type: idType,
+    p_guest_id_number: idNumber,
+    p_guest_address: address,
   });
 
   if (error) {

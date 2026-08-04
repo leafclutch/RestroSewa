@@ -140,6 +140,54 @@ function CheckInModal({ room, onClose }: { room: RoomOverview; onClose: () => vo
             </div>
           </div>
 
+          {/* Identity. A hotel register is not optional, so all three are required — the
+              server refuses without them too. Two columns on anything above a narrow phone;
+              stacked below, because an ID number is long and must not be squeezed. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+                ID type
+              </label>
+              <select
+                name="guest_id_type"
+                required
+                defaultValue="citizenship"
+                className="w-full h-10 rounded-sm border px-3 text-sm"
+                style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+              >
+                <option value="citizenship">Citizenship</option>
+                <option value="nid">National ID (NID)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+                ID number
+              </label>
+              <input
+                name="guest_id_number"
+                required
+                placeholder="12-01-76-12345"
+                autoComplete="off"
+                className="w-full h-10 rounded-sm border px-3 text-sm"
+                style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+              Permanent address
+            </label>
+            <input
+              name="guest_address"
+              required
+              placeholder="Butwal, Rupandehi"
+              autoComplete="off"
+              className="w-full h-10 rounded-sm border px-3 text-sm"
+              style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+            />
+          </div>
+
           <div>
             <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
               Notes
