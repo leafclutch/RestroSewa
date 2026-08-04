@@ -51,12 +51,23 @@ Run **once per environment**, in the Supabase SQL editor:
    select vault.create_secret('https://your-app.example.com', 'app_base_url');
    select vault.create_secret('<same value as CRON_SECRET>',   'cron_secret');
    ```
-3. Run `supabase/cron/daily-summary-cron.sql` to schedule the hourly job.
+3. Run `supabase/cron/daily-summary-cron.sql` to schedule the job.
 
-The job runs hourly and POSTs `/api/cron/daily-summary` with the secret header. The route
-always reports on each restaurant's **previous** business day (always fully closed) and
-dedupes via `report_deliveries`, so one hourly job correctly covers every restaurant's
-different closing time, and a missed hour self-heals on the next tick.
+The job runs **every 15 minutes** and POSTs `/api/cron/daily-summary` with the secret header.
+The route always reports on each restaurant's **previous** business day (always fully closed)
+and dedupes via `report_deliveries`, so one job correctly covers every restaurant's different
+closing time, and a missed tick self-heals on the next one.
+
+> **Why `*/15` and never `0 * * * *`.** pg_cron schedules in **GMT** (`cron.timezone`) and
+> Nepal is **UTC+05:45**, so an hourly job fires at **:45 past every Nepal hour** — a
+> restaurant closing at midnight got its report at 00:45, 45 minutes late, every night.
+> Every whole Nepal hour is UTC `HH:15` (Nepal 00:00 = 18:15 UTC), and `*/15` fires at
+> :00/:15/:30/:45, so a tick lands exactly on the closing instant. Worst case, after a
+> missed tick, is 15 minutes — not 60.
+
+A send that fails is retried unattended at most every 30 minutes (`RETRY_BACKOFF_MS` in
+`lib/reports/daily-summary-send.ts`), so a broken configuration cannot hammer the shared
+Gmail account 96 times a day. The Settings **Retry** button ignores the backoff.
 
 ## 5. Test it
 

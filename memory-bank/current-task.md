@@ -105,8 +105,9 @@ rather than restoring a dump, so the new server's ledger is truthful from day on
    `clone-db.mjs --env .env.production001 --http --reset --yes`, then `verify-parity.mjs`.
 2. **`pg_cron` daily-summary job is NOT recreated on the new server.** Needs `pg_cron` + `pg_net` +
    `supabase_vault`, vault secrets `app_base_url` (new URL) and `cron_secret` (`CRON_SECRET` is
-   unchanged between the env files), then the hourly `daily-summary-emails` job. Do it only once the
-   app is deployed at the new base URL, or it fires hourly into nothing.
+   unchanged between the env files), then the `daily-summary-emails` job — schedule `*/15 * * * *`,
+   NOT hourly (pg_cron runs in GMT; see the Daily Finance Report entry in completed.md). Do it only
+   once the app is deployed at the new base URL, or it fires into nothing.
 3. **`lib/realtime/bus.ts` — SSL fault FIXED, hostname fault REMAINS.** The droplet's Postgres
    reports **`ssl = off`** (measured), and the file used to hardcode
    `ssl: { rejectUnauthorized: false }`, so node-postgres would have thrown *"The server does not

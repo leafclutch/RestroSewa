@@ -23,11 +23,20 @@ create extension if not exists pg_net;
 select cron.unschedule('daily-summary-emails')
  where exists (select 1 from cron.job where jobname = 'daily-summary-emails');
 
--- Hourly. The route always targets the PREVIOUS business day and dedupes via
--- report_deliveries, so one hourly job serves every restaurant's closing hour.
+-- Every 15 minutes. The route always targets the PREVIOUS business day and
+-- dedupes via report_deliveries, so one job serves every restaurant's closing hour.
+--
+-- WHY */15 AND NOT HOURLY: pg_cron schedules in GMT (`cron.timezone`), and Nepal
+-- is UTC+05:45. So the old '0 * * * *' fired at :45 past every NEPAL hour — a
+-- restaurant closing at midnight got its report at 00:45, 45 minutes late, every
+-- single night. Every whole Nepal hour is UTC HH:15 (Nepal 00:00 = 18:15 UTC,
+-- Nepal 04:00 = 22:15 UTC), and */15 fires at :00/:15/:30/:45 — so a tick lands
+-- EXACTLY on each restaurant's closing instant and the mail goes out within
+-- seconds of it. If a tick is ever missed the report is at most 15 minutes late,
+-- not 60. Do not "tidy" this back to an hourly schedule.
 select cron.schedule(
   'daily-summary-emails',
-  '0 * * * *',
+  '*/15 * * * *',
   $$
   select net.http_post(
     url := (select decrypted_secret from vault.decrypted_secrets where name = 'app_base_url')

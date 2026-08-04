@@ -3,6 +3,25 @@
 Chronological log of meaningful shipped features (newest first). Not every commit — only
 features worth remembering. Dates are approximate to the work, not necessarily merge dates.
 
+## 2026-08 — Daily Finance Report: 45-minute delay fixed (pg_cron runs in GMT)
+Reports were arriving **exactly 45 minutes** after closing. Root cause was the schedule, not the
+code: **pg_cron schedules in GMT** (`cron.timezone`) and **Nepal is UTC+05:45**, so `0 * * * *`
+fired at **:45 past every Nepal hour** — every `report_deliveries.sent_at` was `19:00 UTC` =
+00:45 NPT for a midnight close. Every whole Nepal hour is UTC `HH:15`, so the schedule is now
+`*/15 * * * *`: a tick lands exactly ON each restaurant's closing instant (mail out in seconds),
+worst case after a missed tick is 15 min. Applied to prod and verified (tick at 03:15:00 UTC).
+The quarter-hour cadence forces an auto-retry backoff — a `failed` row is now re-attempted
+unattended at most every 30 min (`RETRY_BACKOFF_MS`), else one broken config would open ~288 SMTP
+connections/day on the shared Gmail; the admin **Retry** button passes `force` and skips it.
+The cron route also logs the resolved recipient list per restaurant per run.
+*Also investigated:* "a removed recipient still gets the report" — the app was cleared by the
+data: the delivery row for that day recorded ONLY the new address with `attempts = 1` (attempts
+accumulates per send, so exactly one email left), prod has a single cron job, there is no
+`vercel.json` cron, and the DigitalOcean clone has no `cron` schema. The duplicate is mail-level
+(forward/POP/delegation between the two Gmail accounts), not a stale recipient list.
+*Files:* `supabase/cron/daily-summary-cron.sql`, `lib/reports/daily-summary-send.ts`,
+`app/api/cron/daily-summary/route.ts`, `docs/daily-summary-setup.md`.
+
 ## 2026-07 — Walk-in permission · Room mixed down-payment · Business-type Rooms gating
 Three changes. **(1) Walk-in permission** — new `view_walkins`/`manage_walkins` (`WALKIN_ACCESS`);
 the dashboard section + open action gate on it, and a type-aware backend guard
