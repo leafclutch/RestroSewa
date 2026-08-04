@@ -418,7 +418,30 @@ export function PoweredBy() {
 //    of a completed transaction (PAID + method + cashier) ─────────────────────────
 
 // Optional customer block for takeaway / delivery bills.
-export type BillCustomer = { name: string | null; phone: string | null; address: string | null };
+export type BillCustomer = {
+  name: string | null;
+  phone: string | null;
+  address: string | null;
+  /** 'citizenship' | 'nid' — a hotel guest's identity document. */
+  idType?: string | null;
+  idNumber?: string | null;
+};
+
+/** A room stay's own facts, printed above the lines. Absent on a table bill. */
+export type BillStay = {
+  roomType: string;
+  rate: number;
+  nights: number;
+  checkIn: string;
+  checkOut: string;
+  duration: string;
+};
+
+/** Grouped lines — "Room charge", "Extras", "Food & beverages". */
+export type BillSection = {
+  title: string;
+  lines: BillItem[];
+};
 
 export function BillTicket({
   restaurant,
@@ -427,6 +450,8 @@ export function BillTicket({
   location,
   at,
   items,
+  sections,
+  stay,
   payment,
   credit,
   customer,
@@ -440,6 +465,11 @@ export function BillTicket({
   location: string;
   at: Date;
   items: BillItem[];
+  /** Grouped lines. When present these REPLACE `items` — a caller passes one or the
+   *  other, never both. A room bill groups; a table bill has one flat list. */
+  sections?: BillSection[];
+  /** Hotel block. Present only for a room bill. */
+  stay?: BillStay;
   payment?: BillPayment;
   credit?: BillCredit | null;
   customer?: BillCustomer | null;
@@ -447,15 +477,26 @@ export function BillTicket({
    *  printed before the cashier has entered it, so it passes 0. */
   discount?: number;
 }) {
-  const hasCustomer = !!(customer && (customer.name || customer.phone || customer.address));
-  const subtotal = items.reduce((s, i) => s + Number(i.item_price) * i.quantity, 0);
+  const hasCustomer = !!(
+    customer &&
+    (customer.name || customer.phone || customer.address || customer.idNumber)
+  );
+  // Sections REPLACE items when supplied, so the subtotal is taken over whichever the
+  // caller gave us — a room bill groups its lines, a table bill has one flat list.
+  const allLines = sections ? sections.flatMap((s) => s.lines) : items;
+  const subtotal = allLines.reduce((s, i) => s + Number(i.item_price) * i.quantity, 0);
   const taxPct = restaurant.tax_percent ?? 0;
   const svcPct = restaurant.service_charge_percent ?? 0;
-  const tax = subtotal * (taxPct / 100);
-  const service = subtotal * (svcPct / 100);
-  // The discount comes off AFTER tax/service — it's a reduction of the amount payable,
-  // not of the goods, so the tax lines still reconcile against the subtotal above them.
-  const grandTotal = Math.max(0, subtotal + tax + service - discount);
+  // The discount comes off BEFORE tax/service — you are not taxed on money you did not
+  // pay. This is the rule lib/room-billing.ts buildFolio has always used; this component
+  // used to take it off AFTER, so the same bill totalled differently depending on which
+  // renderer you looked at (and a comment in room-billing.ts wrongly claimed they matched).
+  // Every restaurant runs tax and service at 0 with tax-inclusive prices, so no printed
+  // number moves today — this only decides what happens the day VAT is switched on.
+  const taxable = Math.max(0, subtotal - discount);
+  const tax = taxable * (taxPct / 100);
+  const service = taxable * (svcPct / 100);
+  const grandTotal = taxable + tax + service;
 
   // Show the tender split whenever the bill was settled with more than one.
   const parts = payment
@@ -486,6 +527,22 @@ export function BillTicket({
       <Line label={billLabel ?? (payment ? "Receipt No" : "Bill No")} value={billNo} />
       <Line label="Date" value={at.toLocaleDateString("en-IN", { dateStyle: "medium" })} />
       <Line label="Time" value={at.toLocaleTimeString("en-IN", { timeStyle: "short" })} />
+      {/* The hotel block. A room bill has to answer "which room type, for how many nights,
+          at what rate, between when and when" — a table bill has none of that. */}
+      {stay && (
+        <>
+          <Line label="Room type" value={stay.roomType} />
+          <Line
+            label="Check-in"
+            value={new Date(stay.checkIn).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+          />
+          <Line
+            label="Check-out"
+            value={new Date(stay.checkOut).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+          />
+          <Line label="Nights" value={`${stay.nights} × ${rupee(stay.rate)}`} />
+        </>
+      )}
       {payment?.cashier && <Line label="Cashier" value={payment.cashier} />}
       {credit && <Line label="Credit ID" value={credit.credit_number} />}
       {credit && <Line label="Customer" value={credit.customer_name} />}
@@ -493,6 +550,12 @@ export function BillTicket({
         <>
           {customer!.name && <Line label="Customer" value={customer!.name} />}
           {customer!.phone && <Line label="Phone" value={customer!.phone} />}
+          {customer!.idNumber && (
+            <Line
+              label={customer!.idType === "nid" ? "NID No" : "Citizenship No"}
+              value={customer!.idNumber}
+            />
+          )}
           {customer!.address && (
             <div style={{ fontSize: 11, marginTop: 2 }}>{customer!.address}</div>
           )}
@@ -508,7 +571,25 @@ export function BillTicket({
         <span style={{ width: 62, textAlign: "right" }}>Amount</span>
       </div>
       <div style={{ borderTop: "1px solid #000", margin: "4px 0" }} />
-      {items.length === 0 ? (
+      {sections ? (
+        // Grouped: a heading, then that group's lines. Same row markup as the flat list
+        // below, so a room bill and a table bill line up column for column on paper.
+        sections.map((sec) => (
+          <div key={sec.title}>
+            <div style={{ fontWeight: 700, fontSize: 11, marginTop: 4 }}>{sec.title}</div>
+            {sec.lines.map((it) => (
+              <div key={it.id} style={{ display: "flex", alignItems: "flex-start", marginTop: 2 }}>
+                <span style={{ flex: 1, overflowWrap: "anywhere" }}>{it.item_name}</span>
+                <span style={{ width: 28, textAlign: "center" }}>{it.quantity}</span>
+                <span style={{ width: 54, textAlign: "right" }}>{Number(it.item_price).toFixed(2)}</span>
+                <span style={{ width: 62, textAlign: "right" }}>
+                  {(Number(it.item_price) * it.quantity).toFixed(2)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ))
+      ) : items.length === 0 ? (
         <div style={{ textAlign: "center" }}>No items.</div>
       ) : (
         items.map((it) => (
