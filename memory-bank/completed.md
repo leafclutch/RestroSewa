@@ -3,6 +3,24 @@
 Chronological log of meaningful shipped features (newest first). Not every commit — only
 features worth remembering. Dates are approximate to the work, not necessarily merge dates.
 
+## 2026-08 — Thermal print: the page is the PRINT HEAD (72mm), not the roll (80mm)
+Receipts printed at 100% lost their right-hand column — `BOT-0002…`, `4 Aug 202…`,
+`Diwakar Gupt…` all truncated on real paper — and printing at 80-85% "fixed" it.
+**Root cause:** an "80mm printer" takes an 80mm roll but its head covers only **72mm** (576 dots
+at 203dpi); ~4mm each side is physically unprintable, and a thermal driver advertises its paper
+as that printable width ("80(72.1) x 297mm"). We authored the page at the ROLL width, so an 80mm
+layout was rendered into a 72mm sheet and the right 8mm fell off. 80mm × 0.85 ≈ 68mm is simply
+the first scale that fits inside 72mm — which is why manual scaling looked like a cure.
+Fix: `PRINTABLE_MM = { 58: 48, 80: 72 }`; the `@page` size, the ticket width, the measurement and
+the on-screen preview all use the printable width now (the preview was lying about what fits on a
+line). Side padding 2mm → 1mm, since the page no longer contains the dead zone.
+Also **`TAIL_MM` 4 → 10**: blank feed after the last line so the cutter doesn't come down through
+the footer. Verified in-browser on a real bill and a real reprint: `@page { size: 72mm 115mm }`
+and `72mm 73mm`, ticket 72mm wide, zero horizontal overflow, and the short ticket still clears
+the portrait clamp (73 = 72+1) so nothing rotates to landscape.
+*Files:* `app/(employee)/employee/_components/bill-ticket.tsx`.
+*Untested on hardware:* the 58mm path (48mm) — same lookup, but no 58mm printer here.
+
 ## 2026-08 — Pull-to-refresh: bounded spinner, and the pull now actually updates the dashboard
 Two separate faults behind "the loader spins too long".
 **(1) The arrow was tied to the whole route render.** `startTransition(() => router.refresh())` +

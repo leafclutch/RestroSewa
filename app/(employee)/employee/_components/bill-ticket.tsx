@@ -59,22 +59,51 @@ export function ticketNumber(prefix: string, seedId: string, at: Date) {
 const rupee = (n: number) => `₹${n.toFixed(2)}`;
 
 // ── print stylesheet (hides the app chrome, prints only the ticket) ────────────
-// Thermal-first: the page IS the roll. `@page { size: <W>mm auto }` tells the browser
+// Thermal-first: the page IS the printable strip of the roll (see PRINTABLE_MM below —
+// it is NOT the roll width). `@page { size: <W>mm <H>mm; margin: 0 }` tells the browser
 // the paper is a W-mm-wide continuous roll with NO margins, so the receipt fills the
-// full width instead of sitting as a sliver inside an A4 sheet — and the print preview
-// then matches the physical output. On a plain A4 printer the same rules simply print a
-// tidy W-mm column down the left edge, so A4 stays a valid fallback.
+// head's full width instead of sitting as a sliver inside an A4 sheet — and the print
+// preview then matches the physical output. On a plain A4 printer the same rules simply
+// print a tidy W-mm column down the left edge, so A4 stays a valid fallback.
 
 // The ticket's geometry lives here ONCE, because three places have to agree exactly or
 // the printed page is the wrong height: the print stylesheet, the height measurement, and
 // the on-screen preview. They used to disagree — the preview padded `14px 12px` while
 // print padded `0 2mm` — so the measured page never quite matched what came out.
-const TICKET_PADDING = "0 2mm";
+const TICKET_PADDING = "0 1mm";
 const TICKET_LINE_HEIGHT = 1.45;
 const fontPxFor = (widthMm: 58 | 80) => (widthMm === 58 ? 11 : 12);
 
+/**
+ * ── THE PAGE IS THE PRINT HEAD, NOT THE PAPER ────────────────────────────────
+ *
+ * A "80mm printer" takes an 80mm ROLL but its head only covers **72mm** (576 dots
+ * at 203dpi, 8 dots/mm); the remaining ~4mm each side is physically unprintable.
+ * 58mm rolls are the same story: **48mm** printable (384 dots).
+ *
+ * This used to lay the ticket out at the full roll width. Chrome only honours an
+ * exact `@page` size when the driver offers a matching paper, and a thermal driver
+ * advertises its paper as the PRINTABLE width (e.g. "80(72.1) x 297mm") — so an
+ * 80mm-wide page was rendered into a 72mm one and the right-hand 8mm simply fell
+ * off the sheet. On a real BOT that ate the right-aligned column: `BOT-0002…`,
+ * `4 Aug 202…`, `Diwakar Gupt…`. Printing at 80-85% "fixed" it for the same reason
+ * — 80mm × 0.85 ≈ 68mm finally fits inside 72mm.
+ *
+ * So author at the printable width and let the driver's own dead zone be dead.
+ * Do NOT put the roll width back here.
+ */
+const PRINTABLE_MM = { 58: 48, 80: 72 } as const;
+const printableMm = (rollMm: 58 | 80) => PRINTABLE_MM[rollMm];
+
+/**
+ * Blank paper fed after the last line, so the auto-cutter (or the tear bar) does not
+ * come down through the footer. 4mm left the total sitting right on the cut.
+ */
+const TAIL_MM = 10;
+
 function PrintStyles({ widthMm }: { widthMm: 58 | 80 }) {
   const fontPx = fontPxFor(widthMm);
+  const printMm = printableMm(widthMm);
   return (
     <style
       dangerouslySetInnerHTML={{
@@ -120,8 +149,8 @@ function PrintStyles({ widthMm }: { widthMm: 58 | 80 }) {
   .rs-no-print { display: none !important; }
   .rs-ticket-print {
     position: static !important;
-    width: ${widthMm}mm !important;
-    max-width: ${widthMm}mm !important;
+    width: ${printMm}mm !important;
+    max-width: ${printMm}mm !important;
     margin: 0 auto !important;
     padding: ${TICKET_PADDING} !important;
     box-shadow: none !important;
@@ -213,14 +242,16 @@ export function PrintModal({
     if (!el || !pageEl) return;
     const prevW = el.style.width;
     const prevP = el.style.padding;
-    // Lay the ticket out at the exact print geometry, measure, then restore.
-    el.style.width = `${paperWidthMm}mm`;
+    // Lay the ticket out at the exact print geometry, measure, then restore. The width
+    // is the PRINT HEAD's, not the roll's — see printableMm.
+    const printMm = printableMm(paperWidthMm);
+    el.style.width = `${printMm}mm`;
     el.style.padding = TICKET_PADDING;
     const heightPx = el.getBoundingClientRect().height;
     el.style.width = prevW;
     el.style.padding = prevP;
-    // +4mm tail so the last line never clips and the auto-cutter has a little margin.
-    const contentMm = Math.ceil(pxToMm(heightPx)) + 4;
+    // Tail of blank paper so the last line never clips and the cutter has a margin.
+    const contentMm = Math.ceil(pxToMm(heightPx)) + TAIL_MM;
     // NEVER emit a page wider than it is tall. `@page { size: <w> <h> }` takes no
     // orientation keyword — the LARGER value decides — so 80mm × 63mm is not a short
     // portrait receipt, it is a LANDSCAPE one, and the browser rotates the content 90°.
@@ -231,8 +262,8 @@ export function PrintModal({
     // The cost is that a very short ticket feeds ~81mm of paper rather than ~63mm. There
     // is no way to ask for "portrait, shorter than wide", and `size: 80mm auto` is invalid
     // CSS which is dropped wholesale (that is the Letter fallback described above).
-    const heightMm = Math.max(contentMm, paperWidthMm + 1);
-    pageEl.textContent = `@page { size: ${paperWidthMm}mm ${heightMm}mm; margin: 0; }`;
+    const heightMm = Math.max(contentMm, printMm + 1);
+    pageEl.textContent = `@page { size: ${printMm}mm ${heightMm}mm; margin: 0; }`;
   }, [paperWidthMm]);
 
   // Size the page whenever the preview opens (covers Ctrl+P as well as the Print button),
@@ -248,7 +279,8 @@ export function PrintModal({
 
   if (!open || !mounted) return null;
 
-  const previewPx = mmToPx(paperWidthMm);
+  // The preview must be the PRINTED column, or it lies about what fits on a line.
+  const previewPx = mmToPx(printableMm(paperWidthMm));
 
   const handlePrint = async () => {
     if (onBeforePrint) {
