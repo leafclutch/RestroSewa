@@ -21,6 +21,10 @@ mixed checkout with a ₹180 discount → the same bill in Sales. Lines 1500 + 3
 less 180 = **2000 = `payments.total_amount`**. A pre-existing stay with null identity columns still
 renders (no ID line, no crash) and now shows its room charge for the first time. A paid **table**
 bill is unchanged. `tsc`, `lint`, `build`, `node --test` all clean.
+Follow-up in the same batch: the folio now prints a **receipt** after checkout (PAID + tender +
+cashier, or PARTIALLY PAID + BALANCE DUE on credit) instead of "Status: UNPAID", and its panel
+totals include the recorded discount. Verified across cash, mixed and credit; a live stay still
+prints BILL / UNPAID.
 
 ---
 

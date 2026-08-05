@@ -395,6 +395,33 @@ export async function markRoomClean(roomId: string): Promise<ActionResult> {
 
 // ─── The folio ───────────────────────────────────────────────────────────────
 
+/**
+ * How a stay was settled. Present only once the guest has checked out.
+ *
+ * Read from the `payments` row the checkout wrote — never recomputed. It is what turns
+ * the folio's bill from a BILL into a TAX INVOICE, and its `discount` is the discount of
+ * record, so the frozen folio totals to what was actually collected.
+ */
+export type RoomStayPayment = {
+  payment_id: string;
+  bill_number: number | null;
+  method: string;
+  cash: number;
+  online: number;
+  card: number;
+  discount: number;
+  total: number;
+  cashier_name: string | null;
+  paid_at: string;
+  /** Closed with money still owed. `balance` is what is left NOW, after later repayments. */
+  credit: {
+    credit_number: string;
+    customer_name: string;
+    customer_phone: string | null;
+    balance: number;
+  } | null;
+};
+
 export type RoomFolioView = {
   stay_id: string;
   room_id: string;
@@ -413,6 +440,8 @@ export type RoomFolioView = {
   notes: string | null;
   status: "active" | "checked_out";
   session_id: string | null;
+  /** Null while the stay is live; the settlement once it has been checked out. */
+  payment: RoomStayPayment | null;
   folio: RoomFolio;
   /** Editable extras, so the panel can offer a remove button on each. */
   charges: { id: string; type: RoomChargeType; description: string; amount: number }[];
@@ -510,11 +539,74 @@ async function loadFolioInputs(stayId: string) {
   };
 }
 
+/**
+ * The settlement behind a checked-out stay, or null.
+ *
+ * Only read for a CLOSED stay: a live one has no payment, and this is a round trip the
+ * checkout path (which shares `loadFolioInputs`) must not pay for.
+ */
+async function loadStayPayment(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  sessionId: string
+): Promise<RoomStayPayment | null> {
+  const { data: p } = await svc
+    .from("payments")
+    .select(
+      "id, bill_number, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, credits ( credit_number, customer_name, customer_phone, balance )"
+    )
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!p) return null;
+
+  let cashier_name: string | null = null;
+  if (p.created_by) {
+    const { data: u } = await svc
+      .from("restaurant_users")
+      .select("display_name")
+      .eq("id", p.created_by)
+      .maybeSingle();
+    cashier_name = u?.display_name ?? null;
+  }
+
+  const credit = Array.isArray(p.credits) ? p.credits[0] ?? null : p.credits ?? null;
+
+  return {
+    payment_id: p.id,
+    bill_number: p.bill_number ?? null,
+    method: p.payment_method,
+    cash: Number(p.cash_amount ?? 0),
+    online: Number(p.online_amount ?? 0),
+    card: Number(p.card_amount ?? 0),
+    discount: Number(p.discount_amount ?? 0),
+    total: Number(p.total_amount ?? 0),
+    cashier_name,
+    paid_at: p.created_at,
+    credit: credit
+      ? {
+          credit_number: credit.credit_number,
+          customer_name: credit.customer_name,
+          customer_phone: credit.customer_phone ?? null,
+          balance: Number(credit.balance),
+        }
+      : null,
+  };
+}
+
 export async function getRoomFolio(stayId: string): Promise<RoomFolioView | null> {
   const input = await loadFolioInputs(stayId);
   if (!input) return null;
 
-  const { stay, charges, food, sessionId, typeName, config } = input;
+  const { svc, stay, charges, food, sessionId, typeName, config } = input;
+
+  // A closed stay's folio has to agree with the money that actually moved. Without this
+  // the panel and the bill showed the PRE-discount total for every discounted checkout —
+  // the guest paid 2,000 and the folio still read 2,180.
+  const payment =
+    stay.status !== "active" && sessionId ? await loadStayPayment(svc, sessionId) : null;
 
   return {
     stay_id: stay.id,
@@ -530,6 +622,7 @@ export async function getRoomFolio(stayId: string): Promise<RoomFolioView | null
     notes: stay.notes,
     status: stay.status,
     session_id: sessionId,
+    payment,
     charges,
     folio: buildFolio(
       {
@@ -539,7 +632,9 @@ export async function getRoomFolio(stayId: string): Promise<RoomFolioView | null
       },
       charges,
       food,
-      config
+      // The recorded discount is part of the frozen bill. `config` carries none for a live
+      // stay, which is right: the cashier hasn't decided one yet.
+      payment ? { ...config, discount: payment.discount } : config
     ),
   };
 }

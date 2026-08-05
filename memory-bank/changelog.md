@@ -21,6 +21,10 @@ Versioning is informal (the app ships continuously); dates anchor the entries.
 - **A discount given at room checkout wasn't recorded.** The guest was charged the discounted
   amount, but Sales and the daily discount total showed nothing. It is now saved on the payment and
   appears on the bill.
+- **The room screen still said UNPAID after checkout.** Printing from a checked-out stay now gives
+  a proper receipt — PAID with the payment method, the tender split and the cashier, or the balance
+  still owed on a credit checkout — identical to the copy in Sales. The folio's own totals now show
+  the discount too, instead of the pre-discount amount.
 
 ## [Unreleased] — 2026-07
 ### Added

@@ -545,7 +545,10 @@ export function BillTicket({
       )}
       {payment?.cashier && <Line label="Cashier" value={payment.cashier} />}
       {credit && <Line label="Credit ID" value={credit.credit_number} />}
-      {credit && <Line label="Customer" value={credit.customer_name} />}
+      {/* "Credit a/c", not "Customer": on a room bill the guest is printed below as well,
+          and the two are not always the same person — a company account can settle for a
+          guest. Two lines both labelled "Customer" said nothing about which was which. */}
+      {credit && <Line label="Credit a/c" value={credit.customer_name} />}
       {hasCustomer && (
         <>
           {customer!.name && <Line label="Customer" value={customer!.name} />}

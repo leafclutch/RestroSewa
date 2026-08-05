@@ -32,6 +32,19 @@ took it off BEFORE, so the same stay totalled differently depending on which ren
 at (and a comment in `room-billing.ts` wrongly claimed they agreed). BillTicket moved. No printed
 number changes today — every restaurant runs tax/service at 0 with tax-inclusive prices — this
 only decides what happens the day VAT is switched on.
+**(4) The folio kept printing "Status: UNPAID" after checkout** — the room screen had no payment
+to look at, so the one place staff naturally reprint from still said the guest owed money. Worse,
+`getRoomFolio` built the folio with NO discount, so a settled stay's **panel** showed the
+pre-discount total (paid 2,000, folio read 2,180). `RoomFolioView` now carries the settlement
+(`payment`), read from the `payments` row and never recomputed, and the folio is re-derived with
+`payment.discount`. The bill becomes TAX INVOICE / PAID with cashier and tender split, or
+PARTIALLY PAID / BALANCE DUE for a credit checkout — byte-identical to the Sales reprint. Loaded
+only for a CLOSED stay, so the checkout path (which shares `loadFolioInputs`) pays no round trip.
+Also relabelled the credit holder line `Customer` → **`Credit a/c`**: a room bill prints the guest
+too, and the two can be different people, so two lines both saying "Customer" said nothing.
+`BILL_METHOD_LABEL` moved to `lib/billing/payment-method.ts` — the two components that print a
+settled bill must spell a method identically. (The sales-list / finance maps stay separate: they
+label methods that never reach paper.)
 **RPC trap, hit for real:** `create or replace function` with a LONGER parameter list does not
 replace, it creates an **OVERLOAD** — and the deployed 8-argument call then matched both
 candidates and failed with `42725 … is not unique`. Both migrations `drop function` the old exact

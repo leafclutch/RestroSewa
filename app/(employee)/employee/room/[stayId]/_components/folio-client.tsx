@@ -17,6 +17,7 @@ import type { RestaurantInfo, PrintStation } from "@/app/(employee)/employee/ses
 import { PrintModal, BillTicket, ticketNumber } from "@/app/(employee)/employee/_components/bill-ticket";
 import { folioToBill } from "@/lib/billing/room-bill";
 import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
+import { billMethodLabel } from "@/lib/billing/payment-method";
 import {
   ArrowLeft, BedDouble, Plus, Printer, Trash2, User, UtensilsCrossed, X,
 } from "lucide-react";
@@ -520,16 +521,29 @@ export function FolioClient({
   // so the document a guest is shown before paying and the one filed after are one thing.
   const bill = folioToBill({ folio: f, roomType: view.type_name });
 
-  // The bill number, resolved exactly as an unpaid TABLE bill resolves it: the
-  // restaurant's own sequential number once the session has claimed one, otherwise a
-  // derived reference. No room-only numbering scheme — that is the point of this work.
-  const orderNo =
-    session?.bill_number != null
+  // Once the guest has checked out the SAME document is a receipt, not a bill: it has to
+  // say PAID (or what is still owed), how it was tendered and who took the money. It used
+  // to keep printing "Status: UNPAID" for a settled stay, because the folio screen had no
+  // payment to look at.
+  const paid = view.payment;
+
+  // The bill number, resolved exactly as a TABLE bill resolves it: the restaurant's own
+  // sequential number (claimed by the session, or stamped on the payment under the older
+  // payment-time model), otherwise a derived reference. No room-only numbering scheme —
+  // matching the table workflow is the point of this work.
+  const seq = session?.bill_number ?? paid?.bill_number ?? null;
+  const billRef =
+    seq != null
       ? {
           label: billNumberLabel(restaurant.bill_number_label),
-          value: formatBillNumber(session.bill_number, restaurant.bill_number_pad ?? 0),
+          value: formatBillNumber(seq, restaurant.bill_number_pad ?? 0),
         }
-      : null;
+      : {
+          label: undefined,
+          value: paid
+            ? `BILL-${paid.payment_id.slice(0, 8).toUpperCase()}`
+            : ticketNumber("BILL", view.stay_id, printedAt),
+        };
 
   // The food ordered against this stay — from the room QR, or added by hand. It
   // is ONE list either way; the two were never separate pipelines, they just had
@@ -798,7 +812,7 @@ export function FolioClient({
           className="inline-flex items-center justify-center gap-1.5 text-sm px-4 py-2 rounded-pill border"
           style={{ borderColor: "var(--color-hairline)", color: "var(--color-ink)" }}
         >
-          <Printer size={14} /> Print bill
+          <Printer size={14} /> {paid ? "Print receipt" : "Print bill"}
         </button>
       )}
 
@@ -807,17 +821,47 @@ export function FolioClient({
           different headings, different column layout, no Item/Qty/Rate/Amount grid, and a
           paid room bill in Sales that listed only the food. One renderer, one mapper
           (folioToBill), so the two can no longer disagree. */}
-      <PrintModal open={billOpen} onClose={() => setBillOpen(false)} title="Room bill — preview" paperWidthMm={restaurant.paper_width_mm ?? 80}>
+      <PrintModal
+        open={billOpen}
+        onClose={() => setBillOpen(false)}
+        title={paid ? "Room receipt — preview" : "Room bill — preview"}
+        paperWidthMm={restaurant.paper_width_mm ?? 80}
+      >
         <BillTicket
           restaurant={restaurant}
-          billNo={orderNo ? orderNo.value : ticketNumber("BILL", view.stay_id, printedAt)}
-          billLabel={orderNo ? orderNo.label : undefined}
+          billNo={billRef.value}
+          billLabel={billRef.label}
           location={`Room ${view.room_number}`}
-          at={printedAt}
+          // A receipt is stamped when the money moved, not when someone reprinted it.
+          at={paid ? new Date(paid.paid_at) : printedAt}
           items={[]}
           sections={bill.sections}
           stay={bill.stay}
           discount={bill.discount}
+          payment={
+            paid
+              ? {
+                  method: billMethodLabel(paid.method),
+                  cashier: paid.cashier_name,
+                  cash: paid.cash,
+                  online: paid.online,
+                  card: paid.card,
+                }
+              : undefined
+          }
+          // Closed with money still owed: the receipt must say so and say how much, or it
+          // reads as fully paid. `balance` is the debt NOW, after any later repayments.
+          credit={
+            paid?.credit
+              ? {
+                  credit_number: paid.credit.credit_number,
+                  customer_name: paid.credit.customer_name,
+                  customer_phone: paid.credit.customer_phone,
+                  tendered: paid.cash + paid.online + paid.card,
+                  balance: paid.credit.balance,
+                }
+              : null
+          }
           customer={{
             name: view.guest_name,
             phone: view.guest_phone,

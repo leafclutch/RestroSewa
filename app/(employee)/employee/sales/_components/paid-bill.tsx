@@ -5,17 +5,8 @@ import { getPaidBill } from "@/app/actions/pos";
 import type { PaidBill } from "@/app/actions/pos";
 import { PrintModal, BillTicket } from "@/app/(employee)/employee/_components/bill-ticket";
 import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
+import { billMethodLabel } from "@/lib/billing/payment-method";
 import { Printer, Loader2 } from "lucide-react";
-
-const METHOD_LABEL: Record<string, string> = {
-  cash: "Cash",
-  online: "Online",
-  mixed: "Cash + Online",
-  card: "Card",
-  credit: "Credit",
-  upi: "UPI",
-  other: "Other",
-};
 
 // Reprints a closed bill for one transaction. Fetches the receipt on demand from
 // the existing payment record — never creates or changes a bill. A bill that went
@@ -77,7 +68,7 @@ export function PaidBillButton({ paymentId }: { paymentId: string }) {
             stay={bill.stay}
             discount={bill.discount}
             payment={{
-              method: METHOD_LABEL[bill.method] ?? bill.method,
+              method: billMethodLabel(bill.method),
               cashier: bill.cashier_name,
               cash: bill.cash_amount,
               online: bill.online_amount,
