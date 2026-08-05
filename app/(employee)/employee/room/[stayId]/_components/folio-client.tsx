@@ -14,7 +14,9 @@ import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { OrderItem } from "@/app/(employee)/employee/_components/order-item";
 import { SessionPrintButtons } from "@/app/(employee)/employee/session/[id]/_components/print-tickets";
 import type { RestaurantInfo, PrintStation } from "@/app/(employee)/employee/session/[id]/_components/print-tickets";
-import { PrintModal, Divider, Line as TicketLine, PoweredBy } from "@/app/(employee)/employee/_components/bill-ticket";
+import { PrintModal, BillTicket, ticketNumber } from "@/app/(employee)/employee/_components/bill-ticket";
+import { folioToBill } from "@/lib/billing/room-bill";
+import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
 import {
   ArrowLeft, BedDouble, Plus, Printer, Trash2, User, UtensilsCrossed, X,
 } from "lucide-react";
@@ -508,8 +510,26 @@ export function FolioClient({
   const [adding, setAdding] = useState(false);
   const [billOpen, setBillOpen] = useState(false);
   const [removing, startRemove] = useTransition();
+  // Stamped once per mount, exactly like the table bill: a Date rebuilt on every render
+  // would make the printed time jump while the preview is open.
+  const [printedAt] = useState<Date>(() => new Date());
   const f = view.folio;
   const open = view.status === "active";
+
+  // The bill, arranged for the SHARED renderer. Same mapper the paid bill in Sales uses,
+  // so the document a guest is shown before paying and the one filed after are one thing.
+  const bill = folioToBill({ folio: f, roomType: view.type_name });
+
+  // The bill number, resolved exactly as an unpaid TABLE bill resolves it: the
+  // restaurant's own sequential number once the session has claimed one, otherwise a
+  // derived reference. No room-only numbering scheme — that is the point of this work.
+  const orderNo =
+    session?.bill_number != null
+      ? {
+          label: billNumberLabel(restaurant.bill_number_label),
+          value: formatBillNumber(session.bill_number, restaurant.bill_number_pad ?? 0),
+        }
+      : null;
 
   // The food ordered against this stay — from the room QR, or added by hand. It
   // is ONE list either way; the two were never separate pipelines, they just had
@@ -782,37 +802,30 @@ export function FolioClient({
         </button>
       )}
 
+      {/* THE SAME COMPONENT A TABLE BILL PRINTS. It used to be a hand-built stack of
+          TicketLines here, which is how the room bill and the table bill drifted apart —
+          different headings, different column layout, no Item/Qty/Rate/Amount grid, and a
+          paid room bill in Sales that listed only the food. One renderer, one mapper
+          (folioToBill), so the two can no longer disagree. */}
       <PrintModal open={billOpen} onClose={() => setBillOpen(false)} title="Room bill — preview" paperWidthMm={restaurant.paper_width_mm ?? 80}>
-        {/* No logo on paper — a thermal head is one-bit black, so a logo smears; the
-            restaurant's name is the branding. Same rule as every other receipt. */}
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>{restaurant.name}</div>
-          {restaurant.address && <div style={{ fontSize: 11 }}>{restaurant.address}</div>}
-          {restaurant.contact_phone && <div style={{ fontSize: 11 }}>Ph: {restaurant.contact_phone}</div>}
-          {restaurant.pan_vat_number && <div style={{ fontSize: 11 }}>PAN/VAT: {restaurant.pan_vat_number}</div>}
-          <div style={{ fontWeight: 700, letterSpacing: 1, marginTop: 4 }}>ROOM BILL</div>
-        </div>
-        <Divider />
-        <TicketLine label="Room" value={`${view.room_number} · ${view.type_name}`} />
-        <TicketLine label="Guest" value={view.guest_name} />
-        <TicketLine label="In" value={when(f.checkIn)} />
-        <TicketLine label="Out" value={when(f.checkOut)} />
-        <TicketLine label="Stay" value={`${f.duration} · ${f.nights} night(s)`} />
-        <Divider />
-        <TicketLine label={`${f.room.label} (${f.room.detail})`} value={rupee(f.roomTotal)} />
-        {f.extras.map((l) => <TicketLine key={l.key} label={l.label} value={rupee(l.amount)} />)}
-        {f.food.map((l) => <TicketLine key={l.key} label={`${l.detail} ${l.label}`.trim()} value={rupee(l.amount)} />)}
-        <Divider />
-        <TicketLine label="Subtotal" value={rupee(f.subtotal)} />
-        {f.discount > 0 && <TicketLine label="Discount" value={`-${rupee(f.discount)}`} />}
-        {f.tax > 0 && <TicketLine label={`Tax (${f.taxPercent}%)`} value={rupee(f.tax)} />}
-        {f.service > 0 && <TicketLine label={`Service (${f.servicePercent}%)`} value={rupee(f.service)} />}
-        <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
-        <TicketLine label="TOTAL" value={rupee(f.grandTotal)} bold />
-        <Divider />
-        <div style={{ textAlign: "center", fontSize: 11 }}>Served by {staffName}</div>
-        <Divider />
-        <PoweredBy />
+        <BillTicket
+          restaurant={restaurant}
+          billNo={orderNo ? orderNo.value : ticketNumber("BILL", view.stay_id, printedAt)}
+          billLabel={orderNo ? orderNo.label : undefined}
+          location={`Room ${view.room_number}`}
+          at={printedAt}
+          items={[]}
+          sections={bill.sections}
+          stay={bill.stay}
+          discount={bill.discount}
+          customer={{
+            name: view.guest_name,
+            phone: view.guest_phone,
+            address: view.guest_address,
+            idType: view.guest_id_type,
+            idNumber: view.guest_id_number,
+          }}
+        />
       </PrintModal>
     </div>
   );

@@ -403,6 +403,13 @@ export type RoomFolioView = {
   guest_name: string;
   guest_phone: string | null;
   guest_count: number;
+  /**
+   * The identity document taken at the front desk. Nullable because production holds
+   * stays that predate the columns — an old bill simply renders without the line.
+   */
+  guest_id_type: string | null;
+  guest_id_number: string | null;
+  guest_address: string | null;
   notes: string | null;
   status: "active" | "checked_out";
   session_id: string | null;
@@ -434,7 +441,7 @@ async function loadFolioInputs(stayId: string) {
   const { data: stay } = await svc
     .from("room_stays")
     .select(
-      "id, room_id, guest_name, guest_phone, guest_count, notes, room_rate, check_in_at, check_out_at, status, rooms ( number, room_type_id )"
+      "id, room_id, guest_name, guest_phone, guest_count, guest_id_type, guest_id_number, guest_address, notes, room_rate, check_in_at, check_out_at, status, rooms ( number, room_type_id )"
     )
     .eq("id", stayId)
     .eq("restaurant_id", ru.restaurant_id)
@@ -517,6 +524,9 @@ export async function getRoomFolio(stayId: string): Promise<RoomFolioView | null
     guest_name: stay.guest_name,
     guest_phone: stay.guest_phone,
     guest_count: stay.guest_count,
+    guest_id_type: stay.guest_id_type ?? null,
+    guest_id_number: stay.guest_id_number ?? null,
+    guest_address: stay.guest_address ?? null,
     notes: stay.notes,
     status: stay.status,
     session_id: sessionId,
