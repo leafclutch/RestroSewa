@@ -4,7 +4,7 @@ import { hasPermission, hasAnyPermission, NAV_ACCESS, PERMISSIONS } from "@/lib/
 import { getRoomFolio } from "@/app/actions/rooms";
 import { getSessionDetail } from "@/app/actions/pos";
 import { getWorkstations } from "@/app/actions/workstations";
-import { createServiceClient } from "@/lib/supabase/service";
+import { getRestaurantConfig } from "@/lib/restaurant-info";
 import { FolioClient } from "./_components/folio-client";
 import { TransferHistory } from "../../session/[id]/_components/transfer-history";
 
@@ -36,14 +36,12 @@ export default async function RoomPage({
   const view = await getRoomFolio(stayId);
   if (!view) notFound();
 
-  const service = createServiceClient();
-  const [restRes, session, workstations] = await Promise.all([
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (service as any)
-      .from("restaurants")
-      .select("name, address, contact_phone, pan_vat_number, logo_url, settings")
-      .eq("id", restaurantUser.restaurant_id)
-      .maybeSingle(),
+  const [config, session, workstations] = await Promise.all([
+    // The SAME cached config the session screen reads, instead of this page's own
+    // uncached `restaurants` select. It removes a round trip, and it carries two things
+    // that select never did: the tax/service percentages the printed bill needs, and
+    // whether a discount PIN exists at all.
+    getRestaurantConfig(restaurantUser.restaurant_id),
     // The stay's session, in the SAME shape the table screen uses — so the room
     // can render the very same ticket components rather than a second set that has
     // to be kept in step.
@@ -51,8 +49,6 @@ export default async function RoomPage({
     // Station list so each item lands on its own workstation Order Ticket.
     getWorkstations(restaurantUser.restaurant_id),
   ]);
-
-  const rest = restRes.data;
 
   // KOT/BOT and bill printing is a billing/order-management action — Cashier /
   // Receptionist, NOT a waiter. Gate on the billing permissions only they carry,
@@ -75,14 +71,19 @@ export default async function RoomPage({
       view={view}
       session={session}
       restaurant={{
-        name: rest?.name ?? "",
-        address: rest?.address ?? null,
-        contact_phone: rest?.contact_phone ?? null,
-        pan_vat_number: rest?.pan_vat_number ?? null,
-        logo_url: rest?.logo_url ?? null,
-        paper_width_mm: rest?.settings?.print_paper_width === "58" ? 58 : 80,
-        bill_number_pad: Number.isFinite(Number(rest?.settings?.bill_number_pad)) ? Number(rest?.settings?.bill_number_pad) : 0,
-        bill_number_label: rest?.settings?.bill_number_label === "order" ? "order" : "bill",
+        name: config.name,
+        address: config.address,
+        contact_phone: config.contact_phone,
+        pan_vat_number: config.pan_vat_number,
+        logo_url: config.logo_url,
+        paper_width_mm: config.paper_width_mm,
+        bill_number_pad: config.bill_number_pad,
+        bill_number_label: config.bill_number_label,
+        // The room bill used to render with these at 0 while `buildFolio` used the real
+        // ones, so a restaurant that ever switches VAT on would have had the folio and its
+        // own printed bill disagree.
+        tax_percent: config.tax_percent,
+        service_charge_percent: config.service_charge_percent,
       }}
       staffName={restaurantUser.display_name}
       workstations={workstations}
@@ -92,6 +93,11 @@ export default async function RoomPage({
       canCancelOrders={hasPermission(restaurantUser, PERMISSIONS.CANCEL_ORDERS)}
       canCheckOut={hasPermission(restaurantUser, PERMISSIONS.CLOSE_BILLS)}
       canDiscount={hasPermission(restaurantUser, PERMISSIONS.APPLY_DISCOUNTS)}
+      // Discounts exist only where an admin has set the restaurant's discount PIN — the
+      // same switch the table bill obeys. The hash is collapsed to a boolean inside
+      // getRestaurantConfig so it never reaches the client; the PIN itself is verified
+      // server-side in `checkOutRoom`.
+      discountEnabled={config.discountEnabled}
       // Ticket + bill generation is billing staff only, same as a table. Re-checked server-side.
       canPrintTickets={canPrintTickets}
       canPrintBill={canPrintTickets}

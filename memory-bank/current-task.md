@@ -24,7 +24,9 @@ bill is unchanged. `tsc`, `lint`, `build`, `node --test` all clean.
 Follow-up in the same batch: the folio now prints a **receipt** after checkout (PAID + tender +
 cashier, or PARTIALLY PAID + BALANCE DUE on credit) instead of "Status: UNPAID", and its panel
 totals include the recorded discount. Verified across cash, mixed and credit; a live stay still
-prints BILL / UNPAID.
+prints BILL / UNPAID. Then: the room discount now requires the **same** discount PIN as a table
+(it had only the permission check), the Cash + Online split auto-fills, and the room page reads the
+cached `getRestaurantConfig` instead of its own `restaurants` select.
 
 ---
 

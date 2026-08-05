@@ -36,6 +36,9 @@ Mirrors tables (sessions) but adds a stay/folio and a three-tier permission. See
   cleaning palette with tables).
 - Check-out gates on `close_bills`; room-service charges gate on `create_orders` (unchanged by the
   three-tier split).
+- **A room discount needs the restaurant's discount PIN** — the SAME PIN a table bill uses, verified
+  in `checkOutRoom` via `verify_discount_pin`. No PIN configured = no discounts anywhere. The
+  `apply_discounts` permission alone was the only gate here until 2026-08-05.
 - **A room bill is DERIVED from the frozen stay, never snapshotted.** `check_out_at` stops the
   inputs moving and `room_rate` was captured at check-in, so `buildFolio` returns the same
   document before and after payment — the unpaid preview and the Sales reprint are literally one

@@ -21,6 +21,11 @@ Versioning is informal (the app ships continuously); dates anchor the entries.
 - **A discount given at room checkout wasn't recorded.** The guest was charged the discounted
   amount, but Sales and the daily discount total showed nothing. It is now saved on the payment and
   appears on the bill.
+- **A room discount no longer skips the discount PIN.** Room checkout now asks for the same
+  restaurant discount PIN a table bill does — one PIN for both — and with no PIN set, discounts are
+  off in rooms too.
+- **Cash + Online at room checkout fills itself in.** Type either amount and the other is worked
+  out from the payable, instead of having to type both by hand.
 - **The room screen still said UNPAID after checkout.** Printing from a checked-out stay now gives
   a proper receipt — PAID with the payment method, the tender split and the cashier, or the balance
   still owed on a credit checkout — identical to the copy in Sales. The folio's own totals now show

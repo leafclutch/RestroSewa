@@ -757,6 +757,31 @@ export async function checkOutRoom(
     return { error: "You don't have permission to apply a discount." };
   }
 
+  // ONE discount PIN for the whole restaurant — the same authorization a table bill needs.
+  // Money coming off the till is an authorized act, not a cashier's own call, and a room
+  // folio is the biggest bill in the building: it had the permission check but no PIN, so
+  // the hotel side was the soft way round the guard.
+  //
+  // This check is the ONLY thing that enforces it. The form is a POST endpoint any logged-in
+  // staff member can hit directly, so hiding the field client-side protects nothing on its
+  // own. `verify_discount_pin` returns false when no PIN is configured, which is what makes
+  // "no PIN" mean "discounts off" rather than "discounts unguarded".
+  if (discountRaw > 0) {
+    const pin = String(formData.get("discount_pin") ?? "").trim();
+    if (!pin) return { error: "Enter the discount PIN to apply a discount." };
+
+    const service = createServiceClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: pinOk, error: pinErr } = await (service as any).rpc("verify_discount_pin", {
+      p_restaurant_id: ru.restaurant_id,
+      p_pin: pin,
+    });
+    // A failed CHECK must never be read as a pass — refuse on error too.
+    if (pinErr || pinOk !== true) {
+      return { error: "Incorrect discount PIN. The discount was not applied." };
+    }
+  }
+
   // THE important line. The client tells us what it *thinks* the bill is; we
   // ignore it entirely and rebuild the folio here from the stay, its charges and
   // its orders. So a tampered form cannot check a guest out for ₹1, and a browser

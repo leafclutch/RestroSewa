@@ -45,6 +45,17 @@ too, and the two can be different people, so two lines both saying "Customer" sa
 `BILL_METHOD_LABEL` moved to `lib/billing/payment-method.ts` — the two components that print a
 settled bill must spell a method identically. (The sales-list / finance maps stay separate: they
 label methods that never reach paper.)
+**(5) The room was the soft way round the discount PIN.** A table bill demanded the restaurant's
+discount PIN; `checkOutRoom` checked only the `apply_discounts` permission — on the biggest bill in
+the building. It now runs the identical `verify_discount_pin` gate, so there is **one** discount PIN
+for tables and rooms alike, and "no PIN configured" means discounts are off on both (the field is
+replaced by the same "ask your admin" note). Verified: wrong PIN → refused, stay still active, no
+payment row; correct PIN → `total 1300 = 1500 − 200`.
+**Also:** the room's Cash + Online split now **auto-fills the other side** as the table's does
+(typing 800 fills 500 of a 1,300 payable) and a discount clears a stale split instead of submitting
+one that no longer adds up. And the room page moved from its own uncached `restaurants` select to
+the shared cached `getRestaurantConfig` — one fewer round trip, and it carries the tax/service
+percentages the printed room bill was silently rendering as 0 while `buildFolio` used the real ones.
 **RPC trap, hit for real:** `create or replace function` with a LONGER parameter list does not
 replace, it creates an **OVERLOAD** — and the deployed 8-argument call then matched both
 candidates and failed with `42725 … is not unique`. Both migrations `drop function` the old exact

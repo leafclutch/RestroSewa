@@ -19,7 +19,7 @@ import { folioToBill } from "@/lib/billing/room-bill";
 import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
 import { billMethodLabel } from "@/lib/billing/payment-method";
 import {
-  ArrowLeft, BedDouble, Plus, Printer, Trash2, User, UtensilsCrossed, X,
+  ArrowLeft, BedDouble, Lock, Plus, Printer, Trash2, User, UtensilsCrossed, X,
 } from "lucide-react";
 
 const rupee = (n: number) =>
@@ -147,15 +147,20 @@ function AddChargeForm({ stayId, onDone }: { stayId: string; onDone: () => void 
 // ─── Check out ───────────────────────────────────────────────────────────────
 
 function CheckOutForm({
-  view, canDiscount, canUseCredit,
+  view, canDiscount, canUseCredit, discountEnabled,
 }: {
   view: RoomFolioView;
   canDiscount: boolean;
   canUseCredit: boolean;
+  /** Whether the restaurant has a discount PIN configured. No PIN = no discounts at all,
+   *  so the field isn't shown. The PIN is still verified server-side at checkout. */
+  discountEnabled: boolean;
 }) {
   const [state, action, pending] = useActionState(checkOutRoom, null);
   const [method, setMethod] = useState<"cash" | "online" | "card" | "mixed" | "credit">("cash");
   const [discount, setDiscount] = useState("");
+  // The admin's discount PIN authorizing that reduction. Held only long enough to submit.
+  const [discountPin, setDiscountPin] = useState("");
   const [cash, setCash] = useState("");
   const [online, setOnline] = useState("");
   const [paidNow, setPaidNow] = useState("");
@@ -186,10 +191,39 @@ function CheckOutForm({
   // The subtotal is fixed; the discount is the only thing the cashier moves, so
   // the payable total is recomputed live from it. The SERVER rebuilds this from
   // the database regardless — this is only so the number under the cursor is right.
-  const disc = Math.min(Math.max(parseFloat(discount) || 0, 0), f.subtotal);
+  // With no PIN configured there is no discount to speak of, so it's pinned to 0.
+  const disc = discountEnabled
+    ? Math.min(Math.max(parseFloat(discount) || 0, 0), f.subtotal)
+    : 0;
   const taxable = f.subtotal - disc;
   const total =
     Math.round((taxable * (1 + f.taxPercent / 100 + f.servicePercent / 100)) * 100) / 100;
+
+  // The server is the real gate; this just stops an obviously-incomplete submit.
+  const discountPinValid = disc === 0 || /^\d{4}$/.test(discountPin);
+
+  // Typing one half of a Cash + Online split fills the other, so the two always add up to
+  // the payable — the same behaviour as the table bill, and as this form's own credit
+  // down-payment split. It used to demand both numbers by hand.
+  function handleCashChange(val: string) {
+    setCash(val);
+    const n = parseFloat(val);
+    setOnline(!isNaN(n) && n >= 0 ? Math.max(0, Math.round((total - n) * 100) / 100).toFixed(2) : "");
+  }
+
+  function handleOnlineChange(val: string) {
+    setOnline(val);
+    const n = parseFloat(val);
+    setCash(!isNaN(n) && n >= 0 ? Math.max(0, Math.round((total - n) * 100) / 100).toFixed(2) : "");
+  }
+
+  // A new discount moves the payable, which strands any split already typed against the
+  // old one — clear it rather than submit a split that no longer adds up.
+  function handleDiscountChange(val: string) {
+    setDiscount(val);
+    setCash("");
+    setOnline("");
+  }
 
   const cashNum = parseFloat(cash) || 0;
   const onlineNum = parseFloat(online) || 0;
@@ -254,23 +288,61 @@ function CheckOutForm({
       )}
 
       {canDiscount && (
-        <div>
-          <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
-            Discount
-          </label>
-          <input
-            type="number"
-            min="0"
-            max={f.subtotal}
-            step="0.01"
-            inputMode="decimal"
-            value={discount}
-            onChange={(e) => setDiscount(e.target.value)}
-            placeholder="0.00"
-            className="w-full h-10 rounded-sm border px-3 text-sm tabular"
-            style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
-          />
-        </div>
+        discountEnabled ? (
+          <>
+            <div>
+              <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+                Discount
+              </label>
+              <input
+                type="number"
+                min="0"
+                max={f.subtotal}
+                step="0.01"
+                inputMode="decimal"
+                value={discount}
+                onChange={(e) => handleDiscountChange(e.target.value)}
+                placeholder="0.00"
+                className="w-full h-10 rounded-sm border px-3 text-sm tabular"
+                style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+              />
+            </div>
+
+            {/* Only asked for once there's actually something to authorize. */}
+            {disc > 0 && (
+              <div>
+                <label htmlFor="room_discount_pin" className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+                  Discount PIN
+                </label>
+                <input
+                  id="room_discount_pin"
+                  name="discount_pin"
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  maxLength={4}
+                  placeholder="••••"
+                  value={discountPin}
+                  onChange={(e) => setDiscountPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  className="w-full h-10 rounded-sm border px-3 text-sm text-right tracking-[0.4em]"
+                  style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+                />
+                {!discountPinValid && (
+                  <p className="text-xs mt-1.5" style={{ color: "var(--color-ink-mute)" }}>
+                    Enter the 4-digit discount PIN to authorize this reduction.
+                  </p>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="flex items-start gap-2">
+            <Lock size={13} className="mt-0.5 shrink-0" style={{ color: "var(--color-ink-mute)" }} />
+            <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+              Discounts are turned off. Ask your admin to set a discount PIN in Settings.
+            </p>
+          </div>
+        )
       )}
 
       {/* Payable */}
@@ -304,11 +376,12 @@ function CheckOutForm({
 
       {method === "mixed" && (
         <div className="grid grid-cols-2 gap-3">
-          {([["Cash", cash, setCash], ["Online", online, setOnline]] as const).map(([label, val, set]) => (
+          {/* Type either side; the other fills itself so the two always total the payable. */}
+          {([["Cash", cash, handleCashChange], ["Online", online, handleOnlineChange]] as const).map(([label, val, set]) => (
             <div key={label}>
               <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>{label}</label>
               <input
-                type="number" min="0" step="0.01" inputMode="decimal"
+                type="number" min="0" max={total} step="0.01" inputMode="decimal"
                 value={val}
                 onChange={(e) => set(e.target.value)}
                 className="w-full h-10 rounded-sm border px-3 text-sm tabular"
@@ -474,7 +547,7 @@ function CheckOutForm({
       <Button
         type="submit"
         variant="primary"
-        disabled={pending || !mixedOk || !creditOk}
+        disabled={pending || !mixedOk || !creditOk || !discountPinValid}
         className="w-full"
       >
         {pending ? "Checking out…" : `Check out · ${rupee(total)}`}
@@ -488,7 +561,8 @@ function CheckOutForm({
 export function FolioClient({
   view, session, restaurant, staffName, workstations = [],
   canAddCharges, canCreateOrders, canManageOrders, canCancelOrders,
-  canCheckOut, canDiscount, canUseCredit, canPrintTickets = false, canPrintBill = false,
+  canCheckOut, canDiscount, canUseCredit, discountEnabled = false,
+  canPrintTickets = false, canPrintBill = false,
 }: {
   view: RoomFolioView;
   /** The stay's session, in the same shape a table's screen uses. */
@@ -503,6 +577,8 @@ export function FolioClient({
   canCheckOut: boolean;
   canDiscount: boolean;
   canUseCredit: boolean;
+  /** The restaurant has a discount PIN set. No PIN = no discounts, same as a table bill. */
+  discountEnabled?: boolean;
   /** KOT/BOT printing — billing/order-management staff only (not waiters). */
   canPrintTickets?: boolean;
   /** Room folio bill printing — billing staff only. */
@@ -796,7 +872,12 @@ export function FolioClient({
           <p className="text-sm font-medium mb-3" style={{ color: "var(--color-ink)" }}>
             Check out &amp; settle
           </p>
-          <CheckOutForm view={view} canDiscount={canDiscount} canUseCredit={canUseCredit} />
+          <CheckOutForm
+            view={view}
+            canDiscount={canDiscount}
+            canUseCredit={canUseCredit}
+            discountEnabled={discountEnabled}
+          />
         </div>
       )}
 
