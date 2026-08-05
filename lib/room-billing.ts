@@ -191,8 +191,11 @@ export function buildFolio(
   const discount = money(Math.min(Math.max(config.discount ?? 0, 0), subtotal));
   const taxable = money(subtotal - discount);
 
-  // Both percentages are taken on the discounted subtotal, matching how the
-  // existing table bill ticket already computes them.
+  // Both percentages are taken on the DISCOUNTED subtotal — you are not taxed on money
+  // you did not pay. This comment used to claim the table bill ticket already agreed; it
+  // did not. `BillTicket` took the discount off AFTER tax until the billing unification,
+  // so the same stay totalled differently depending on which renderer you looked at.
+  // BillTicket is the one that moved — this file was always right.
   const taxPercent = config.taxPercent ?? 0;
   const servicePercent = config.servicePercent ?? 0;
   const tax = money(taxable * (taxPercent / 100));

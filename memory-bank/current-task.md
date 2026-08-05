@@ -6,6 +6,25 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
+**Room billing unification (2026-08-04 → 05) — CODE COMPLETE.** Guest identity at check-in, and the
+room bill rendered through the shared `BillTicket` so the document is the same before and after
+payment. Full write-up in `completed.md`; design + plan in
+`docs/superpowers/{specs,plans}/2026-08-04-room-billing-unification*`.
+**Remaining — ops only:**
+1. `node scripts/migrate.mjs up --prod --yes` (migrations `20260804000000`, `20260804010000`).
+   Additive, every new RPC parameter defaults, so the DB can go **before** the app; rolling the app
+   back alone is safe because the old argument lists still resolve.
+2. Deploy, then on the live hotel client ("Sanjib") check one guest in with an ID, check them out
+   with a small discount, and confirm `payments.discount_amount` and the Sales bill.
+**Verified on DEV end to end:** check-in → room-service order → extra charge → unpaid bill →
+mixed checkout with a ₹180 discount → the same bill in Sales. Lines 1500 + 300 + 380 = 2180,
+less 180 = **2000 = `payments.total_amount`**. A pre-existing stay with null identity columns still
+renders (no ID line, no crash) and now shows its room charge for the first time. A paid **table**
+bill is unchanged. `tsc`, `lint`, `build`, `node --test` all clean.
+
+---
+
+## Previous feature — shipped
 **Thermal printing fixes (2026-08-03).** Six reported defects in printed KOT/BOT/bill output reduced
 to **three** real causes. Every receipt in the app goes through one `PrintModal`, so the fixes land
 on the session bill, station tickets, room folio bill and credit receipt at once.

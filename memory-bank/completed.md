@@ -3,6 +3,47 @@
 Chronological log of meaningful shipped features (newest first). Not every commit — only
 features worth remembering. Dates are approximate to the work, not necessarily merge dates.
 
+## 2026-08 — Room billing unification: one bill, before and after payment
+A room bill and a table bill were two different documents built by two different renderers, and
+the room one was wrong in three separate ways. There was never a separate billing *architecture*
+to dismantle — a stay already rides on `sessions` + `payments` — only a separate renderer plus
+three defects.
+**(1) The guest was anonymous.** Check-in now requires **ID type (Citizenship / NID), ID number
+and permanent address**, stored on `room_stays` and printed on every bill from the stay. The
+columns are **nullable on purpose**: production holds stays that cannot be backfilled with
+documents nobody recorded, so old bills simply render without the line. They are NOT
+`sessions.customer_address` — that belongs to the walk-in feature and dies with the session.
+**(2) A discount was applied but never recorded.** The checkout modal already collected one and
+`buildFolio` already applied it to the total, but `check_out_room` had no `p_discount` parameter,
+so `payments.discount_amount` stayed 0 for every room checkout: the guest paid less and Sales and
+the Finance discount total never knew. Verified across cash, mixed and credit.
+**(3) A paid room bill listed only the food.** `getPaidBill` printed `session_order_items`, so the
+room nights and every extra charge were missing and the visible lines did not add up to what was
+charged. It now reloads the frozen stay and calls the SAME `buildFolio` + `folioToBill` with
+`discount = payments.discount_amount`. Re-deriving is safe *because* the stay is frozen
+(`check_out_at` set, `room_rate` snapshotted at check-in) — a second calculator, or a snapshot of
+the lines at payment, is exactly how the two would drift.
+**The unification itself:** `BillTicket` gained two optional props (`sections`, `stay`) and ID
+fields on `customer`; one pure mapper `lib/billing/room-bill.ts` `folioToBill()` (6 `node --test`
+tests) feeds it from both the unpaid folio and the paid Sales bill, so the two cannot diverge. A
+table bill passes neither and is byte-for-byte unchanged — verified on a real paid table bill.
+**Also fixed while in there:** `BillTicket` took the discount off AFTER tax while `buildFolio`
+took it off BEFORE, so the same stay totalled differently depending on which renderer you looked
+at (and a comment in `room-billing.ts` wrongly claimed they agreed). BillTicket moved. No printed
+number changes today — every restaurant runs tax/service at 0 with tax-inclusive prices — this
+only decides what happens the day VAT is switched on.
+**RPC trap, hit for real:** `create or replace function` with a LONGER parameter list does not
+replace, it creates an **OVERLOAD** — and the deployed 8-argument call then matched both
+candidates and failed with `42725 … is not unique`. Both migrations `drop function` the old exact
+signature first. Every new parameter has a DEFAULT and every call site passes arguments BY NAME.
+*Files:* migrations `20260804000000` (guest identity + `check_in_room`) and `20260804010000`
+(`check_out_room` `p_discount`), `lib/billing/room-bill.ts` + `.test.ts`,
+`app/(employee)/employee/_components/bill-ticket.tsx`, `app/actions/{rooms,pos}.ts`,
+`rooms-grid.tsx`, `folio-client.tsx`, `sales/_components/paid-bill.tsx`, `lib/room-billing.ts`,
+`tsconfig.json` (`allowImportingTsExtensions`, so `node --test` files typecheck).
+*Ops:* both migrations still to run on **production** (`node scripts/migrate.mjs up --prod --yes`)
+— additive with defaulting parameters, so the DB can go before the app.
+
 ## 2026-08 — Thermal print: the page is the PRINT HEAD (72mm), not the roll (80mm)
 Receipts printed at 100% lost their right-hand column — `BOT-0002…`, `4 Aug 202…`,
 `Diwakar Gupt…` all truncated on real paper — and printing at 80-85% "fixed" it.

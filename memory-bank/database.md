@@ -29,6 +29,14 @@ almost everything is reached through the **service_role** client or **RPCs** (RL
   its orders/calls. **restaurant_user_tables** = the group↔staff assignment (the "Assign staff"
   / "Assign all" UI writes here via `setTableGroupWaiters`).
 - **rooms / room_types / restaurant_user_rooms** — hotel side; same assignment idea.
+- **room_stays** — one guest's stay. `room_rate` is the rate SNAPSHOTTED at check-in (a later
+  price change must not re-bill a guest already in the bed) and `check_out_at` freezes the folio;
+  the bill is DERIVED from those two, never stored. **`guest_id_type`** (`citizenship` | `nid`,
+  CHECK-constrained), **`guest_id_number`**, **`guest_address`** = the hotel register.
+  **Nullable on purpose** — stays that predate the columns cannot be backfilled with documents
+  nobody recorded; `checkInRoom` requires all three for every NEW check-in.
+- **room_charges** — extras on a stay (laundry, mini bar, late checkout…). Food rides on the
+  stay's `session` instead, which is what puts room service on the room bill.
 - **sessions** — one open visit per table/room. `type`, `status`, transfer handled by ONE
   column; **unique partial indexes** enforce one-open-per-table and one-open-per-room. Customer
   follows the session, not the QR. Table/room state (available/occupied/cleaning) is **derived**
