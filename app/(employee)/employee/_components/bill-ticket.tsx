@@ -59,22 +59,51 @@ export function ticketNumber(prefix: string, seedId: string, at: Date) {
 const rupee = (n: number) => `₹${n.toFixed(2)}`;
 
 // ── print stylesheet (hides the app chrome, prints only the ticket) ────────────
-// Thermal-first: the page IS the roll. `@page { size: <W>mm auto }` tells the browser
+// Thermal-first: the page IS the printable strip of the roll (see PRINTABLE_MM below —
+// it is NOT the roll width). `@page { size: <W>mm <H>mm; margin: 0 }` tells the browser
 // the paper is a W-mm-wide continuous roll with NO margins, so the receipt fills the
-// full width instead of sitting as a sliver inside an A4 sheet — and the print preview
-// then matches the physical output. On a plain A4 printer the same rules simply print a
-// tidy W-mm column down the left edge, so A4 stays a valid fallback.
+// head's full width instead of sitting as a sliver inside an A4 sheet — and the print
+// preview then matches the physical output. On a plain A4 printer the same rules simply
+// print a tidy W-mm column down the left edge, so A4 stays a valid fallback.
 
 // The ticket's geometry lives here ONCE, because three places have to agree exactly or
 // the printed page is the wrong height: the print stylesheet, the height measurement, and
 // the on-screen preview. They used to disagree — the preview padded `14px 12px` while
 // print padded `0 2mm` — so the measured page never quite matched what came out.
-const TICKET_PADDING = "0 2mm";
+const TICKET_PADDING = "0 1mm";
 const TICKET_LINE_HEIGHT = 1.45;
 const fontPxFor = (widthMm: 58 | 80) => (widthMm === 58 ? 11 : 12);
 
+/**
+ * ── THE PAGE IS THE PRINT HEAD, NOT THE PAPER ────────────────────────────────
+ *
+ * A "80mm printer" takes an 80mm ROLL but its head only covers **72mm** (576 dots
+ * at 203dpi, 8 dots/mm); the remaining ~4mm each side is physically unprintable.
+ * 58mm rolls are the same story: **48mm** printable (384 dots).
+ *
+ * This used to lay the ticket out at the full roll width. Chrome only honours an
+ * exact `@page` size when the driver offers a matching paper, and a thermal driver
+ * advertises its paper as the PRINTABLE width (e.g. "80(72.1) x 297mm") — so an
+ * 80mm-wide page was rendered into a 72mm one and the right-hand 8mm simply fell
+ * off the sheet. On a real BOT that ate the right-aligned column: `BOT-0002…`,
+ * `4 Aug 202…`, `Diwakar Gupt…`. Printing at 80-85% "fixed" it for the same reason
+ * — 80mm × 0.85 ≈ 68mm finally fits inside 72mm.
+ *
+ * So author at the printable width and let the driver's own dead zone be dead.
+ * Do NOT put the roll width back here.
+ */
+const PRINTABLE_MM = { 58: 48, 80: 72 } as const;
+const printableMm = (rollMm: 58 | 80) => PRINTABLE_MM[rollMm];
+
+/**
+ * Blank paper fed after the last line, so the auto-cutter (or the tear bar) does not
+ * come down through the footer. 4mm left the total sitting right on the cut.
+ */
+const TAIL_MM = 10;
+
 function PrintStyles({ widthMm }: { widthMm: 58 | 80 }) {
   const fontPx = fontPxFor(widthMm);
+  const printMm = printableMm(widthMm);
   return (
     <style
       dangerouslySetInnerHTML={{
@@ -120,8 +149,8 @@ function PrintStyles({ widthMm }: { widthMm: 58 | 80 }) {
   .rs-no-print { display: none !important; }
   .rs-ticket-print {
     position: static !important;
-    width: ${widthMm}mm !important;
-    max-width: ${widthMm}mm !important;
+    width: ${printMm}mm !important;
+    max-width: ${printMm}mm !important;
     margin: 0 auto !important;
     padding: ${TICKET_PADDING} !important;
     box-shadow: none !important;
@@ -213,14 +242,16 @@ export function PrintModal({
     if (!el || !pageEl) return;
     const prevW = el.style.width;
     const prevP = el.style.padding;
-    // Lay the ticket out at the exact print geometry, measure, then restore.
-    el.style.width = `${paperWidthMm}mm`;
+    // Lay the ticket out at the exact print geometry, measure, then restore. The width
+    // is the PRINT HEAD's, not the roll's — see printableMm.
+    const printMm = printableMm(paperWidthMm);
+    el.style.width = `${printMm}mm`;
     el.style.padding = TICKET_PADDING;
     const heightPx = el.getBoundingClientRect().height;
     el.style.width = prevW;
     el.style.padding = prevP;
-    // +4mm tail so the last line never clips and the auto-cutter has a little margin.
-    const contentMm = Math.ceil(pxToMm(heightPx)) + 4;
+    // Tail of blank paper so the last line never clips and the cutter has a margin.
+    const contentMm = Math.ceil(pxToMm(heightPx)) + TAIL_MM;
     // NEVER emit a page wider than it is tall. `@page { size: <w> <h> }` takes no
     // orientation keyword — the LARGER value decides — so 80mm × 63mm is not a short
     // portrait receipt, it is a LANDSCAPE one, and the browser rotates the content 90°.
@@ -231,8 +262,8 @@ export function PrintModal({
     // The cost is that a very short ticket feeds ~81mm of paper rather than ~63mm. There
     // is no way to ask for "portrait, shorter than wide", and `size: 80mm auto` is invalid
     // CSS which is dropped wholesale (that is the Letter fallback described above).
-    const heightMm = Math.max(contentMm, paperWidthMm + 1);
-    pageEl.textContent = `@page { size: ${paperWidthMm}mm ${heightMm}mm; margin: 0; }`;
+    const heightMm = Math.max(contentMm, printMm + 1);
+    pageEl.textContent = `@page { size: ${printMm}mm ${heightMm}mm; margin: 0; }`;
   }, [paperWidthMm]);
 
   // Size the page whenever the preview opens (covers Ctrl+P as well as the Print button),
@@ -248,7 +279,8 @@ export function PrintModal({
 
   if (!open || !mounted) return null;
 
-  const previewPx = mmToPx(paperWidthMm);
+  // The preview must be the PRINTED column, or it lies about what fits on a line.
+  const previewPx = mmToPx(printableMm(paperWidthMm));
 
   const handlePrint = async () => {
     if (onBeforePrint) {
@@ -386,7 +418,30 @@ export function PoweredBy() {
 //    of a completed transaction (PAID + method + cashier) ─────────────────────────
 
 // Optional customer block for takeaway / delivery bills.
-export type BillCustomer = { name: string | null; phone: string | null; address: string | null };
+export type BillCustomer = {
+  name: string | null;
+  phone: string | null;
+  address: string | null;
+  /** 'citizenship' | 'nid' — a hotel guest's identity document. */
+  idType?: string | null;
+  idNumber?: string | null;
+};
+
+/** A room stay's own facts, printed above the lines. Absent on a table bill. */
+export type BillStay = {
+  roomType: string;
+  rate: number;
+  nights: number;
+  checkIn: string;
+  checkOut: string;
+  duration: string;
+};
+
+/** Grouped lines — "Room charge", "Extras", "Food & beverages". */
+export type BillSection = {
+  title: string;
+  lines: BillItem[];
+};
 
 export function BillTicket({
   restaurant,
@@ -395,6 +450,8 @@ export function BillTicket({
   location,
   at,
   items,
+  sections,
+  stay,
   payment,
   credit,
   customer,
@@ -408,6 +465,11 @@ export function BillTicket({
   location: string;
   at: Date;
   items: BillItem[];
+  /** Grouped lines. When present these REPLACE `items` — a caller passes one or the
+   *  other, never both. A room bill groups; a table bill has one flat list. */
+  sections?: BillSection[];
+  /** Hotel block. Present only for a room bill. */
+  stay?: BillStay;
   payment?: BillPayment;
   credit?: BillCredit | null;
   customer?: BillCustomer | null;
@@ -415,15 +477,26 @@ export function BillTicket({
    *  printed before the cashier has entered it, so it passes 0. */
   discount?: number;
 }) {
-  const hasCustomer = !!(customer && (customer.name || customer.phone || customer.address));
-  const subtotal = items.reduce((s, i) => s + Number(i.item_price) * i.quantity, 0);
+  const hasCustomer = !!(
+    customer &&
+    (customer.name || customer.phone || customer.address || customer.idNumber)
+  );
+  // Sections REPLACE items when supplied, so the subtotal is taken over whichever the
+  // caller gave us — a room bill groups its lines, a table bill has one flat list.
+  const allLines = sections ? sections.flatMap((s) => s.lines) : items;
+  const subtotal = allLines.reduce((s, i) => s + Number(i.item_price) * i.quantity, 0);
   const taxPct = restaurant.tax_percent ?? 0;
   const svcPct = restaurant.service_charge_percent ?? 0;
-  const tax = subtotal * (taxPct / 100);
-  const service = subtotal * (svcPct / 100);
-  // The discount comes off AFTER tax/service — it's a reduction of the amount payable,
-  // not of the goods, so the tax lines still reconcile against the subtotal above them.
-  const grandTotal = Math.max(0, subtotal + tax + service - discount);
+  // The discount comes off BEFORE tax/service — you are not taxed on money you did not
+  // pay. This is the rule lib/room-billing.ts buildFolio has always used; this component
+  // used to take it off AFTER, so the same bill totalled differently depending on which
+  // renderer you looked at (and a comment in room-billing.ts wrongly claimed they matched).
+  // Every restaurant runs tax and service at 0 with tax-inclusive prices, so no printed
+  // number moves today — this only decides what happens the day VAT is switched on.
+  const taxable = Math.max(0, subtotal - discount);
+  const tax = taxable * (taxPct / 100);
+  const service = taxable * (svcPct / 100);
+  const grandTotal = taxable + tax + service;
 
   // Show the tender split whenever the bill was settled with more than one.
   const parts = payment
@@ -454,13 +527,38 @@ export function BillTicket({
       <Line label={billLabel ?? (payment ? "Receipt No" : "Bill No")} value={billNo} />
       <Line label="Date" value={at.toLocaleDateString("en-IN", { dateStyle: "medium" })} />
       <Line label="Time" value={at.toLocaleTimeString("en-IN", { timeStyle: "short" })} />
+      {/* The hotel block. A room bill has to answer "which room type, for how many nights,
+          at what rate, between when and when" — a table bill has none of that. */}
+      {stay && (
+        <>
+          <Line label="Room type" value={stay.roomType} />
+          <Line
+            label="Check-in"
+            value={new Date(stay.checkIn).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+          />
+          <Line
+            label="Check-out"
+            value={new Date(stay.checkOut).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+          />
+          <Line label="Nights" value={`${stay.nights} × ${rupee(stay.rate)}`} />
+        </>
+      )}
       {payment?.cashier && <Line label="Cashier" value={payment.cashier} />}
       {credit && <Line label="Credit ID" value={credit.credit_number} />}
-      {credit && <Line label="Customer" value={credit.customer_name} />}
+      {/* "Credit a/c", not "Customer": on a room bill the guest is printed below as well,
+          and the two are not always the same person — a company account can settle for a
+          guest. Two lines both labelled "Customer" said nothing about which was which. */}
+      {credit && <Line label="Credit a/c" value={credit.customer_name} />}
       {hasCustomer && (
         <>
           {customer!.name && <Line label="Customer" value={customer!.name} />}
           {customer!.phone && <Line label="Phone" value={customer!.phone} />}
+          {customer!.idNumber && (
+            <Line
+              label={customer!.idType === "nid" ? "NID No" : "Citizenship No"}
+              value={customer!.idNumber}
+            />
+          )}
           {customer!.address && (
             <div style={{ fontSize: 11, marginTop: 2 }}>{customer!.address}</div>
           )}
@@ -476,7 +574,25 @@ export function BillTicket({
         <span style={{ width: 62, textAlign: "right" }}>Amount</span>
       </div>
       <div style={{ borderTop: "1px solid #000", margin: "4px 0" }} />
-      {items.length === 0 ? (
+      {sections ? (
+        // Grouped: a heading, then that group's lines. Same row markup as the flat list
+        // below, so a room bill and a table bill line up column for column on paper.
+        sections.map((sec) => (
+          <div key={sec.title}>
+            <div style={{ fontWeight: 700, fontSize: 11, marginTop: 4 }}>{sec.title}</div>
+            {sec.lines.map((it) => (
+              <div key={it.id} style={{ display: "flex", alignItems: "flex-start", marginTop: 2 }}>
+                <span style={{ flex: 1, overflowWrap: "anywhere" }}>{it.item_name}</span>
+                <span style={{ width: 28, textAlign: "center" }}>{it.quantity}</span>
+                <span style={{ width: 54, textAlign: "right" }}>{Number(it.item_price).toFixed(2)}</span>
+                <span style={{ width: 62, textAlign: "right" }}>
+                  {(Number(it.item_price) * it.quantity).toFixed(2)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ))
+      ) : items.length === 0 ? (
         <div style={{ textAlign: "center" }}>No items.</div>
       ) : (
         items.map((it) => (

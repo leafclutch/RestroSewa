@@ -14,9 +14,12 @@ import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { OrderItem } from "@/app/(employee)/employee/_components/order-item";
 import { SessionPrintButtons } from "@/app/(employee)/employee/session/[id]/_components/print-tickets";
 import type { RestaurantInfo, PrintStation } from "@/app/(employee)/employee/session/[id]/_components/print-tickets";
-import { PrintModal, Divider, Line as TicketLine, PoweredBy } from "@/app/(employee)/employee/_components/bill-ticket";
+import { PrintModal, BillTicket, ticketNumber } from "@/app/(employee)/employee/_components/bill-ticket";
+import { folioToBill } from "@/lib/billing/room-bill";
+import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
+import { billMethodLabel } from "@/lib/billing/payment-method";
 import {
-  ArrowLeft, BedDouble, Plus, Printer, Trash2, User, UtensilsCrossed, X,
+  ArrowLeft, BedDouble, Lock, Plus, Printer, Trash2, User, UtensilsCrossed, X,
 } from "lucide-react";
 
 const rupee = (n: number) =>
@@ -144,15 +147,20 @@ function AddChargeForm({ stayId, onDone }: { stayId: string; onDone: () => void 
 // ─── Check out ───────────────────────────────────────────────────────────────
 
 function CheckOutForm({
-  view, canDiscount, canUseCredit,
+  view, canDiscount, canUseCredit, discountEnabled,
 }: {
   view: RoomFolioView;
   canDiscount: boolean;
   canUseCredit: boolean;
+  /** Whether the restaurant has a discount PIN configured. No PIN = no discounts at all,
+   *  so the field isn't shown. The PIN is still verified server-side at checkout. */
+  discountEnabled: boolean;
 }) {
   const [state, action, pending] = useActionState(checkOutRoom, null);
   const [method, setMethod] = useState<"cash" | "online" | "card" | "mixed" | "credit">("cash");
   const [discount, setDiscount] = useState("");
+  // The admin's discount PIN authorizing that reduction. Held only long enough to submit.
+  const [discountPin, setDiscountPin] = useState("");
   const [cash, setCash] = useState("");
   const [online, setOnline] = useState("");
   const [paidNow, setPaidNow] = useState("");
@@ -183,10 +191,39 @@ function CheckOutForm({
   // The subtotal is fixed; the discount is the only thing the cashier moves, so
   // the payable total is recomputed live from it. The SERVER rebuilds this from
   // the database regardless — this is only so the number under the cursor is right.
-  const disc = Math.min(Math.max(parseFloat(discount) || 0, 0), f.subtotal);
+  // With no PIN configured there is no discount to speak of, so it's pinned to 0.
+  const disc = discountEnabled
+    ? Math.min(Math.max(parseFloat(discount) || 0, 0), f.subtotal)
+    : 0;
   const taxable = f.subtotal - disc;
   const total =
     Math.round((taxable * (1 + f.taxPercent / 100 + f.servicePercent / 100)) * 100) / 100;
+
+  // The server is the real gate; this just stops an obviously-incomplete submit.
+  const discountPinValid = disc === 0 || /^\d{4}$/.test(discountPin);
+
+  // Typing one half of a Cash + Online split fills the other, so the two always add up to
+  // the payable — the same behaviour as the table bill, and as this form's own credit
+  // down-payment split. It used to demand both numbers by hand.
+  function handleCashChange(val: string) {
+    setCash(val);
+    const n = parseFloat(val);
+    setOnline(!isNaN(n) && n >= 0 ? Math.max(0, Math.round((total - n) * 100) / 100).toFixed(2) : "");
+  }
+
+  function handleOnlineChange(val: string) {
+    setOnline(val);
+    const n = parseFloat(val);
+    setCash(!isNaN(n) && n >= 0 ? Math.max(0, Math.round((total - n) * 100) / 100).toFixed(2) : "");
+  }
+
+  // A new discount moves the payable, which strands any split already typed against the
+  // old one — clear it rather than submit a split that no longer adds up.
+  function handleDiscountChange(val: string) {
+    setDiscount(val);
+    setCash("");
+    setOnline("");
+  }
 
   const cashNum = parseFloat(cash) || 0;
   const onlineNum = parseFloat(online) || 0;
@@ -251,23 +288,61 @@ function CheckOutForm({
       )}
 
       {canDiscount && (
-        <div>
-          <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
-            Discount
-          </label>
-          <input
-            type="number"
-            min="0"
-            max={f.subtotal}
-            step="0.01"
-            inputMode="decimal"
-            value={discount}
-            onChange={(e) => setDiscount(e.target.value)}
-            placeholder="0.00"
-            className="w-full h-10 rounded-sm border px-3 text-sm tabular"
-            style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
-          />
-        </div>
+        discountEnabled ? (
+          <>
+            <div>
+              <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+                Discount
+              </label>
+              <input
+                type="number"
+                min="0"
+                max={f.subtotal}
+                step="0.01"
+                inputMode="decimal"
+                value={discount}
+                onChange={(e) => handleDiscountChange(e.target.value)}
+                placeholder="0.00"
+                className="w-full h-10 rounded-sm border px-3 text-sm tabular"
+                style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+              />
+            </div>
+
+            {/* Only asked for once there's actually something to authorize. */}
+            {disc > 0 && (
+              <div>
+                <label htmlFor="room_discount_pin" className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+                  Discount PIN
+                </label>
+                <input
+                  id="room_discount_pin"
+                  name="discount_pin"
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  maxLength={4}
+                  placeholder="••••"
+                  value={discountPin}
+                  onChange={(e) => setDiscountPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  className="w-full h-10 rounded-sm border px-3 text-sm text-right tracking-[0.4em]"
+                  style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+                />
+                {!discountPinValid && (
+                  <p className="text-xs mt-1.5" style={{ color: "var(--color-ink-mute)" }}>
+                    Enter the 4-digit discount PIN to authorize this reduction.
+                  </p>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="flex items-start gap-2">
+            <Lock size={13} className="mt-0.5 shrink-0" style={{ color: "var(--color-ink-mute)" }} />
+            <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+              Discounts are turned off. Ask your admin to set a discount PIN in Settings.
+            </p>
+          </div>
+        )
       )}
 
       {/* Payable */}
@@ -301,11 +376,12 @@ function CheckOutForm({
 
       {method === "mixed" && (
         <div className="grid grid-cols-2 gap-3">
-          {([["Cash", cash, setCash], ["Online", online, setOnline]] as const).map(([label, val, set]) => (
+          {/* Type either side; the other fills itself so the two always total the payable. */}
+          {([["Cash", cash, handleCashChange], ["Online", online, handleOnlineChange]] as const).map(([label, val, set]) => (
             <div key={label}>
               <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>{label}</label>
               <input
-                type="number" min="0" step="0.01" inputMode="decimal"
+                type="number" min="0" max={total} step="0.01" inputMode="decimal"
                 value={val}
                 onChange={(e) => set(e.target.value)}
                 className="w-full h-10 rounded-sm border px-3 text-sm tabular"
@@ -471,7 +547,7 @@ function CheckOutForm({
       <Button
         type="submit"
         variant="primary"
-        disabled={pending || !mixedOk || !creditOk}
+        disabled={pending || !mixedOk || !creditOk || !discountPinValid}
         className="w-full"
       >
         {pending ? "Checking out…" : `Check out · ${rupee(total)}`}
@@ -485,7 +561,8 @@ function CheckOutForm({
 export function FolioClient({
   view, session, restaurant, staffName, workstations = [],
   canAddCharges, canCreateOrders, canManageOrders, canCancelOrders,
-  canCheckOut, canDiscount, canUseCredit, canPrintTickets = false, canPrintBill = false,
+  canCheckOut, canDiscount, canUseCredit, discountEnabled = false,
+  canPrintTickets = false, canPrintBill = false,
 }: {
   view: RoomFolioView;
   /** The stay's session, in the same shape a table's screen uses. */
@@ -500,6 +577,8 @@ export function FolioClient({
   canCheckOut: boolean;
   canDiscount: boolean;
   canUseCredit: boolean;
+  /** The restaurant has a discount PIN set. No PIN = no discounts, same as a table bill. */
+  discountEnabled?: boolean;
   /** KOT/BOT printing — billing/order-management staff only (not waiters). */
   canPrintTickets?: boolean;
   /** Room folio bill printing — billing staff only. */
@@ -508,8 +587,39 @@ export function FolioClient({
   const [adding, setAdding] = useState(false);
   const [billOpen, setBillOpen] = useState(false);
   const [removing, startRemove] = useTransition();
+  // Stamped once per mount, exactly like the table bill: a Date rebuilt on every render
+  // would make the printed time jump while the preview is open.
+  const [printedAt] = useState<Date>(() => new Date());
   const f = view.folio;
   const open = view.status === "active";
+
+  // The bill, arranged for the SHARED renderer. Same mapper the paid bill in Sales uses,
+  // so the document a guest is shown before paying and the one filed after are one thing.
+  const bill = folioToBill({ folio: f, roomType: view.type_name });
+
+  // Once the guest has checked out the SAME document is a receipt, not a bill: it has to
+  // say PAID (or what is still owed), how it was tendered and who took the money. It used
+  // to keep printing "Status: UNPAID" for a settled stay, because the folio screen had no
+  // payment to look at.
+  const paid = view.payment;
+
+  // The bill number, resolved exactly as a TABLE bill resolves it: the restaurant's own
+  // sequential number (claimed by the session, or stamped on the payment under the older
+  // payment-time model), otherwise a derived reference. No room-only numbering scheme —
+  // matching the table workflow is the point of this work.
+  const seq = session?.bill_number ?? paid?.bill_number ?? null;
+  const billRef =
+    seq != null
+      ? {
+          label: billNumberLabel(restaurant.bill_number_label),
+          value: formatBillNumber(seq, restaurant.bill_number_pad ?? 0),
+        }
+      : {
+          label: undefined,
+          value: paid
+            ? `BILL-${paid.payment_id.slice(0, 8).toUpperCase()}`
+            : ticketNumber("BILL", view.stay_id, printedAt),
+        };
 
   // The food ordered against this stay — from the room QR, or added by hand. It
   // is ONE list either way; the two were never separate pipelines, they just had
@@ -762,7 +872,12 @@ export function FolioClient({
           <p className="text-sm font-medium mb-3" style={{ color: "var(--color-ink)" }}>
             Check out &amp; settle
           </p>
-          <CheckOutForm view={view} canDiscount={canDiscount} canUseCredit={canUseCredit} />
+          <CheckOutForm
+            view={view}
+            canDiscount={canDiscount}
+            canUseCredit={canUseCredit}
+            discountEnabled={discountEnabled}
+          />
         </div>
       )}
 
@@ -778,41 +893,64 @@ export function FolioClient({
           className="inline-flex items-center justify-center gap-1.5 text-sm px-4 py-2 rounded-pill border"
           style={{ borderColor: "var(--color-hairline)", color: "var(--color-ink)" }}
         >
-          <Printer size={14} /> Print bill
+          <Printer size={14} /> {paid ? "Print receipt" : "Print bill"}
         </button>
       )}
 
-      <PrintModal open={billOpen} onClose={() => setBillOpen(false)} title="Room bill — preview" paperWidthMm={restaurant.paper_width_mm ?? 80}>
-        {/* No logo on paper — a thermal head is one-bit black, so a logo smears; the
-            restaurant's name is the branding. Same rule as every other receipt. */}
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>{restaurant.name}</div>
-          {restaurant.address && <div style={{ fontSize: 11 }}>{restaurant.address}</div>}
-          {restaurant.contact_phone && <div style={{ fontSize: 11 }}>Ph: {restaurant.contact_phone}</div>}
-          {restaurant.pan_vat_number && <div style={{ fontSize: 11 }}>PAN/VAT: {restaurant.pan_vat_number}</div>}
-          <div style={{ fontWeight: 700, letterSpacing: 1, marginTop: 4 }}>ROOM BILL</div>
-        </div>
-        <Divider />
-        <TicketLine label="Room" value={`${view.room_number} · ${view.type_name}`} />
-        <TicketLine label="Guest" value={view.guest_name} />
-        <TicketLine label="In" value={when(f.checkIn)} />
-        <TicketLine label="Out" value={when(f.checkOut)} />
-        <TicketLine label="Stay" value={`${f.duration} · ${f.nights} night(s)`} />
-        <Divider />
-        <TicketLine label={`${f.room.label} (${f.room.detail})`} value={rupee(f.roomTotal)} />
-        {f.extras.map((l) => <TicketLine key={l.key} label={l.label} value={rupee(l.amount)} />)}
-        {f.food.map((l) => <TicketLine key={l.key} label={`${l.detail} ${l.label}`.trim()} value={rupee(l.amount)} />)}
-        <Divider />
-        <TicketLine label="Subtotal" value={rupee(f.subtotal)} />
-        {f.discount > 0 && <TicketLine label="Discount" value={`-${rupee(f.discount)}`} />}
-        {f.tax > 0 && <TicketLine label={`Tax (${f.taxPercent}%)`} value={rupee(f.tax)} />}
-        {f.service > 0 && <TicketLine label={`Service (${f.servicePercent}%)`} value={rupee(f.service)} />}
-        <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
-        <TicketLine label="TOTAL" value={rupee(f.grandTotal)} bold />
-        <Divider />
-        <div style={{ textAlign: "center", fontSize: 11 }}>Served by {staffName}</div>
-        <Divider />
-        <PoweredBy />
+      {/* THE SAME COMPONENT A TABLE BILL PRINTS. It used to be a hand-built stack of
+          TicketLines here, which is how the room bill and the table bill drifted apart —
+          different headings, different column layout, no Item/Qty/Rate/Amount grid, and a
+          paid room bill in Sales that listed only the food. One renderer, one mapper
+          (folioToBill), so the two can no longer disagree. */}
+      <PrintModal
+        open={billOpen}
+        onClose={() => setBillOpen(false)}
+        title={paid ? "Room receipt — preview" : "Room bill — preview"}
+        paperWidthMm={restaurant.paper_width_mm ?? 80}
+      >
+        <BillTicket
+          restaurant={restaurant}
+          billNo={billRef.value}
+          billLabel={billRef.label}
+          location={`Room ${view.room_number}`}
+          // A receipt is stamped when the money moved, not when someone reprinted it.
+          at={paid ? new Date(paid.paid_at) : printedAt}
+          items={[]}
+          sections={bill.sections}
+          stay={bill.stay}
+          discount={bill.discount}
+          payment={
+            paid
+              ? {
+                  method: billMethodLabel(paid.method),
+                  cashier: paid.cashier_name,
+                  cash: paid.cash,
+                  online: paid.online,
+                  card: paid.card,
+                }
+              : undefined
+          }
+          // Closed with money still owed: the receipt must say so and say how much, or it
+          // reads as fully paid. `balance` is the debt NOW, after any later repayments.
+          credit={
+            paid?.credit
+              ? {
+                  credit_number: paid.credit.credit_number,
+                  customer_name: paid.credit.customer_name,
+                  customer_phone: paid.credit.customer_phone,
+                  tendered: paid.cash + paid.online + paid.card,
+                  balance: paid.credit.balance,
+                }
+              : null
+          }
+          customer={{
+            name: view.guest_name,
+            phone: view.guest_phone,
+            address: view.guest_address,
+            idType: view.guest_id_type,
+            idNumber: view.guest_id_number,
+          }}
+        />
       </PrintModal>
     </div>
   );

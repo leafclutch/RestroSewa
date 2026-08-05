@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { memo, useCallback, useState, useTransition } from "react";
+import { memo, useCallback, useEffect, useState, useTransition } from "react";
 import { getMyTables, openTableSession, markTableClean } from "@/app/actions/pos";
 import type { TableStatus } from "@/app/actions/pos";
 import { STATUS_STYLE, cleaningFor } from "@/lib/status-colors";
@@ -199,6 +199,12 @@ export function TablesGrid({
   }, []);
 
   useRealtime(["tables", "orders"], resync);
+
+  // A route refresh — pull-to-refresh, or a server action calling revalidatePath —
+  // re-renders this component with a fresh `initial`, but `useState` seeds ONCE and
+  // ignores it. That is why pulling down used to re-run every query on the dashboard
+  // and change nothing on screen. Adopt the new props when they arrive.
+  useEffect(() => setTables(initial), [initial]);
 
   /**
    * THE FIX FOR THE SILENT-TAP BUG.

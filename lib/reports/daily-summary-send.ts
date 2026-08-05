@@ -10,11 +10,14 @@ import { sendEmail } from "@/lib/email/mailer";
 import type { ReportLogo } from "./pdf/report-document";
 
 // ─── Orchestrator: build → PDF → email → log ───────────────────────────────────
-// The ONE code path that produces and sends a daily report, shared by the hourly
-// cron and the admin "Retry" button. It builds the model, renders the PDF, sends it
+// The ONE code path that produces and sends a daily report, shared by the
+// scheduled cron and the admin "Retry" button. It builds the model, renders the PDF, sends it
 // from the HRestroSewa Gmail with the PDF attached, and records the outcome in
 // report_deliveries (generated_at, sent_at, recipients, attempts, status/error).
 // Exactly-once: unless `force`, a day already marked 'sent' is skipped.
+
+/** Minimum gap between two UNATTENDED sends for the same failed (restaurant, day). */
+const RETRY_BACKOFF_MS = 30 * 60 * 1000;
 
 export type SendOutcome =
   | { status: "sent"; recipients: string[] }
@@ -72,16 +75,27 @@ export async function sendDailySummary(
     return { status: "skipped", reason: "disabled or no recipients" };
   }
 
-  // One read serves both the dedup check and the attempts accumulator.
+  // One read serves the dedup check, the retry backoff and the attempts accumulator.
   const { data: existing } = await service
     .from("report_deliveries")
-    .select("status, attempts")
+    .select("status, attempts, sent_at")
     .eq("restaurant_id", restaurantId)
     .eq("period_type", "daily")
     .eq("period_key", businessDate)
     .maybeSingle();
   if (!opts?.force && existing?.status === "sent") {
     return { status: "skipped", reason: "already sent" };
+  }
+  // Auto-retry backoff. The scheduler ticks every 15 minutes so that a report
+  // leaves the moment the day closes — but that also means a restaurant whose
+  // send keeps failing would be re-attempted 96×/day, each one opening three SMTP
+  // connections. That is how you get the shared Gmail account rate-limited for
+  // everyone. Space unattended retries out instead; the failure still self-heals,
+  // just at ~2 tries an hour. The admin "Retry" button passes force and is never
+  // held back.
+  if (!opts?.force && existing?.status === "failed" && existing.sent_at) {
+    const since = Date.now() - new Date(existing.sent_at).getTime();
+    if (since < RETRY_BACKOFF_MS) return { status: "skipped", reason: "retry backoff" };
   }
   const priorAttempts = Number(existing?.attempts ?? 0);
 

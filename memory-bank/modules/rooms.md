@@ -13,11 +13,16 @@ Mirrors tables (sessions) but adds a stay/folio and a three-tier permission. See
   charges, cleaning turn-over.
 
 # Features
-- **Check-in** — start a stay/session for a guest (needs `check_in`).
+- **Check-in** — start a stay/session for a guest (needs `check_in`). Captures the hotel
+  register: guest name, phone, count **plus ID type (Citizenship / NID), ID number and permanent
+  address** — all three required, validated server-side in `checkInRoom`, stored on `room_stays`
+  and printed on every bill derived from the stay.
 - **Checkout** — settle and close the stay. Payment supports Cash / Online / Card / **Mixed
   (Cash+Online)** / Credit; on a credit checkout the "Paid now" down-payment can itself be split
   Cash+Online (parity with the table bill; server = `check_out_room` taking `p_cash`/`p_online`/`p_card`).
-- **Room billing / folio** — the stay's running charges + bill.
+- **Room billing / folio** — the stay's running charges + bill. The folio PANEL is the working
+  screen; the printed bill is the shared `BillTicket`, the same component a table bill uses,
+  fed by the one mapper `lib/billing/room-bill.ts` `folioToBill()`.
 - **Room service** — add/remove charges to the folio (an order-style charge).
 - **Assignments** — staff assigned to rooms (`restaurant_user_rooms`) see only their rooms.
 - **Cleaning** — room parks in Cleaning on checkout; `markRoomClean` turns it over.
@@ -31,6 +36,15 @@ Mirrors tables (sessions) but adds a stay/folio and a three-tier permission. See
   cleaning palette with tables).
 - Check-out gates on `close_bills`; room-service charges gate on `create_orders` (unchanged by the
   three-tier split).
+- **A room discount needs the restaurant's discount PIN** — the SAME PIN a table bill uses, verified
+  in `checkOutRoom` via `verify_discount_pin`. No PIN configured = no discounts anywhere. The
+  `apply_discounts` permission alone was the only gate here until 2026-08-05.
+- **A room bill is DERIVED from the frozen stay, never snapshotted.** `check_out_at` stops the
+  inputs moving and `room_rate` was captured at check-in, so `buildFolio` returns the same
+  document before and after payment — the unpaid preview and the Sales reprint are literally one
+  calculator and one renderer. Never write a second one, and never store the lines.
+- **`payments.discount_amount` is the discount of record.** The paid bill re-derives the folio
+  with that number, so its printed lines reconcile to `payments.total_amount`.
 
 # Important Components
 - `app/actions/rooms.ts` (getRoomsOverview, checkInRoom, markRoomClean, checkOutRoom, add/remove

@@ -286,9 +286,20 @@ export async function checkInRoom(
   const guestPhone = String(formData.get("guest_phone") ?? "").trim();
   const guestCount = parseInt(String(formData.get("guest_count") ?? "1"), 10) || 1;
   const notes = String(formData.get("notes") ?? "").trim();
+  const idType = String(formData.get("guest_id_type") ?? "").trim();
+  const idNumber = String(formData.get("guest_id_number") ?? "").trim();
+  const address = String(formData.get("guest_address") ?? "").trim();
 
   if (!roomId) return { error: "No room selected." };
   if (!guestName) return { error: "Enter the guest's name." };
+
+  // Identity is required for every new check-in — a hotel register is not optional, and
+  // the room bill prints it. Each field names ITSELF in the error: "invalid input" at a
+  // busy front desk tells the receptionist nothing about which box to go back to.
+  // (Stays created before this existed keep NULLs; only new check-ins are gated.)
+  if (idType !== "citizenship" && idType !== "nid") return { error: "Choose an ID type." };
+  if (!idNumber) return { error: "Enter the guest's ID number." };
+  if (!address) return { error: "Enter the guest's permanent address." };
 
   // The same room isolation that governs tables: staff may only work the rooms
   // they are assigned to.
@@ -322,6 +333,11 @@ export async function checkInRoom(
     p_notes: notes || null,
     p_customer_pin: pin,
     p_created_by: ru.id,
+    // By NAME, never positionally — see the drop/create note in migration
+    // 20260804000000, and 20260717140000 for what a positional room RPC call cost before.
+    p_guest_id_type: idType,
+    p_guest_id_number: idNumber,
+    p_guest_address: address,
   });
 
   if (error) {
@@ -379,6 +395,33 @@ export async function markRoomClean(roomId: string): Promise<ActionResult> {
 
 // ─── The folio ───────────────────────────────────────────────────────────────
 
+/**
+ * How a stay was settled. Present only once the guest has checked out.
+ *
+ * Read from the `payments` row the checkout wrote — never recomputed. It is what turns
+ * the folio's bill from a BILL into a TAX INVOICE, and its `discount` is the discount of
+ * record, so the frozen folio totals to what was actually collected.
+ */
+export type RoomStayPayment = {
+  payment_id: string;
+  bill_number: number | null;
+  method: string;
+  cash: number;
+  online: number;
+  card: number;
+  discount: number;
+  total: number;
+  cashier_name: string | null;
+  paid_at: string;
+  /** Closed with money still owed. `balance` is what is left NOW, after later repayments. */
+  credit: {
+    credit_number: string;
+    customer_name: string;
+    customer_phone: string | null;
+    balance: number;
+  } | null;
+};
+
 export type RoomFolioView = {
   stay_id: string;
   room_id: string;
@@ -387,9 +430,18 @@ export type RoomFolioView = {
   guest_name: string;
   guest_phone: string | null;
   guest_count: number;
+  /**
+   * The identity document taken at the front desk. Nullable because production holds
+   * stays that predate the columns — an old bill simply renders without the line.
+   */
+  guest_id_type: string | null;
+  guest_id_number: string | null;
+  guest_address: string | null;
   notes: string | null;
   status: "active" | "checked_out";
   session_id: string | null;
+  /** Null while the stay is live; the settlement once it has been checked out. */
+  payment: RoomStayPayment | null;
   folio: RoomFolio;
   /** Editable extras, so the panel can offer a remove button on each. */
   charges: { id: string; type: RoomChargeType; description: string; amount: number }[];
@@ -418,7 +470,7 @@ async function loadFolioInputs(stayId: string) {
   const { data: stay } = await svc
     .from("room_stays")
     .select(
-      "id, room_id, guest_name, guest_phone, guest_count, notes, room_rate, check_in_at, check_out_at, status, rooms ( number, room_type_id )"
+      "id, room_id, guest_name, guest_phone, guest_count, guest_id_type, guest_id_number, guest_address, notes, room_rate, check_in_at, check_out_at, status, rooms ( number, room_type_id )"
     )
     .eq("id", stayId)
     .eq("restaurant_id", ru.restaurant_id)
@@ -487,11 +539,74 @@ async function loadFolioInputs(stayId: string) {
   };
 }
 
+/**
+ * The settlement behind a checked-out stay, or null.
+ *
+ * Only read for a CLOSED stay: a live one has no payment, and this is a round trip the
+ * checkout path (which shares `loadFolioInputs`) must not pay for.
+ */
+async function loadStayPayment(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  sessionId: string
+): Promise<RoomStayPayment | null> {
+  const { data: p } = await svc
+    .from("payments")
+    .select(
+      "id, bill_number, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, credits ( credit_number, customer_name, customer_phone, balance )"
+    )
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!p) return null;
+
+  let cashier_name: string | null = null;
+  if (p.created_by) {
+    const { data: u } = await svc
+      .from("restaurant_users")
+      .select("display_name")
+      .eq("id", p.created_by)
+      .maybeSingle();
+    cashier_name = u?.display_name ?? null;
+  }
+
+  const credit = Array.isArray(p.credits) ? p.credits[0] ?? null : p.credits ?? null;
+
+  return {
+    payment_id: p.id,
+    bill_number: p.bill_number ?? null,
+    method: p.payment_method,
+    cash: Number(p.cash_amount ?? 0),
+    online: Number(p.online_amount ?? 0),
+    card: Number(p.card_amount ?? 0),
+    discount: Number(p.discount_amount ?? 0),
+    total: Number(p.total_amount ?? 0),
+    cashier_name,
+    paid_at: p.created_at,
+    credit: credit
+      ? {
+          credit_number: credit.credit_number,
+          customer_name: credit.customer_name,
+          customer_phone: credit.customer_phone ?? null,
+          balance: Number(credit.balance),
+        }
+      : null,
+  };
+}
+
 export async function getRoomFolio(stayId: string): Promise<RoomFolioView | null> {
   const input = await loadFolioInputs(stayId);
   if (!input) return null;
 
-  const { stay, charges, food, sessionId, typeName, config } = input;
+  const { svc, stay, charges, food, sessionId, typeName, config } = input;
+
+  // A closed stay's folio has to agree with the money that actually moved. Without this
+  // the panel and the bill showed the PRE-discount total for every discounted checkout —
+  // the guest paid 2,000 and the folio still read 2,180.
+  const payment =
+    stay.status !== "active" && sessionId ? await loadStayPayment(svc, sessionId) : null;
 
   return {
     stay_id: stay.id,
@@ -501,9 +616,13 @@ export async function getRoomFolio(stayId: string): Promise<RoomFolioView | null
     guest_name: stay.guest_name,
     guest_phone: stay.guest_phone,
     guest_count: stay.guest_count,
+    guest_id_type: stay.guest_id_type ?? null,
+    guest_id_number: stay.guest_id_number ?? null,
+    guest_address: stay.guest_address ?? null,
     notes: stay.notes,
     status: stay.status,
     session_id: sessionId,
+    payment,
     charges,
     folio: buildFolio(
       {
@@ -513,7 +632,9 @@ export async function getRoomFolio(stayId: string): Promise<RoomFolioView | null
       },
       charges,
       food,
-      config
+      // The recorded discount is part of the frozen bill. `config` carries none for a live
+      // stay, which is right: the cashier hasn't decided one yet.
+      payment ? { ...config, discount: payment.discount } : config
     ),
   };
 }
@@ -636,6 +757,31 @@ export async function checkOutRoom(
     return { error: "You don't have permission to apply a discount." };
   }
 
+  // ONE discount PIN for the whole restaurant — the same authorization a table bill needs.
+  // Money coming off the till is an authorized act, not a cashier's own call, and a room
+  // folio is the biggest bill in the building: it had the permission check but no PIN, so
+  // the hotel side was the soft way round the guard.
+  //
+  // This check is the ONLY thing that enforces it. The form is a POST endpoint any logged-in
+  // staff member can hit directly, so hiding the field client-side protects nothing on its
+  // own. `verify_discount_pin` returns false when no PIN is configured, which is what makes
+  // "no PIN" mean "discounts off" rather than "discounts unguarded".
+  if (discountRaw > 0) {
+    const pin = String(formData.get("discount_pin") ?? "").trim();
+    if (!pin) return { error: "Enter the discount PIN to apply a discount." };
+
+    const service = createServiceClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: pinOk, error: pinErr } = await (service as any).rpc("verify_discount_pin", {
+      p_restaurant_id: ru.restaurant_id,
+      p_pin: pin,
+    });
+    // A failed CHECK must never be read as a pass — refuse on error too.
+    if (pinErr || pinOk !== true) {
+      return { error: "Incorrect discount PIN. The discount was not applied." };
+    }
+  }
+
   // THE important line. The client tells us what it *thinks* the bill is; we
   // ignore it entirely and rebuild the folio here from the stay, its charges and
   // its orders. So a tampered form cannot check a guest out for ₹1, and a browser
@@ -693,6 +839,10 @@ export async function checkOutRoom(
     p_restaurant_id: ru.restaurant_id,
     p_stay_id: stayId,
     p_total: total,
+    // `total` is already net of this — buildFolio subtracted it. This records WHAT was
+    // given away, so Sales and the Finance discount total can see it; without it the
+    // discount reduced the cash taken and left no trace anywhere.
+    p_discount: discountRaw,
     p_cash: cash,
     p_online: online,
     p_card: card,

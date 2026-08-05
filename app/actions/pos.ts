@@ -12,6 +12,9 @@ import type { BillSettlement, CreditStats } from "@/lib/credits";
 import { resolveOrderItems } from "@/lib/order-items";
 import { resolveCustomItems, type CustomItemRequest } from "@/lib/custom-items";
 import { businessDate, businessPeriodBounds, businessToday } from "@/lib/business-day";
+import { buildFolio } from "@/lib/room-billing";
+import { folioToBill } from "@/lib/billing/room-bill";
+import type { BillSection, BillStay } from "@/lib/billing/room-bill";
 import { span } from "@/lib/perf/timing";
 import { getRestaurantConfig } from "@/lib/restaurant-info";
 import {
@@ -2260,8 +2263,25 @@ export type PaidBill = {
   /** How to format/label that number on the bill (from the restaurant's settings). */
   bill_number_pad: number;
   bill_number_label: "bill" | "order";
-  /** Walk-in customer details (takeaway / delivery), when present. */
-  customer: { name: string | null; phone: string | null; address: string | null } | null;
+  /** Walk-in customer details (takeaway / delivery), or a room guest with their ID. */
+  customer: {
+    name: string | null;
+    phone: string | null;
+    address: string | null;
+    idType?: string | null;
+    idNumber?: string | null;
+  } | null;
+  /**
+   * A ROOM bill's grouped lines — room charge, extras, food — rebuilt from the frozen
+   * stay. Absent for a table or walk-in bill, which has the one flat `items` list.
+   *
+   * This is the fix for a real defect: a paid room bill used to print `items` alone, so
+   * the room nights and every extra charge were simply missing and the printed lines did
+   * not add up to what the guest paid.
+   */
+  sections?: BillSection[];
+  /** The hotel block (room type, check-in/out, nights × rate). Room bills only. */
+  stay?: BillStay;
   restaurant: {
     name: string;
     address: string | null;
@@ -2307,7 +2327,7 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
   const { data: p } = await (service as any)
     .from("payments")
     .select(
-      "id, bill_number, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, session_id, restaurant_id, sessions ( type, bill_number, customer_name, customer_phone, customer_address, restaurant_tables ( number ), rooms ( number ) ), credits ( credit_number, customer_name, customer_phone, paid_amount, balance )"
+      "id, bill_number, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, session_id, restaurant_id, sessions ( type, bill_number, room_stay_id, customer_name, customer_phone, customer_address, restaurant_tables ( number ), rooms ( number, room_type_id ) ), credits ( credit_number, customer_name, customer_phone, paid_amount, balance )"
     )
     .eq("id", paymentId)
     .maybeSingle();
@@ -2375,7 +2395,78 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
   const cash = Number(p.cash_amount ?? 0);
   const online = Number(p.online_amount ?? 0);
   const card = Number(p.card_amount ?? 0);
+  const discount = Number(p.discount_amount ?? 0);
   const credit = Array.isArray(p.credits) ? p.credits[0] ?? null : p.credits ?? null;
+
+  // ── A room bill, rebuilt from the FROZEN stay ────────────────────────────────
+  //
+  // Re-deriving is safe, and is the point: `check_out_at` is set and `room_rate` was
+  // snapshotted at check-in, so the inputs cannot move — the same buildFolio + folioToBill
+  // the unpaid folio uses returns the same document here. A second calculator, or a
+  // snapshot of the lines taken at payment, is exactly how the two would drift apart.
+  //
+  // The discount comes from the PAYMENT row, not from the folio: it is what the cashier
+  // actually knocked off. With it, folio.grandTotal reconciles to payments.total_amount.
+  let sections: BillSection[] | undefined;
+  let stayBlock: BillStay | undefined;
+  let roomGuest: PaidBill["customer"] = null;
+  const stayId: string | null = p.sessions?.room_stay_id ?? null;
+  if (stayId) {
+    const [stayRes, chargesRes, typeRes] = await Promise.all([
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (service as any)
+        .from("room_stays")
+        .select(
+          "guest_name, guest_phone, guest_id_type, guest_id_number, guest_address, room_rate, check_in_at, check_out_at"
+        )
+        .eq("id", stayId)
+        .maybeSingle(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (service as any)
+        .from("room_charges")
+        .select("id, type, description, amount")
+        .eq("room_stay_id", stayId)
+        .order("created_at"),
+      p.sessions?.rooms?.room_type_id
+        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (service as any)
+            .from("room_types")
+            .select("name")
+            .eq("id", p.sessions.rooms.room_type_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+
+    const stayRow = stayRes.data;
+    if (stayRow) {
+      const folio = buildFolio(
+        {
+          check_in_at: stayRow.check_in_at,
+          check_out_at: stayRow.check_out_at,
+          room_rate: Number(stayRow.room_rate),
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ((chargesRes.data ?? []) as any[]).map((c) => ({ ...c, amount: Number(c.amount) })),
+        items,
+        {
+          taxPercent: settingsNumber(rest?.settings, "tax_percent", "tax_rate", "gst_percent") ?? 0,
+          servicePercent:
+            settingsNumber(rest?.settings, "service_charge_percent", "service_charge") ?? 0,
+          discount,
+        }
+      );
+      const view = folioToBill({ folio, roomType: (typeRes.data?.name as string) ?? "—" });
+      sections = view.sections;
+      stayBlock = view.stay;
+      roomGuest = {
+        name: stayRow.guest_name ?? null,
+        phone: stayRow.guest_phone ?? null,
+        address: stayRow.guest_address ?? null,
+        idType: stayRow.guest_id_type ?? null,
+        idNumber: stayRow.guest_id_number ?? null,
+      };
+    }
+  }
 
   return {
     payment_id: p.id,
@@ -2385,7 +2476,7 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
     online_amount: online,
     card_amount: card,
     total,
-    discount: Number(p.discount_amount ?? 0),
+    discount,
     cashier_name,
     order_ids,
     location,
@@ -2394,14 +2485,19 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
     bill_number: p.sessions?.bill_number ?? p.bill_number ?? null,
     bill_number_pad: Number.isFinite(Number(rest?.settings?.bill_number_pad)) ? Number(rest?.settings?.bill_number_pad) : 0,
     bill_number_label: rest?.settings?.bill_number_label === "order" ? "order" : "bill",
+    // A room bill's "customer" is the registered guest, ID and all; a walk-in's is
+    // whatever the till was given.
     customer:
-      p.sessions?.customer_name || p.sessions?.customer_phone || p.sessions?.customer_address
+      roomGuest ??
+      (p.sessions?.customer_name || p.sessions?.customer_phone || p.sessions?.customer_address
         ? {
             name: p.sessions?.customer_name ?? null,
             phone: p.sessions?.customer_phone ?? null,
             address: p.sessions?.customer_address ?? null,
           }
-        : null,
+        : null),
+    sections,
+    stay: stayBlock,
     restaurant: {
       name: rest?.name ?? "Restaurant",
       address: rest?.address ?? null,

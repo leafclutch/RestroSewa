@@ -3,6 +3,34 @@
 Human-readable release notes. Newest first. Group entries by Added / Changed / Fixed / Removed.
 Versioning is informal (the app ships continuously); dates anchor the entries.
 
+## [Unreleased] — 2026-08
+### Added
+- **Guest ID at check-in** — checking a guest in now asks for **ID type (Citizenship / National ID),
+  ID number and permanent address**. All three are required, kept with the booking, and printed on
+  the room bill. Stays checked in before this keep working and simply print without the ID line.
+### Changed
+- **The room bill is now the same document as a table bill** — same header, same
+  Item/Qty/Rate/Amount columns, same footer — with the hotel details a room needs (room type,
+  check-in/out, nights × rate, guest ID) and its charges grouped into **Room charge / Extras /
+  Food & beverages**. The bill you show a guest before payment and the one you reprint from Sales
+  afterwards are the same bill; only UNPAID → PAID, the cashier, the discount and the tender lines
+  change.
+### Fixed
+- **A paid room bill was missing its room charge and extras.** Reprinting one from Sales listed
+  only the food, so the lines didn't add up to what the guest paid. It now shows every line.
+- **A discount given at room checkout wasn't recorded.** The guest was charged the discounted
+  amount, but Sales and the daily discount total showed nothing. It is now saved on the payment and
+  appears on the bill.
+- **A room discount no longer skips the discount PIN.** Room checkout now asks for the same
+  restaurant discount PIN a table bill does — one PIN for both — and with no PIN set, discounts are
+  off in rooms too.
+- **Cash + Online at room checkout fills itself in.** Type either amount and the other is worked
+  out from the payable, instead of having to type both by hand.
+- **The room screen still said UNPAID after checkout.** Printing from a checked-out stay now gives
+  a proper receipt — PAID with the payment method, the tender split and the cashier, or the balance
+  still owed on a credit checkout — identical to the copy in Sales. The folio's own totals now show
+  the discount too, instead of the pre-discount amount.
+
 ## [Unreleased] — 2026-07
 ### Added
 - **Custom items** — staff with the new **Add Custom Items** permission can add an off-menu line
