@@ -70,6 +70,11 @@ export function PaidBillButton({ paymentId }: { paymentId: string }) {
             customer={bill.customer}
             at={new Date(bill.created_at)}
             items={bill.items}
+            // A ROOM bill arrives grouped (room charge / extras / food) and carries the
+            // hotel block; both are undefined for a table or walk-in bill, which keeps
+            // printing its flat `items` list exactly as before.
+            sections={bill.sections}
+            stay={bill.stay}
             discount={bill.discount}
             payment={{
               method: METHOD_LABEL[bill.method] ?? bill.method,
