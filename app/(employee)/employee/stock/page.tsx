@@ -9,6 +9,7 @@ import {
   getStock,
   getStockSummary,
 } from "@/app/actions/stock";
+import { getWorkstations } from "@/app/actions/workstations";
 import { StockClient } from "@/app/(admin)/admin/stock/_components/stock-client";
 import { businessToday } from "@/lib/business-day";
 
@@ -26,11 +27,12 @@ export default async function EmployeeStockPage() {
     redirect("/employee/dashboard");
   }
 
-  const [stock, summary, products, targets] = await Promise.all([
+  const [stock, summary, products, targets, workstations] = await Promise.all([
     getStock({ filter: "all" }),
     getStockSummary(),
     getProductOptions(),
     getLinkTargets(),
+    getWorkstations(restaurantUser.restaurant_id),
   ]);
 
   return (
@@ -49,6 +51,8 @@ export default async function EmployeeStockPage() {
         initialSummary={summary}
         products={products}
         targets={targets}
+        workstations={workstations}
+        deductionsHref="/employee/deductions"
         today={businessToday(restaurantUser.closingHour)}
         canManage={STOCK_ACCESS.canManageStock(restaurantUser)}
       />

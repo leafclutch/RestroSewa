@@ -14,6 +14,18 @@ import { MenuBrowser } from "./_components/menu-browser";
 import { ChevronLeft } from "lucide-react";
 
 /**
+ * The screen is exactly the space left under the staff nav, so the cart bar (and its
+ * Place order button) sits on the bottom edge without the page scrolling.
+ *
+ * Mirrors `StaffNav`'s own height — `calc(56px + env(safe-area-inset-top))` — rather
+ * than the bare 56px this used to subtract: the viewport is `viewport-fit: cover`, so on
+ * a notched phone the nav is TALLER than 56px and the difference pushed the bottom of
+ * this page off the screen. `dvh`, not `vh`, for the same reason on mobile browsers,
+ * where `vh` is the tallest the viewport ever gets rather than its current height.
+ */
+const SCREEN_UNDER_NAV = "calc(100dvh - 56px - env(safe-area-inset-top, 0px))";
+
+/**
  * Why this screen cannot show the menu — in words, not a 404.
  *
  * Two things can be true, and they need different actions from the person holding the
@@ -40,7 +52,7 @@ function AddItemsUnavailable({
       : `Reopen the table to add more items${status ? ` (status: ${status})` : ""}.`;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-56px)]">
+    <div className="flex flex-col" style={{ height: SCREEN_UNDER_NAV }}>
       <div
         className="flex items-center gap-3 px-4 py-3 border-b shrink-0"
         style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
@@ -133,7 +145,7 @@ export default async function AddItemsPage({
     : [];
 
   return (
-    <div className="flex flex-col h-[calc(100vh-56px)]">
+    <div className="flex flex-col" style={{ height: SCREEN_UNDER_NAV }}>
       {/* Header */}
       <div
         className="flex items-center gap-3 px-4 py-3 border-b shrink-0"

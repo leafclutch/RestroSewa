@@ -26,23 +26,64 @@ export function SettingsClient({ settings }: { settings: BillingSettings }) {
 
   return (
     <form action={action} className="flex flex-col gap-6 max-w-lg">
-      {/* ── PAN ─────────────────────────────────────────────────────────────── */}
+      {/* ── Bill header: PAN + phone ─────────────────────────────────────────── */}
       <section
         className="rounded-xl border px-5 py-5"
         style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
       >
         <p className="text-sm font-medium mb-1 flex items-center gap-2" style={{ color: "var(--color-ink)" }}>
-          <Receipt size={15} /> PAN number
+          <Receipt size={15} /> Bill header
         </p>
-        <p className="text-xs mb-3" style={{ color: "var(--color-ink-mute)" }}>
-          Printed on every bill (e.g. <span className="font-mono">PAN No.: 123456789</span>). Leave blank to omit it.
+        <p className="text-xs mb-4" style={{ color: "var(--color-ink-mute)" }}>
+          Printed under your restaurant&apos;s name on every bill. Leave either blank to omit that line.
         </p>
-        <Input
-          name="pan_number"
-          defaultValue={settings.panNumber}
-          placeholder="e.g. 123456789"
-          className="max-w-xs"
-        />
+
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="s_pan"
+              className="text-xs uppercase tracking-wide"
+              style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+            >
+              PAN number
+            </label>
+            <Input
+              id="s_pan"
+              name="pan_number"
+              defaultValue={settings.panNumber}
+              placeholder="e.g. 123456789"
+              className="max-w-xs"
+            />
+            <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+              Prints as <span className="font-mono">PAN No.: 123456789</span>
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="s_phone"
+              className="text-xs uppercase tracking-wide"
+              style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+            >
+              Phone number
+            </label>
+            <Input
+              id="s_phone"
+              name="contact_phone"
+              // `tel`, not `number`: a phone number is a string of digits and
+              // punctuation, not a quantity — `number` would strip the leading 0 of
+              // 071-5xxxxx and offer a spinner on it.
+              type="tel"
+              inputMode="tel"
+              defaultValue={settings.contactPhone}
+              placeholder="e.g. 071-520100"
+              className="max-w-xs"
+            />
+            <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+              Prints as <span className="font-mono">Ph: 071-520100</span>, on the line under the PAN.
+            </p>
+          </div>
+        </div>
       </section>
 
       {/* ── Bill / Order numbering ──────────────────────────────────────────── */}

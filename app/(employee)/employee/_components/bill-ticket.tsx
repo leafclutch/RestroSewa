@@ -70,7 +70,24 @@ const rupee = (n: number) => `₹${n.toFixed(2)}`;
 // the printed page is the wrong height: the print stylesheet, the height measurement, and
 // the on-screen preview. They used to disagree — the preview padded `14px 12px` while
 // print padded `0 2mm` — so the measured page never quite matched what came out.
-const TICKET_PADDING = "0 1mm";
+/**
+ * Side margin inside the printable strip.
+ *
+ * This used to be a flat 1mm, which put the receipt hard against the left edge of the
+ * paper: the head starts printing at dot 0, so "no page margin" means literally no
+ * margin, and the first character of every left-aligned line sat on the edge with the
+ * right-aligned column doing the same on the other side.
+ *
+ * The margin belongs HERE rather than in `@page`, because the page size has to keep
+ * matching the driver's advertised paper exactly (see PRINTABLE_MM) — shrink the page
+ * and Chrome stops honouring it, which is the right-hand-column clipping this whole
+ * geometry was written to fix. So the page stays the full printable width and the
+ * CONTENT is inset inside it.
+ *
+ * 58mm rolls get less, because 44mm of usable line is already tight for a bill.
+ */
+const SIDE_MARGIN_MM = { 58: 2, 80: 3 } as const;
+const ticketPadding = (widthMm: 58 | 80) => `0 ${SIDE_MARGIN_MM[widthMm]}mm`;
 const TICKET_LINE_HEIGHT = 1.45;
 const fontPxFor = (widthMm: 58 | 80) => (widthMm === 58 ? 11 : 12);
 
@@ -97,9 +114,10 @@ const printableMm = (rollMm: 58 | 80) => PRINTABLE_MM[rollMm];
 
 /**
  * Blank paper fed after the last line, so the auto-cutter (or the tear bar) does not
- * come down through the footer. 4mm left the total sitting right on the cut.
+ * come down through the footer. 4mm left the total sitting right on the cut; 10mm still
+ * put the "powered by" footer on the edge of a hand-torn receipt.
  */
-const TAIL_MM = 10;
+const TAIL_MM = 16;
 
 function PrintStyles({ widthMm }: { widthMm: 58 | 80 }) {
   const fontPx = fontPxFor(widthMm);
@@ -152,7 +170,7 @@ function PrintStyles({ widthMm }: { widthMm: 58 | 80 }) {
     width: ${printMm}mm !important;
     max-width: ${printMm}mm !important;
     margin: 0 auto !important;
-    padding: ${TICKET_PADDING} !important;
+    padding: ${ticketPadding(widthMm)} !important;
     box-shadow: none !important;
     background: #fff !important;
     font-size: ${fontPx}px !important;
@@ -246,7 +264,7 @@ export function PrintModal({
     // is the PRINT HEAD's, not the roll's — see printableMm.
     const printMm = printableMm(paperWidthMm);
     el.style.width = `${printMm}mm`;
-    el.style.padding = TICKET_PADDING;
+    el.style.padding = ticketPadding(paperWidthMm);
     const heightPx = el.getBoundingClientRect().height;
     el.style.width = prevW;
     el.style.padding = prevP;
@@ -517,14 +535,21 @@ export function BillTicket({
       <div style={{ textAlign: "center" }}>
         <div style={{ fontWeight: 700, fontSize: 15 }}>{restaurant.name}</div>
         {restaurant.address && <div style={{ fontSize: 11 }}>{restaurant.address}</div>}
-        {restaurant.contact_phone && <div style={{ fontSize: 11 }}>Ph: {restaurant.contact_phone}</div>}
         {restaurant.pan_vat_number && <div style={{ fontSize: 11 }}>PAN No.: {restaurant.pan_vat_number}</div>}
-        <div style={{ fontWeight: 700, letterSpacing: 1, marginTop: 4 }}>{payment ? "TAX INVOICE" : "BILL"}</div>
+        {restaurant.contact_phone && <div style={{ fontSize: 11 }}>Ph: {restaurant.contact_phone}</div>}
+        {/* ALWAYS "BILL" — never "TAX INVOICE" after payment. The document does not
+            change when it is paid, so its title must not either: the same sale showing
+            two different titles is what made a paid bill look like a different
+            document from the one the customer was handed. */}
+        <div style={{ fontWeight: 800, fontSize: 15, letterSpacing: 2, marginTop: 4 }}>BILL</div>
       </div>
       <Divider />
       {/* The table/room is what staff match the bill to — make it prominent. */}
       <div style={{ textAlign: "center", fontWeight: 700, fontSize: 18, marginBottom: 4 }}>{location}</div>
-      <Line label={billLabel ?? (payment ? "Receipt No" : "Bill No")} value={billNo} />
+      {/* "Bill No" whether paid or not, for the same reason the title is always BILL —
+          it is one document with one number. (An admin who prefers "Order No" sets it in
+          Settings; that override still wins, and still applies to both states.) */}
+      <Line label={billLabel ?? "Bill No"} value={billNo} />
       <Line label="Date" value={at.toLocaleDateString("en-IN", { dateStyle: "medium" })} />
       <Line label="Time" value={at.toLocaleTimeString("en-IN", { timeStyle: "short" })} />
       {/* The hotel block. A room bill has to answer "which room type, for how many nights,
@@ -704,8 +729,9 @@ export function CreditReceiptTicket({
       <div style={{ textAlign: "center" }}>
         <div style={{ fontWeight: 700, fontSize: 14 }}>{restaurant.name}</div>
         {restaurant.address && <div style={{ fontSize: 11 }}>{restaurant.address}</div>}
-        {restaurant.contact_phone && <div style={{ fontSize: 11 }}>Ph: {restaurant.contact_phone}</div>}
+        {/* Same order as the bill: PAN, then phone. */}
         {restaurant.pan_vat_number && <div style={{ fontSize: 11 }}>PAN/VAT: {restaurant.pan_vat_number}</div>}
+        {restaurant.contact_phone && <div style={{ fontSize: 11 }}>Ph: {restaurant.contact_phone}</div>}
         <div style={{ fontWeight: 700, letterSpacing: 1, marginTop: 4 }}>
           {settled ? "CREDIT RECEIPT — SETTLED" : "CREDIT RECEIPT"}
         </div>

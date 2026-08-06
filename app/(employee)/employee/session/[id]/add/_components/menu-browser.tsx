@@ -202,7 +202,13 @@ export function MenuBrowser({
   }
 
   return (
-    <div className="flex flex-col h-full">
+    // `flex-1 min-h-0`, NOT `h-full`. This is a flex child sitting BELOW the page's
+    // "Add items" header bar, so `h-full` (100% of the whole column) overflowed the
+    // column by exactly the header's height and pushed the cart bar — and the Place
+    // order button on it — off the bottom of the screen. `min-h-0` is the other half:
+    // a flex item defaults to `min-height:auto`, so without it a long menu refuses to
+    // shrink and shoves the footer off again.
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Search — the fastest path to a dish. Non-empty query hides the tabs and searches every
           category at once. */}
       <div className={`px-4 pt-3 pb-2.5 shrink-0 ${searching ? "border-b" : ""}`} style={{ borderColor: "var(--color-hairline)" }}>
@@ -285,7 +291,9 @@ export function MenuBrowser({
       )}
 
       {/* Items grid */}
-      <div className="flex-1 overflow-y-auto p-4">
+      {/* The ONLY scrolling region. `min-h-0` again, for the same reason as the root:
+          this is what makes the menu scroll instead of growing the column. */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-4">
         {visibleItems.length === 0 ? (
           <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
             {searching ? `No items match “${query.trim()}”.` : "No items in this category."}
@@ -312,9 +320,15 @@ export function MenuBrowser({
                 <div
                   key={item.id}
                   className="rounded-xl border p-3.5 flex flex-col gap-2"
+                  // All four sides as LONGHANDS. Mixing the `borderColor` shorthand with a
+                  // `borderLeftColor` longhand made React warn on every re-render — i.e. on
+                  // every tap of + or − while taking an order — which buried anything real
+                  // in the console. Same appearance, no warning.
                   style={{
                     background: qty > 0 ? cat.soft : "var(--color-canvas)",
-                    borderColor: qty > 0 ? cat.color : "var(--color-hairline)",
+                    borderTopColor: qty > 0 ? cat.color : "var(--color-hairline)",
+                    borderRightColor: qty > 0 ? cat.color : "var(--color-hairline)",
+                    borderBottomColor: qty > 0 ? cat.color : "var(--color-hairline)",
                     borderLeftColor: cat.color,
                     borderLeftWidth: 3,
                   }}
@@ -550,7 +564,15 @@ export function MenuBrowser({
       {totalCount > 0 && (
         <div
           className="shrink-0 border-t px-4 py-3 flex flex-col gap-2"
-          style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+          style={{
+            background: "var(--color-canvas)",
+            borderColor: "var(--color-hairline)",
+            // ADDS to the py-3 rather than replacing it (which `.pb-safe` would, leaving
+            // 0 bottom padding on any device without a notch). Installed on an iPhone
+            // this bar is the last thing on screen and the home indicator sits over the
+            // bottom ~34px — exactly where the Place order button is.
+            paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+          }}
         >
           {/* Each variant is its own line, so a staff member can see that the
               order is 1 Small and 2 Large before they send it. */}

@@ -21,6 +21,11 @@ export type ActionResult = { error: string } | { ok: true } | null;
 export type BillingSettings = {
   /** PAN / VAT registration number printed on bills. Empty when unset. */
   panNumber: string;
+  /** Contact number printed on bills, under the PAN. Empty when unset.
+   *  Stored on `restaurants.contact_phone` — the SAME column the superadmin surface
+   *  edits, deliberately: two columns for one phone number would print whichever the
+   *  bill happened to read. */
+  contactPhone: string;
   /** The number the NEXT bill will use; null = custom numbering off (legacy refs). */
   billNumberNext: number | null;
   /** Minimum digits to zero-pad the printed number to (0 = no padding). */
@@ -45,13 +50,14 @@ export async function getBillingSettings(): Promise<BillingSettings> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (service as any)
     .from("restaurants")
-    .select("pan_vat_number, bill_number_next, settings, discount_pin_hash")
+    .select("pan_vat_number, contact_phone, bill_number_next, settings, discount_pin_hash")
     .eq("id", restaurantUser.restaurant_id)
     .maybeSingle();
 
   const s = data?.settings ?? {};
   return {
     panNumber: data?.pan_vat_number ?? "",
+    contactPhone: data?.contact_phone ?? "",
     billNumberNext: data?.bill_number_next ?? null,
     billNumberPad: Number.isFinite(Number(s.bill_number_pad)) ? Number(s.bill_number_pad) : 0,
     billNumberLabel: normalizeBillLabel(s.bill_number_label),
@@ -113,6 +119,22 @@ export async function updateBillingSettings(
 
   const pan = ((formData.get("pan_number") as string) || "").trim() || null;
 
+  // The number printed under the PAN. Kept permissive on FORM (Nepali numbers are
+  // written +977-71-… , 071-5xxxxx, or with a second number after a slash) but it must
+  // still be a phone number rather than a line of free text, so letters are refused and
+  // there has to be a plausible count of digits.
+  const phoneRaw = ((formData.get("contact_phone") as string) || "").trim();
+  let contactPhone: string | null = null;
+  if (phoneRaw !== "") {
+    if (phoneRaw.length > 40) return { error: "That phone number is too long for a bill." };
+    if (!/^[0-9+\-()/ ]+$/.test(phoneRaw)) {
+      return { error: "The phone number can only contain digits and + - ( ) / and spaces." };
+    }
+    const digits = phoneRaw.replace(/\D/g, "").length;
+    if (digits < 6) return { error: "That doesn't look like a phone number." };
+    contactPhone = phoneRaw;
+  }
+
   // Blank "next number" turns custom numbering OFF (fall back to legacy refs). Otherwise it
   // must be a non-negative integer, and it becomes the number the very next bill will use.
   const rawNext = ((formData.get("bill_number_next") as string) || "").trim();
@@ -151,6 +173,7 @@ export async function updateBillingSettings(
     .from("restaurants")
     .update({
       pan_vat_number: pan,
+      contact_phone: contactPhone,
       bill_number_next: billNumberNext,
       settings,
     })

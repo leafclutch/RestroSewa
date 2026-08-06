@@ -26,6 +26,12 @@ around fast floor work and realtime.
 - Section visibility is permission-derived (`getStaffNav` + direct `*_ACCESS` checks); each thin
   page re-checks server-side.
 - Credits require BOTH billing perms; a reports-only viewer must not reach customer debt.
+- **Add-items is a fixed-height screen, not a scrolling page.** `/employee/session/[id]/add` sizes
+  itself to `calc(100dvh - 56px - env(safe-area-inset-top))` — mirroring StaffNav's own height, and
+  `dvh` not `vh` — so the cart bar and its Place order button stay on the bottom edge while only the
+  menu scrolls. The chain that makes that work is `flex-1 min-h-0` on BOTH the browser root and the
+  menu list: `h-full` on a flex child under a header overflows by the header's height (that was the
+  bug), and a flex item's default `min-height:auto` refuses to shrink below its content.
 
 # Important Components
 - `app/(employee)/employee/dashboard/page.tsx` + `_components/*` (staff-dashboard, orders/tables/

@@ -42,6 +42,11 @@ export type StockRow = {
   status: StockStatus;
   /** How many menu items sell this product. 0 ⇒ nothing will ever deduct it. */
   link_count: number;
+  /** Stations that hold this product. Empty ⇒ unassigned, which is the state
+   *  every product created before the mapping existed is in — and a perfectly
+   *  valid one. Organisational only: it changes nothing about what a sale
+   *  deducts. */
+  workstation_ids: string[];
 };
 
 export type StockSummary = {
@@ -114,6 +119,28 @@ function sanitizeSearch(raw: string): string {
   return raw.replace(/[,()*%\\]/g, " ").trim().slice(0, 60);
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The station ids a product form submitted, as a clean uuid[].
+ *
+ * Anything malformed is dropped rather than rejected: the ids are checkbox
+ * values, not user input, so a bad one means a bug on our side and there is
+ * nothing an admin could do with the error. Ownership is NOT checked here —
+ * `set_product_workstations` filters to this restaurant's stations inside the
+ * transaction, which is the only place that check cannot be raced.
+ */
+function workstationIds(formData: FormData): string[] {
+  const raw = formData.getAll("workstation_ids");
+  return [
+    ...new Set(
+      raw
+        .filter((v): v is string => typeof v === "string")
+        .filter((v) => UUID_RE.test(v))
+    ),
+  ];
+}
+
 const RPC_ERRORS: Record<string, string> = {
   PRODUCT_EXISTS: "A product with this name already exists. Use that one instead of creating a second.",
   NAME_REQUIRED: "Enter the product name.",
@@ -124,6 +151,7 @@ const RPC_ERRORS: Record<string, string> = {
     "This product is used in one or more menu-item recipes and can't be deleted. Remove those links, or deactivate the product instead.",
   PRODUCT_HAS_HISTORY:
     "This product has purchase or stock history and can't be deleted. Deactivate it instead to keep the record.",
+  PRODUCT_NOT_FOUND: "Product not found.",
 };
 
 function rpcError(message: string, fallback: string): string {
@@ -150,7 +178,7 @@ export async function getStock(params?: {
   const service = createServiceClient();
   const { from, to } = dayBounds(params?.day ?? null, ru.closingHour);
 
-  const [productsRes, reportRes, linksRes] = await Promise.all([
+  const [productsRes, reportRes, linksRes, stationsRes] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("products")
@@ -167,6 +195,14 @@ export async function getStock(params?: {
       .from("menu_item_products")
       .select("product_id")
       .eq("restaurant_id", ru.restaurant_id),
+    // Which stations hold what. A fourth arm of the SAME Promise.all rather than
+    // its own await: the app is latency-bound, so a parallel query costs nothing
+    // and a sequential one would cost a full round trip.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("product_workstations")
+      .select("product_id, workstation_id")
+      .eq("restaurant_id", ru.restaurant_id),
   ]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -179,6 +215,14 @@ export async function getStock(params?: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const l of (linksRes.data ?? []) as any[]) {
     linkCount.set(l.product_id, (linkCount.get(l.product_id) ?? 0) + 1);
+  }
+
+  const stations = new Map<string, string[]>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const s of (stationsRes.data ?? []) as any[]) {
+    const list = stations.get(s.product_id);
+    if (list) list.push(s.workstation_id);
+    else stations.set(s.product_id, [s.workstation_id]);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -204,6 +248,7 @@ export async function getStock(params?: {
       closing,
       status: stockStatus(closing, threshold),
       link_count: linkCount.get(p.id) ?? 0,
+      workstation_ids: stations.get(p.id) ?? [],
     };
   });
 
@@ -422,7 +467,7 @@ export async function createProduct(
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (service as any).rpc("create_product", {
+  const { data, error } = await (service as any).rpc("create_product", {
     p_restaurant_id: ru.restaurant_id,
     p_name: name,
     p_unit: unit,
@@ -433,6 +478,29 @@ export async function createProduct(
 
   if (error) {
     return { error: rpcError(error.message ?? "", "Could not create the product. Please try again.") };
+  }
+
+  // Stations are a second call rather than another `create_product` parameter:
+  // changing that function's signature means dropping and recreating it on every
+  // database it already lives on, for a screen an admin opens a few times a year.
+  //
+  // If this half fails the product still exists, unassigned — a valid state, not
+  // a broken one — so say exactly that instead of a generic failure that would
+  // send the admin back to create a duplicate.
+  const stations = workstationIds(formData);
+  if (stations.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: wsError } = await (service as any).rpc("set_product_workstations", {
+      p_restaurant_id: ru.restaurant_id,
+      p_product_id: data?.id,
+      p_workstation_ids: stations,
+    });
+    if (wsError) {
+      revalidatePath("/admin/stock");
+      return {
+        error: "Product created, but its workstations weren't saved. Open Edit to set them.",
+      };
+    }
   }
 
   revalidatePath("/admin/stock");
@@ -473,6 +541,20 @@ export async function updateProduct(
   if (error) {
     if (error.code === "23505") return { error: "Another product already uses this name." };
     return { error: "Could not update the product. Please try again." };
+  }
+
+  // Always called, including with an empty list — clearing every station is how a
+  // product goes back to Unassigned, and skipping the call when nothing is ticked
+  // would make that impossible.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: wsError } = await (service as any).rpc("set_product_workstations", {
+    p_restaurant_id: ru.restaurant_id,
+    p_product_id: id,
+    p_workstation_ids: workstationIds(formData),
+  });
+  if (wsError) {
+    revalidatePath("/admin/stock");
+    return { error: "Saved the product, but its workstations didn't change. Please try again." };
   }
 
   revalidatePath("/admin/stock");

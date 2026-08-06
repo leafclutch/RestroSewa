@@ -57,6 +57,32 @@ export type PurchaseSummary = {
 
 export type VendorOption = { id: string; name: string; credit_balance: number };
 
+/**
+ * ONE line of a supplier bill, lifted out so it can be reported on by station.
+ *
+ * A bill is not the right unit for a station question: one bill routinely mixes
+ * 4kg of chicken (Kitchen) with two crates of beer (Bar), and its `total_amount`
+ * is the sum of both. Reporting "Bar spend" off bill totals would count the
+ * chicken, so the station view drops to the LINE — the only level at which the
+ * question has an honest answer.
+ */
+export type PurchaseLineRow = {
+  id: string;
+  purchase_id: string;
+  purchase_code: string;
+  vendor_name: string;
+  method: PurchaseMethod;
+  created_at: string;
+  product_id: string;
+  product_name: string;
+  unit: string;
+  quantity: number;
+  unit_cost: number;
+  line_total: number;
+  /** Stations holding this line's PRODUCT. Empty ⇒ Unassigned. */
+  workstation_ids: string[];
+};
+
 function sanitizeSearch(raw: string): string {
   return raw.replace(/[,()*%\\]/g, " ").trim().slice(0, 60);
 }
@@ -140,6 +166,102 @@ export async function getPurchases(params?: {
   }
 
   return rows;
+}
+
+/**
+ * Every purchase LINE across the recent bills, with its product's stations.
+ *
+ * Same window as `getPurchases` (most recent 500 bills) so the two views of the
+ * same screen cover the same ground — switching to a station must not silently
+ * change the period as well as the unit.
+ *
+ * Station filtering happens on the CLIENT, over this one payload: the screen
+ * already holds every line, so switching stations costs no round trip. This
+ * returns the lines and their stations; it does not decide which you're looking
+ * at.
+ */
+export async function getPurchaseLines(params?: {
+  search?: string | null;
+  filter?: PurchaseFilter;
+}): Promise<PurchaseLineRow[]> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canViewPurchases(ru)) return [];
+
+  const service = createServiceClient();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let query = (service as any)
+    .from("purchases")
+    .select(
+      "id, purchase_code, payment_method, created_at, vendors ( name ), " +
+        "purchase_items ( id, product_id, quantity, unit_cost, line_total, products ( name, unit ) )"
+    )
+    .eq("restaurant_id", ru.restaurant_id);
+
+  const filter = params?.filter ?? "all";
+  if (filter !== "all") query = query.eq("payment_method", filter);
+
+  const [billsRes, stationsRes] = await Promise.all([
+    query.order("created_at", { ascending: false }).limit(500),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("product_workstations")
+      .select("product_id, workstation_id")
+      .eq("restaurant_id", ru.restaurant_id),
+  ]);
+
+  const stations = new Map<string, string[]>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const s of (stationsRes.data ?? []) as any[]) {
+    const list = stations.get(s.product_id);
+    if (list) list.push(s.workstation_id);
+    else stations.set(s.product_id, [s.workstation_id]);
+  }
+
+  const search = sanitizeSearch(params?.search ?? "").toLowerCase();
+  const rows: PurchaseLineRow[] = [];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const b of ((billsRes.data ?? []) as any[])) {
+    const vendorName = b.vendors?.name ?? "—";
+    // Search matches the BILL (code or vendor) or the PRODUCT, because in a line
+    // view "chicken" is at least as likely a search as a purchase code.
+    const billMatches =
+      !search ||
+      b.purchase_code.toLowerCase().includes(search) ||
+      vendorName.toLowerCase().includes(search);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const i of ((b.purchase_items ?? []) as any[])) {
+      const productName = i.products?.name ?? "—";
+      if (!billMatches && !productName.toLowerCase().includes(search)) continue;
+      rows.push({
+        id: i.id,
+        purchase_id: b.id,
+        purchase_code: b.purchase_code,
+        vendor_name: vendorName,
+        method: b.payment_method as PurchaseMethod,
+        created_at: b.created_at,
+        product_id: i.product_id,
+        product_name: productName,
+        unit: i.products?.unit ?? "",
+        quantity: Number(i.quantity),
+        unit_cost: Number(i.unit_cost),
+        line_total: Number(i.line_total),
+        workstation_ids: stations.get(i.product_id) ?? [],
+      });
+    }
+  }
+
+  // Newest first, matching the bill list. `purchase_items` comes back in no
+  // guaranteed order within a bill, so lines of one bill are then held together
+  // by product name rather than left arbitrary.
+  return rows.sort(
+    (a, b) =>
+      b.created_at.localeCompare(a.created_at) ||
+      a.purchase_code.localeCompare(b.purchase_code) ||
+      a.product_name.localeCompare(b.product_name)
+  );
 }
 
 export async function getPurchaseSummary(day?: string | null): Promise<PurchaseSummary> {
