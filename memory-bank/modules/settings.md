@@ -5,14 +5,14 @@ Owner-only restaurant configuration at `/admin/settings` (`requireRestaurantAdmi
 setting is its own card + its own Server Action so an unrelated "Save" never rides along.
 
 # Responsibilities
-- Business closing time, PAN/VAT, bill numbering, per-workstation OT numbering, discount PIN,
+- Business closing time, PAN/VAT + bill phone, bill numbering, per-workstation OT numbering, discount PIN,
   daily finance report recipients + history, logo (via branding).
 
 # Features
 - **Business closing time** — the day boundary; changing it re-buckets every date-based figure
   (warned in UI). Stored `settings.business_closing_hour`. See `modules/finance.md`,
   `decisions.md`.
-- **PAN / bill numbering** — editable PAN, next bill number, padding, "Bill"/"Order" label;
+- **Bill header / numbering** — editable PAN **and phone** (both print in the bill header, PAN then phone), next bill number, padding, "Bill"/"Order" label;
   stamped by a DB trigger on payment (history-preserving; unused numbers roll back).
 - **OT numbering** — per-workstation prefix (`ticket_code`) + next number (see `modules/printing.md`).
 - **Discount PIN** — set/clear the PIN that gates discounts (hashed in-DB via `set_discount_pin`;

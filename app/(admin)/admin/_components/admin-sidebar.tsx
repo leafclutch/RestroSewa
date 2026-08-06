@@ -53,6 +53,8 @@ const NAV: NavItem[] = [
 // is gated separately again, so a storekeeper never sees a link that would just
 // bounce them (nav and route guard must agree).
 const STOCK_NAV: NavItem[] = [
+  // The Deduction Report is deliberately NOT here: it is reached by the "Deduction
+  // report" button on the Stock page, next to where deductions are recorded.
   { label: "Stock",     href: "/admin/stock",     icon: Package,      exact: false, needs: "stock" },
   { label: "Purchases", href: "/admin/purchases", icon: ShoppingCart, exact: false, needs: "purchases" },
   { label: "Vendors",   href: "/admin/vendors",   icon: Truck,        exact: false, needs: "vendors" },

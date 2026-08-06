@@ -3,8 +3,14 @@ import { redirect } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { STOCK_ACCESS } from "@/lib/permissions";
-import { getPurchases, getPurchaseSummary, getVendorOptions } from "@/app/actions/purchases";
+import {
+  getPurchaseLines,
+  getPurchases,
+  getPurchaseSummary,
+  getVendorOptions,
+} from "@/app/actions/purchases";
 import { getProductOptions } from "@/app/actions/stock";
+import { getWorkstations } from "@/app/actions/workstations";
 import { getRestaurantConfig } from "@/lib/restaurant-info";
 import { PurchasesClient } from "@/app/(admin)/admin/purchases/_components/purchases-client";
 
@@ -19,11 +25,13 @@ export default async function EmployeePurchasesPage() {
     redirect("/employee/dashboard");
   }
 
-  const [purchases, summary, vendors, products, config] = await Promise.all([
+  const [purchases, lines, summary, vendors, products, workstations, config] = await Promise.all([
     getPurchases({ filter: "all" }),
+    getPurchaseLines({ filter: "all" }),
     getPurchaseSummary(),
     getVendorOptions(),
     getProductOptions(),
+    getWorkstations(restaurantUser.restaurant_id),
     getRestaurantConfig(restaurantUser.restaurant_id),
   ]);
 
@@ -40,9 +48,11 @@ export default async function EmployeePurchasesPage() {
 
       <PurchasesClient
         initialPurchases={purchases}
+        initialLines={lines}
         initialSummary={summary}
         vendors={vendors}
         products={products}
+        workstations={workstations}
         canManage={STOCK_ACCESS.canManagePurchases(restaurantUser)}
         canEdit={restaurantUser.role === "restaurant_admin"}
         securityEnabled={config.securityEnabled}

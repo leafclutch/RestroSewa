@@ -6,6 +6,99 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
+**Workstation reporting: Purchases by station + a new Deduction Report (2026-08-06) — CODE COMPLETE,
+verified on DEV.** The follow-on the mapping's analysis pointed at: purchases and waste were the two
+things the POS could never answer by station.
+
+**A wrong premise, corrected before building.** The request was "add the workstation filter to
+purchase and waste reports". There WAS no waste report — `stock_adjustments` rows were written by
+the Manual Deduction form and then only ever read one product at a time inside `product_history`.
+So that half was building a report, not filtering one.
+
+**Purchases filter at the LINE, not the bill.** One supplier bill routinely mixes 4kg of chicken
+(Kitchen) with two crates of beer (Bar), and `purchases.total_amount` is the sum of both — so
+filtering bills would have reported the chicken as bar spend. Picking a station switches the list to
+purchase LINES with their own total; "All" is the familiar bill list, untouched. Verified with a
+deliberately mixed ₹9,060 bill: Bar took 8848 + CocaCola, Kitchen took 8848 + Chicken, neither saw
+the other's lines. Note Bar + Kitchen can EXCEED the bill total when a product is on both stations —
+the banner says so rather than hiding it.
+
+**Deduction Report** (`/admin/deductions`, `/employee/deductions`, `view_stock`, read-only) — named
+"Waste report" when first built, then renamed **throughout**: label, heading, routes, files
+(`app/actions/deductions.ts`, `lib/deductions.ts`) and identifiers (`DeductionRow`,
+`getDeductionReport`, `summariseDeductions`, `deductionsHref`). The reason label **"Waste"** was
+deliberately left alone — it is one of the six deduction reasons and `stock_adjustments.kind` still
+stores `waste`. Period picker reusing
+`businessPeriodBounds`, station + reason filters, value-removed total and a by-reason breakdown.
+Corrections that ADD stock are counted separately and never netted against the loss. Value uses each
+product's CURRENT `last_unit_cost` — an estimate the screen states, and one my own test proved:
+recording a purchase moved the value of that product's earlier waste (₹5,952 → ₹5,953).
+
+**Shared, not copied three times:** `lib/workstations/stations.ts` holds the one definition of the
+filter rule (`matchesStation`, the `all`/`none` sentinels, `filterableStations`) and
+`components/station-chips.tsx` the one chip row; Stock was refactored onto both. `lib/deductions.ts`
+holds `summariseDeductions` so the action and the screen total identically — the screen re-totals after a
+station filter with no round trip. (A first draft had that as a server action; pure arithmetic over
+a round trip is exactly wrong in a latency-bound app.)
+
+Files: `app/actions/deductions.ts`, `lib/deductions.ts`, `lib/workstations/stations.ts`,
+`components/station-chips.tsx`, `app/(admin)/admin/deductions/*`,
+`app/(employee)/employee/deductions/*` (new); `app/actions/purchases.ts` (`getPurchaseLines`), both
+purchases pages + client, both stock pages + client.
+
+**Verified on DEV in a browser:** waste totals reconcile (3337.47 + 1304.97 + 710 + 600 = 5952.44,
+with a +₹330 correction excluded); the kitchen filter re-totals to ₹5,292 and drops the Bar-only
+product and its correction; station switches fire **0 fetch calls** on all three screens; "All"
+restores the bill list; 375px has no horizontal overflow; the employee routes render on employee
+chrome. Fixed one real defect found this way: JSX ate the space before an em dash, rendering
+"purchases— other". `tsc` and `build` clean. Dev data restored (seeded waste rows and the test
+purchase deleted, `last_unit_cost` recomputed from remaining purchases, assignments cleared).
+
+**Remaining — ops only:** unchanged from below — apply `20260806000000` to production. No new
+migration: both features read tables that already exist.
+
+---
+
+## Previous feature — shipped
+**Product ↔ Workstation mapping (2026-08-06) — CODE COMPLETE, verified on DEV.**
+Products had no station while menu items always have had one, so Stock was a single
+undifferentiated list. Added `product_workstations` (M2M, `restaurant_id` carried) +
+`set_product_workstations` (whole-set replace, cross-tenant station ids filtered out), a
+multi-select on the product form, station-grouped listing and a **client-side** station filter
+(zero round trips — `rows` already holds every product).
+
+**The load-bearing claim, and how it was proved:** this is metadata, not mechanism.
+`set_product_workstations` is the ONLY DB object referencing the table (checked via `prosrc`), and
+`stock_report` returns byte-identical output with stations cleared, set, and reassigned. Nothing in
+the deduction path changed.
+
+**Design rule recorded in `modules/stock.md`:** station-level POS consumption was *already*
+derivable from `session_order_items.workstation_id`, so this mapping's real value is purchases and
+waste (which had no path to a station at all). Usage reports must key on the MENU ITEM's station,
+purchases/waste/holding on the PRODUCT's station — they can disagree.
+
+Files: `supabase/migrations/20260806000000_product_workstations.sql` (new), `app/actions/stock.ts`,
+`app/(admin)/admin/stock/_components/stock-client.tsx`, both stock pages, `types/database.ts`.
+
+**Verified on DEV in a browser:** legacy products render under Unassigned with unchanged figures;
+create with two stations lists under both; edit assigns and clears; the filter fires **0 fetch
+calls**; a group split across a page boundary repeats its header on page 2; mobile (375px) and the
+employee surface both correct; a `view_stock`-only user sees grouping + filter but no write
+controls. DB-level: cross-tenant station id dropped, workstation delete cascades instead of
+blocking, `delete_product` still works on a product that has stations. `tsc` and `build` clean.
+Dev data was restored afterwards (test product deleted, all assignments cleared).
+
+**Remaining — ops only:** apply `20260806000000` to production (`node scripts/migrate.mjs up --prod
+--yes`). Purely additive; the app tolerates the table being absent only insofar as the query would
+error, so **DB before app**.
+
+⚠️ `npm run lint` is misleading in this repo: the flat config has no `files` key, so ESLint 10 skips
+every `.ts`/`.tsx` file and only lints `.next/` build output (~2000 pre-existing errors). Unrelated
+to this change, but don't read it as coverage.
+
+---
+
+## Earlier feature — shipped
 **Room billing unification (2026-08-04 → 05) — CODE COMPLETE.** Guest identity at check-in, and the
 room bill rendered through the shared `BillTicket` so the document is the same before and after
 payment. Full write-up in `completed.md`; design + plan in
@@ -30,7 +123,7 @@ cached `getRestaurantConfig` instead of its own `restaurants` select.
 
 ---
 
-## Previous feature — shipped
+## Earlier feature — shipped
 **Thermal printing fixes (2026-08-03).** Six reported defects in printed KOT/BOT/bill output reduced
 to **three** real causes. Every receipt in the app goes through one `PrintModal`, so the fixes land
 on the session bill, station tickets, room folio bill and credit receipt at once.

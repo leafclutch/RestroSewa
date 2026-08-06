@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   getPurchaseDetail,
+  getPurchaseLines,
   getPurchases,
   getPurchaseSummary,
   recordPurchase,
@@ -19,10 +20,19 @@ import type {
   ActionResult,
   PurchaseDetail,
   PurchaseFilter,
+  PurchaseLineRow,
   PurchaseRow,
   PurchaseSummary,
   VendorOption,
 } from "@/app/actions/purchases";
+import type { WorkstationRow } from "@/app/actions/workstations";
+import {
+  ALL_STATIONS,
+  filterableStations,
+  matchesStation,
+  stationColor,
+} from "@/lib/workstations/stations";
+import { StationChips } from "@/components/station-chips";
 import { updatePurchase, type PurchaseEditInput } from "@/app/actions/security";
 import { qty } from "@/lib/stock";
 import { useRealtime } from "@/lib/realtime/use-realtime";
@@ -637,17 +647,22 @@ function PurchaseDetailView({
 
 export function PurchasesClient({
   initialPurchases,
+  initialLines,
   initialSummary,
   vendors,
   products,
+  workstations,
   canManage,
   canEdit,
   securityEnabled,
 }: {
   initialPurchases: PurchaseRow[];
+  /** The same bills as `initialPurchases`, split into lines — the station view. */
+  initialLines: PurchaseLineRow[];
   initialSummary: PurchaseSummary;
   vendors: VendorOption[];
   products: ProductOption[];
+  workstations: WorkstationRow[];
   canManage: boolean;
   /** Owner: may edit completed purchases (behind the Security PIN). */
   canEdit: boolean;
@@ -655,9 +670,13 @@ export function PurchasesClient({
   securityEnabled: boolean;
 }) {
   const [rows, setRows] = useState(initialPurchases);
+  const [lines, setLines] = useState(initialLines);
   const [summary, setSummary] = useState(initialSummary);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<PurchaseFilter>("all");
+  /** Station filter. `all` keeps the familiar list of BILLS; picking a station
+   *  switches to LINES, because only a line belongs to one station. */
+  const [station, setStation] = useState<string>(ALL_STATIONS);
   const [page, setPage] = useState(1);
   const [loading, startTransition] = useTransition();
   const [creating, setCreating] = useState(false);
@@ -666,11 +685,16 @@ export function PurchasesClient({
   const reload = useCallback((s: string, f: PurchaseFilter) => {
     startTransition(async () => {
       try {
-        const [list, sum] = await Promise.all([
+        // Bills and lines are fetched together, always. They are two views of the
+        // same window, so refreshing one without the other would let the station
+        // view fall behind the bill view after a purchase is recorded.
+        const [list, lineList, sum] = await Promise.all([
           getPurchases({ search: s, filter: f }),
+          getPurchaseLines({ search: s, filter: f }),
           getPurchaseSummary(),
         ]);
         setRows(list);
+        setLines(lineList);
         setSummary(sum);
       } catch {
         // keep the last known list on a transient failure
@@ -688,18 +712,54 @@ export function PurchasesClient({
     return () => clearTimeout(t);
   }, [search, filter, reload]);
 
-  useEffect(() => { setPage(1); }, [search, filter]);
+  useEffect(() => { setPage(1); }, [search, filter, station]);
 
   const refresh = useCallback(() => reload(search, filter), [reload, search, filter]);
 
   useRealtime(["purchases", "vendors"], refresh);
 
-  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  // Stations worth offering: active ones, plus any inactive station still on a
+  // line in view.
+  const chipStations = useMemo(
+    () => filterableStations(workstations, lines.flatMap((l) => l.workstation_ids)),
+    [workstations, lines]
+  );
+
+  const byStation = station !== ALL_STATIONS;
+
+  // Client-side, over lines already in memory — switching station costs no round
+  // trip, exactly as on the Stock page.
+  const stationLines = useMemo(
+    () => (byStation ? lines.filter((l) => matchesStation(l.workstation_ids, station)) : []),
+    [lines, station, byStation]
+  );
+
+  /** What the listed lines add up to. Stated as the total of what's on screen —
+   *  NOT apportioned across cash/online/credit, which are facts about a whole
+   *  bill and cannot be honestly split across its lines. */
+  const stationTotal = useMemo(
+    () => stationLines.reduce((sum, l) => sum + l.line_total, 0),
+    [stationLines]
+  );
+  const stationBills = useMemo(
+    () => new Set(stationLines.map((l) => l.purchase_id)).size,
+    [stationLines]
+  );
+
+  const listLength = byStation ? stationLines.length : rows.length;
+  const pageCount = Math.max(1, Math.ceil(listLength / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const pageRows = useMemo(
     () => rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
     [rows, safePage]
   );
+  const pageLines = useMemo(
+    () => stationLines.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [stationLines, safePage]
+  );
+
+  const activeStation = chipStations.find((w) => w.id === station) ?? null;
+  const stationLabel = activeStation?.name ?? "Unassigned";
 
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto">
@@ -766,17 +826,194 @@ export function PurchasesClient({
         </div>
       </div>
 
-      {rows.length === 0 ? (
+      <StationChips
+        stations={chipStations}
+        value={station}
+        onChange={setStation}
+        className="mb-4"
+      />
+
+      {/* What the station view is, said once, where the numbers change meaning.
+          The stat cards above stay whole-restaurant and say "today"; this total
+          is of the lines listed below, over the same window as the bill list. */}
+      {byStation && (
+        <div
+          className="rounded-xl border px-4 py-3 mb-4 flex items-center justify-between gap-3 flex-wrap"
+          style={{
+            background: "var(--color-canvas-soft)",
+            borderColor: activeStation
+              ? `color-mix(in srgb, ${stationColor(activeStation)} 30%, transparent)`
+              : "var(--color-hairline)",
+          }}
+        >
+          <div>
+            <p
+              className="text-xs uppercase tracking-wide font-medium"
+              style={{
+                color: activeStation ? stationColor(activeStation) : "var(--color-ink-mute)",
+                letterSpacing: "0.06em",
+              }}
+            >
+              {stationLabel}
+            </p>
+            <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
+              {stationLines.length} line{stationLines.length !== 1 ? "s" : ""} across{" "}
+              {stationBills} purchase{stationBills !== 1 ? "s" : ""}
+              {" — other stations’ lines on the same bills are not counted."}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-lg font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>
+              {money2(stationTotal)}
+            </p>
+            <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+              spent on {stationLabel.toLowerCase()} stock
+            </p>
+          </div>
+        </div>
+      )}
+
+      {listLength === 0 ? (
         <div
           className="rounded-xl border px-6 py-12 text-center"
           style={{ borderStyle: "dashed", borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
         >
           <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
-            {search || filter !== "all"
+            {byStation
+              ? `Nothing bought for ${stationLabel} in these purchases. Assign products to a workstation on the Stock page, and their purchases appear here.`
+              : search || filter !== "all"
               ? "No purchases match that search."
               : "No purchases yet. Record one to add stock and track what you spent."}
           </p>
         </div>
+      ) : byStation ? (
+        <>
+          {/* Station view: LINES, not bills. Tapping one still opens its bill —
+              the line is the unit of reporting, the bill is the unit of record. */}
+          <div
+            className="hidden md:block rounded-xl border overflow-x-auto"
+            style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
+          >
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ background: "var(--color-canvas-soft)" }}>
+                  {[
+                    { h: "Product", right: false },
+                    { h: "Purchase", right: false },
+                    { h: "Vendor", right: false },
+                    { h: "Qty", right: true },
+                    { h: "Unit cost", right: true },
+                    { h: "Line total", right: true },
+                  ].map(({ h, right }) => (
+                    <th
+                      key={h}
+                      className={`px-4 py-2.5 font-medium text-xs uppercase tracking-wide whitespace-nowrap ${right ? "text-right" : "text-left"}`}
+                      style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pageLines.map((l) => (
+                  <tr
+                    key={l.id}
+                    className="border-t cursor-pointer"
+                    style={{ borderColor: "var(--color-hairline)" }}
+                    onClick={() => {
+                      const bill = rows.find((r) => r.id === l.purchase_id);
+                      if (bill) setDetailOf(bill);
+                    }}
+                  >
+                    <td className="px-4 py-3" style={{ color: "var(--color-ink)" }}>{l.product_name}</td>
+                    <td className="px-4 py-3">
+                      <span style={{ color: "var(--color-ink)" }}>{l.purchase_code}</span>
+                      <span className="block text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                        {new Date(l.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3" style={{ color: "var(--color-ink-mute)" }}>{l.vendor_name}</td>
+                    <td className="px-4 py-3 text-right tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
+                      {qty(l.quantity)} {l.unit}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
+                      {money2(l.unit_cost)}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-medium" style={{ color: "var(--color-ink)" }}>
+                      {money2(l.line_total)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile cards */}
+          <div className="md:hidden flex flex-col gap-2">
+            {pageLines.map((l) => (
+              <button
+                key={l.id}
+                type="button"
+                onClick={() => {
+                  const bill = rows.find((r) => r.id === l.purchase_id);
+                  if (bill) setDetailOf(bill);
+                }}
+                className="w-full rounded-xl border px-4 py-3 text-left"
+                style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate" style={{ color: "var(--color-ink)" }}>
+                      {l.product_name}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
+                      {qty(l.quantity)} {l.unit} × {money2(l.unit_cost)}
+                    </p>
+                    <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                      {l.purchase_code} · {l.vendor_name} ·{" "}
+                      {new Date(l.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                    </p>
+                  </div>
+                  <p className="text-sm font-medium tabular-nums shrink-0" style={{ color: "var(--color-ink)" }}>
+                    {money(l.line_total)}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {pageCount > 1 && (
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, listLength)} of {listLength} lines
+              </p>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={safePage === 1}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center border disabled:opacity-40"
+                  style={{ borderColor: "var(--color-hairline)", color: "var(--color-ink)" }}
+                >
+                  <ChevronLeft size={14} />
+                </button>
+                <span className="text-xs px-2 tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
+                  {safePage} / {pageCount}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                  disabled={safePage === pageCount}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center border disabled:opacity-40"
+                  style={{ borderColor: "var(--color-hairline)", color: "var(--color-ink)" }}
+                >
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         <>
           {/* Desktop table */}

@@ -4,7 +4,37 @@ Human-readable release notes. Newest first. Group entries by Added / Changed / F
 Versioning is informal (the app ships continuously); dates anchor the entries.
 
 ## [Unreleased] — 2026-08
+### Fixed
+- **The Place order button sat below the bottom of the screen when adding items to a table.** With a
+  full menu you had to scroll to reach it. The menu now scrolls inside the page and the order bar
+  stays pinned to the bottom, so Place order is always in reach — and on an installed iPhone it no
+  longer sits under the home indicator.
+- **Printed bills sat hard against the left edge of the paper.** The receipt now keeps a 3mm margin
+  on each side (2mm on 58mm rolls), and feeds a little more blank paper at the end so the footer is
+  no longer on the tear line.
+- **A bill changed its title once it was paid** — "BILL" before payment, "TAX INVOICE" after, with
+  the number line switching from "Bill No" to "Receipt No". One sale, one document: it is now
+  **BILL** either way, printed slightly larger and bolder. Only the PAID/tender block changes. (If
+  you've set the label to "Order No" in Settings, that still wins — and now applies to both.)
 ### Added
+- **Your phone number can now be printed on bills.** Admin → Settings → Bill header has a phone
+  field next to the PAN; it prints on the line under the PAN. Leave it blank to omit it.
+- **New: a Deduction Report** (Stock → "Deduction report"). Everything deducted by hand —
+  thrown away, damaged, used in the kitchen, eaten by staff — for a day, week, month, year or a
+  custom range, with what it was worth, a breakdown by reason, and filters for reason and
+  workstation. Until now these deductions could only be seen one product at a time in that
+  product's history. Corrections that put stock *back* are shown separately and never subtracted
+  from the loss. Values use each product's last purchase price, which the report says on its face.
+- **Purchases can be filtered by workstation.** Picking a station switches the list from bills to
+  the individual lines for that station, with what they cost — so "what did the Bar spend" is a
+  real number rather than the total of bills that happen to include a bar item. A bill that mixes
+  stations contributes only its relevant lines to each.
+- **Products can now be assigned to workstations.** Creating or editing a product offers your
+  stations (Kitchen, Bar, Reception, or whatever you've set up) as a multi-select — chicken to the
+  Kitchen, beer to the Bar, coffee beans to both. The stock list then groups under station headings
+  with an All / per-station / Unassigned filter that switches instantly. A product on two stations
+  shows under both. **Existing products need no change**: they simply list under Unassigned, and
+  stock levels, purchases and deductions work exactly as before either way.
 - **Guest ID at check-in** — checking a guest in now asks for **ID type (Citizenship / National ID),
   ID number and permanent address**. All three are required, kept with the booking, and printed on
   the room bill. Stays checked in before this keep working and simply print without the ID line.

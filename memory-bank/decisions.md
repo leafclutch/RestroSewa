@@ -199,3 +199,59 @@ follow-up. This exists so future work doesn't re-propose things already chosen o
   the `is_directory` flags so redeploys stop recreating the fault. **The lesson worth keeping: when
   a managed platform's output is wrong, look for the platform's own record of what it intended to
   build — and diff it against a working instance.**
+
+- **A product's workstation is metadata, not mechanism — and a join table, not a column
+  (2026-08-06).** Menu items have carried `workstation_id` (NOT NULL, `on delete restrict`) since
+  the start because a dish that cannot be routed to a station cannot print. Products got the
+  opposite treatment: `product_workstations` is a **nullable M2M** with `on delete cascade` on the
+  station, so deleting a station **unassigns** its products instead of being refused. That
+  asymmetry is deliberate — a product with no station is an ordinary product, so its tag carries no
+  integrity meaning and must never block an operation. It is enforced by omission too: nothing in
+  the deduction path reads the table, and `set_product_workstations` is the only DB object that
+  mentions it (verified by scanning `pg_proc.prosrc`), so `stock_report` returns identical output
+  with stations cleared, set or reassigned.
+
+  **What the mapping does and does not buy, because it changes what is worth building next.**
+  Station-level POS consumption was *already* derivable without it: `session_order_items` stamps
+  `workstation_id` on every sold line, and `menu_item_products` leads from that line to the product.
+  The mapping's real value is the things the POS never touches — **purchases** (`purchase_items`
+  points at a product, full stop) and **waste/manual deductions** (same). So any future report must
+  pick a side and say so: **usage keys on the MENU ITEM's station** (who physically made it),
+  **purchases, waste and inventory-holding key on the PRODUCT's station** (who buys and keeps it).
+  These legitimately disagree — coffee beans are tagged Bar + Kitchen while the *Coffee* menu item
+  is Bar only — and averaging them produces a figure nobody can reconcile. Two standing constraints:
+  a shared product double-counts under `group by station`, and unassigned products need a stated
+  home in every such report rather than a silent omission.
+
+  Rejected: extending `create_product`'s signature (it is live on three databases; a second call for
+  a screen used a few times a year is not worth dropping and recreating a function), and a `primary
+  station` column (adds a concept the requirement never asked for purely to make counts add up).
+
+- **A purchase's station question is answered at the LINE, not the bill (2026-08-06).** One supplier
+  bill routinely mixes 4kg of chicken (Kitchen) with two crates of beer (Bar), and
+  `purchases.total_amount` is the sum of both. Filtering BILLS by station — the cheap
+  implementation, one extra condition, summary cards untouched — would have reported the chicken as
+  bar spend. So selecting a station switches the Purchases list from bills to purchase LINES with
+  their own total, and "All" keeps the familiar bill list unchanged. Two consequences stated on the
+  screen rather than hidden: Bar + Kitchen can EXCEED a bill's total when a product belongs to both
+  stations, and the "today" stat cards stay whole-restaurant because cash/online/credit are facts
+  about a whole bill and cannot be honestly apportioned across its lines.
+
+- **Waste needed a REPORT before it could have a filter (2026-08-06).** `stock_adjustments` had been
+  written since the stock module shipped and was only ever read back one product at a time, inside
+  `product_history` — there was no way to ask what was thrown away this month. The new report is
+  read-only, gated on `view_stock` (seeing what was lost is a stock read, not a finance one), and
+  adds no table and no migration. Two rules it encodes: a correction that ADDS stock is counted
+  separately and never nets against the loss (otherwise a +5 correction cancels a −5 wastage and the
+  month reports nothing lost); and value is each product's CURRENT `last_unit_cost`, an estimate the
+  screen states on its face, because no historical cost per movement is recorded anywhere —
+  recording a purchase visibly moves the value of that product's earlier waste.
+
+- **The station filter is one rule in one file, used by three screens.** `matchesStation` and the
+  `all`/`none` sentinels live in `lib/workstations/stations.ts`, the chip row in
+  `components/station-chips.tsx`; Stock was refactored onto both when Purchases and Waste arrived.
+  Three copies of "does this belong to the Bar" is three chances for one screen to treat a
+  multi-station product, or the Unassigned bucket, differently from the others. Likewise
+  `summariseWaste` lives in `lib/waste.ts`, called by the action for the period and by the screen
+  after a station filter — the same totals function either way. It is NOT a server action: pure
+  arithmetic behind a ~130ms round trip is precisely the mistake the performance model warns about.

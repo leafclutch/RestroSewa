@@ -135,6 +135,31 @@ export type Database = {
         };
       };
 
+      // Which stations hold a product (M2M — coffee beans belong to the bar AND
+      // the kitchen). Organisational only: it groups and filters the stock list
+      // and has no part in what a sale deducts. No row = "Unassigned", which is
+      // where every product predating this table sits.
+      product_workstations: {
+        Row: {
+          restaurant_id: string;
+          product_id: string;
+          workstation_id: string;
+          created_at: string;
+        };
+        Insert: {
+          restaurant_id: string;
+          product_id: string;
+          workstation_id: string;
+          created_at?: string;
+        };
+        Update: {
+          restaurant_id?: string;
+          product_id?: string;
+          workstation_id?: string;
+          created_at?: string;
+        };
+      };
+
       table_groups: {
         Row: {
           id: string;

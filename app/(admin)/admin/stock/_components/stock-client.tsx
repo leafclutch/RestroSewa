@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useActionState,
   useCallback,
   useEffect,
@@ -33,6 +34,15 @@ import type {
   StockRow,
   StockSummary,
 } from "@/app/actions/stock";
+import type { WorkstationRow } from "@/app/actions/workstations";
+import {
+  ALL_STATIONS,
+  NO_STATION,
+  filterableStations,
+  matchesStation,
+  stationColor,
+} from "@/lib/workstations/stations";
+import { StationChips } from "@/components/station-chips";
 import {
   CAN_ADD_STOCK,
   MOVEMENT_COLOR,
@@ -44,6 +54,7 @@ import {
   STOCK_STATUS_LABEL,
 } from "@/lib/stock";
 import type { StockMovement } from "@/lib/stock";
+import Link from "next/link";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,6 +73,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+
 
 const PAGE_SIZE = 10;
 const HISTORY_PAGE = 12;
@@ -111,9 +123,120 @@ function StatusPill({ status }: { status: StockRow["status"] }) {
   );
 }
 
+// ── Workstations ──────────────────────────────────────────────────────────────
+// Which stations hold a product — the kitchen's chicken, the bar's whisky, the
+// reception's towels. Organisational only: it groups and filters the list and
+// changes nothing about what a sale deducts. A product with no station is a
+// normal product, and reads as "Unassigned".
+
+function StationPills({ ids, workstations }: { ids: string[]; workstations: WorkstationRow[] }) {
+  if (ids.length === 0) return null;
+  return (
+    <>
+      {workstations
+        .filter((w) => ids.includes(w.id))
+        .map((w) => (
+          <span
+            key={w.id}
+            className="text-[10px] px-1.5 py-0.5 rounded-md whitespace-nowrap"
+            style={{
+              background: `color-mix(in srgb, ${stationColor(w)} 10%, transparent)`,
+              color: stationColor(w),
+            }}
+          >
+            {w.name}
+          </span>
+        ))}
+    </>
+  );
+}
+
+/**
+ * The station multi-select on the create/edit form.
+ *
+ * Selection is React state, mirrored into hidden inputs so the surrounding
+ * `useActionState` form posts it as repeated `workstation_ids` values and the
+ * action can read it with `formData.getAll` — no extra wiring, and the form
+ * still works as one submit.
+ */
+function StationPicker({
+  workstations,
+  initial,
+}: {
+  workstations: WorkstationRow[];
+  initial: string[];
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set(initial));
+
+  // Active stations, plus any inactive one this product already uses — so a
+  // station deactivated after the fact stays visible and can be removed, rather
+  // than silently sticking to the product with no way to see it.
+  const offered = workstations.filter((w) => w.is_active || selected.has(w.id));
+  if (offered.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label
+        className="text-xs uppercase tracking-wide"
+        style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+      >
+        Workstations
+      </label>
+
+      {[...selected].map((id) => (
+        <input key={id} type="hidden" name="workstation_ids" value={id} />
+      ))}
+
+      <div className="flex flex-wrap gap-1.5">
+        {offered.map((w) => {
+          const active = selected.has(w.id);
+          const color = stationColor(w);
+          return (
+            <button
+              key={w.id}
+              type="button"
+              aria-pressed={active}
+              onClick={() =>
+                setSelected((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(w.id)) next.delete(w.id);
+                  else next.add(w.id);
+                  return next;
+                })
+              }
+              className="text-xs px-2.5 py-1 rounded-full border transition-colors"
+              style={{
+                background: active ? `color-mix(in srgb, ${color} 13%, transparent)` : "transparent",
+                borderColor: active ? color : "var(--color-hairline)",
+                color: active ? color : "var(--color-ink-mute)",
+              }}
+            >
+              {w.name}
+              {!w.is_active && " (inactive)"}
+            </button>
+          );
+        })}
+      </div>
+
+      <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+        Where this is kept and used — pick as many as apply. Leave it blank and the product
+        simply lists under Unassigned; stock, purchases and deductions work the same either way.
+      </p>
+    </div>
+  );
+}
+
 // ── Create / edit product ─────────────────────────────────────────────────────
 
-function ProductForm({ product, onDone }: { product?: StockRow; onDone: () => void }) {
+function ProductForm({
+  product,
+  workstations,
+  onDone,
+}: {
+  product?: StockRow;
+  workstations: WorkstationRow[];
+  onDone: () => void;
+}) {
   const editing = !!product;
   const [state, action, pending] = useActionState<ActionResult, FormData>(
     editing ? updateProduct : createProduct,
@@ -168,6 +291,8 @@ function ProductForm({ product, onDone }: { product?: StockRow; onDone: () => vo
           </p>
         </div>
       )}
+
+      <StationPicker workstations={workstations} initial={product?.workstation_ids ?? []} />
 
       {state?.error && (
         <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
@@ -952,6 +1077,8 @@ export function StockClient({
   initialSummary,
   products,
   targets,
+  workstations,
+  deductionsHref,
   today,
   canManage,
 }: {
@@ -959,6 +1086,11 @@ export function StockClient({
   initialSummary: StockSummary;
   products: ProductOption[];
   targets: LinkTarget[];
+  /** Every station, active or not, already ordered by sort_order then name. */
+  workstations: WorkstationRow[];
+  /** Where the Deduction Report lives on THIS surface — the admin and employee
+   *  routes differ, and this component serves both. */
+  deductionsHref: string;
   /** Today's BUSINESS date (YYYY-MM-DD), resolved on the server — never `new Date()` here. */
   today: string;
   canManage: boolean;
@@ -967,6 +1099,10 @@ export function StockClient({
   const [summary, setSummary] = useState(initialSummary);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<StockFilter>("all");
+  /** Station filter: a workstation id, or one of the two sentinels. Unlike search
+   *  and the status filter it never goes to the server — `rows` already holds
+   *  every product, so this is pure client-side work and lands instantly. */
+  const [station, setStation] = useState<string>(ALL_STATIONS);
   const [day, setDay] = useState(today);
   const [page, setPage] = useState(1);
   const [loading, startTransition] = useTransition();
@@ -1010,7 +1146,7 @@ export function StockClient({
     return () => clearTimeout(t);
   }, [search, filter, day, reload]);
 
-  useEffect(() => { setPage(1); }, [search, filter, day]);
+  useEffect(() => { setPage(1); }, [search, filter, day, station]);
 
   const refresh = useCallback(() => reload(search, filter, day), [reload, search, filter, day]);
 
@@ -1018,12 +1154,82 @@ export function StockClient({
   // deduction. All three push here.
   useRealtime(["stock", "purchases", "orders"], refresh);
 
-  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount);
-  const pageRows = useMemo(
-    () => rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
-    [rows, safePage]
+  // Stations worth offering as a filter: every active one, plus any inactive one
+  // still holding something — so a product tagged to a station that was later
+  // deactivated is never stranded where no filter can reach it.
+  const chipStations = useMemo(
+    () => filterableStations(workstations, rows.flatMap((r) => r.workstation_ids)),
+    [workstations, rows]
   );
+
+  const grouping = station === ALL_STATIONS && chipStations.length > 0;
+
+  /**
+   * The list to render, flattened to one entry per (station, product) pair.
+   *
+   * A product on two stations produces TWO entries and so appears under both
+   * headers — which is the agreed behaviour, and the reason a group's count and
+   * the product total don't add up. Flattening here rather than rendering nested
+   * groups is what lets the existing pagination keep working untouched: it still
+   * slices a flat array, it just slices a longer one.
+   */
+  const entries = useMemo(() => {
+    type Entry = { key: string; station: WorkstationRow | null; product: StockRow };
+
+    if (station !== ALL_STATIONS) {
+      return rows
+        .filter((r) => matchesStation(r.workstation_ids, station))
+        .map((p) => ({ key: p.id, station: null, product: p }));
+    }
+
+    if (!grouping) return rows.map((p) => ({ key: p.id, station: null, product: p }));
+
+    const out: Entry[] = [];
+    // `workstations` arrives sorted by sort_order then name, and `rows` by status
+    // then name, so both orders come for free.
+    for (const w of chipStations) {
+      for (const p of rows) {
+        if (p.workstation_ids.includes(w.id)) {
+          out.push({ key: `${w.id}:${p.id}`, station: w, product: p });
+        }
+      }
+    }
+    for (const p of rows) {
+      if (p.workstation_ids.length === 0) out.push({ key: p.id, station: null, product: p });
+    }
+    return out;
+  }, [rows, station, grouping, chipStations]);
+
+  // Per-station totals for the group headers. Counted over the whole filtered set,
+  // not the current page, so a header reads the same however the list is sliced.
+  const groupCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const e of entries) {
+      const key = e.station?.id ?? NO_STATION;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [entries]);
+
+  const pageCount = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const pageEntries = useMemo(
+    () => entries.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [entries, safePage]
+  );
+
+  /**
+   * Whether this entry starts a new group on this page. True for the first entry
+   * of a page even mid-group, so a group split across pages is labelled on both
+   * — an unheaded run of rows at the top of page 2 would read as belonging to
+   * whatever station the eye last saw.
+   */
+  const startsGroup = (i: number) =>
+    grouping && (i === 0 || pageEntries[i - 1].station?.id !== pageEntries[i].station?.id);
+
+  const groupLabel = (w: WorkstationRow | null) => (w ? w.name : "Unassigned");
+  const groupTone = (w: WorkstationRow | null) =>
+    w ? stationColor(w) : "var(--color-ink-mute)";
 
   const isToday = day === today;
 
@@ -1040,6 +1246,11 @@ export function StockClient({
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Deductions are recorded here, so this is where you'd look for what
+              they added up to. */}
+          <Button variant="secondary" size="sm" asChild>
+            <Link href={deductionsHref}><Trash2 size={14} /> Deduction report</Link>
+          </Button>
           <Button variant="secondary" size="sm" onClick={() => setLinksOpen(true)}>
             <Link2 size={14} /> Menu links
           </Button>
@@ -1127,13 +1338,27 @@ export function StockClient({
         })}
       </div>
 
-      {rows.length === 0 ? (
+      {/* Station filter. Purely client-side over a list already in memory, so it
+          switches with no spinner and no request. */}
+      <StationChips
+        stations={chipStations}
+        value={station}
+        onChange={setStation}
+        className="mb-4"
+      />
+
+
+      {entries.length === 0 ? (
         <div
           className="rounded-xl border px-6 py-12 text-center"
           style={{ borderStyle: "dashed", borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
         >
           <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
-            {search || filter !== "all"
+            {station === NO_STATION
+              ? "Every product is assigned to a workstation."
+              : station !== ALL_STATIONS
+              ? "No products at this workstation yet. Assign one by editing it."
+              : search || filter !== "all"
               ? "No products match that search."
               : "No products yet. Add the ingredients and goods you want to track."}
           </p>
@@ -1167,16 +1392,33 @@ export function StockClient({
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((p) => (
+                {pageEntries.map((entry, i) => {
+                  const p = entry.product;
+                  return (
+                  <Fragment key={entry.key}>
+                  {startsGroup(i) && (
+                    <tr style={{ background: "var(--color-canvas-soft)" }}>
+                      <td colSpan={6} className="px-4 py-2 border-t" style={{ borderColor: "var(--color-hairline)" }}>
+                        <span
+                          className="text-xs uppercase tracking-wide font-medium"
+                          style={{ color: groupTone(entry.station), letterSpacing: "0.06em" }}
+                        >
+                          {groupLabel(entry.station)}
+                        </span>
+                        <span className="text-xs ml-2" style={{ color: "var(--color-ink-mute)" }}>
+                          {groupCounts.get(entry.station?.id ?? NO_STATION) ?? 0}
+                        </span>
+                      </td>
+                    </tr>
+                  )}
                   <tr
-                    key={p.id}
                     className="border-t cursor-pointer"
                     style={{ borderColor: "var(--color-hairline)", opacity: p.is_active ? 1 : 0.5 }}
                     onClick={() => setDetailOf(p)}
                   >
                     <td className="px-4 py-3">
                       <span style={{ color: "var(--color-ink)" }}>{p.name}</span>
-                      <div className="flex items-center gap-1.5 mt-0.5">
+                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                         <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
                           {p.product_code} · {p.unit}
                         </span>
@@ -1188,6 +1430,10 @@ export function StockClient({
                             {p.link_count} menu item{p.link_count !== 1 ? "s" : ""}
                           </span>
                         )}
+                        {/* Shown even inside a group: a product sitting under
+                            Kitchen may also belong to the Bar, and only the badges
+                            say so. */}
+                        <StationPills ids={p.workstation_ids} workstations={workstations} />
                       </div>
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums" style={{ color: "var(--color-ink-mute)" }}>{qty(p.opening)}</td>
@@ -1253,16 +1499,33 @@ export function StockClient({
                       </div>
                     </td>
                   </tr>
-                ))}
+                  </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
           {/* Mobile / tablet cards */}
           <div className="lg:hidden flex flex-col gap-2">
-            {pageRows.map((p) => (
+            {pageEntries.map((entry, i) => {
+              const p = entry.product;
+              return (
+              <Fragment key={entry.key}>
+              {startsGroup(i) && (
+                <div className="flex items-baseline gap-2 px-1 pt-2 first:pt-0">
+                  <span
+                    className="text-xs uppercase tracking-wide font-medium"
+                    style={{ color: groupTone(entry.station), letterSpacing: "0.06em" }}
+                  >
+                    {groupLabel(entry.station)}
+                  </span>
+                  <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                    {groupCounts.get(entry.station?.id ?? NO_STATION) ?? 0}
+                  </span>
+                </div>
+              )}
               <div
-                key={p.id}
                 className="rounded-xl border px-4 py-3"
                 style={{
                   background: "var(--color-canvas)",
@@ -1278,6 +1541,11 @@ export function StockClient({
                         {p.product_code} · {p.unit}
                         {p.link_count > 0 && ` · ${p.link_count} menu item${p.link_count !== 1 ? "s" : ""}`}
                       </p>
+                      {p.workstation_ids.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          <StationPills ids={p.workstation_ids} workstations={workstations} />
+                        </div>
+                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-sm font-medium tabular-nums" style={{ color: STOCK_STATUS_COLOR[p.status] }}>
@@ -1336,13 +1604,19 @@ export function StockClient({
                   </div>
                 )}
               </div>
-            ))}
+              </Fragment>
+              );
+            })}
           </div>
 
           {pageCount > 1 && (
             <div className="flex items-center justify-between mt-4">
               <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, rows.length)} of {rows.length}
+                {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, entries.length)} of {entries.length}
+                {/* Grouped, this counts LISTINGS not products: a product on two
+                    stations is listed under both. Saying so beats a total that
+                    silently exceeds the Products stat card. */}
+                {grouping && entries.length !== rows.length && " listings"}
               </p>
               <div className="flex items-center gap-1">
                 <button
@@ -1374,11 +1648,17 @@ export function StockClient({
 
       {/* Modals */}
       <Modal open={creating} onClose={() => setCreating(false)} title="Add product" subtitle="An ingredient or good you want to track">
-        <ProductForm onDone={() => { setCreating(false); refresh(); }} />
+        <ProductForm workstations={workstations} onDone={() => { setCreating(false); refresh(); }} />
       </Modal>
 
       <Modal open={!!editing} onClose={() => setEditing(null)} title="Edit product" subtitle={editing?.product_code}>
-        {editing && <ProductForm product={editing} onDone={() => { setEditing(null); refresh(); }} />}
+        {editing && (
+          <ProductForm
+            product={editing}
+            workstations={workstations}
+            onDone={() => { setEditing(null); refresh(); }}
+          />
+        )}
       </Modal>
 
       <Modal

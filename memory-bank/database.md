@@ -80,6 +80,12 @@ almost everything is reached through the **service_role** client or **RPCs** (RL
   sales).
 - **stock_adjustments** — manual movements only (wastage/damage/kitchen/correction). Every reason
   removes stock; only an explicit "add" correction puts it back.
+- **product_workstations** — M2M product→station (`restaurant_id`, `product_id`, `workstation_id`,
+  PK on the last two). **Organisational only**: it groups/filters the stock list and is referenced
+  by NO other DB object — `stock_report` output is identical with it empty, set or cleared. No row
+  = "Unassigned", where every pre-existing product sits. Written whole-set by
+  `set_product_workstations` (cross-tenant station ids are filtered out, not raised); FKs all
+  `cascade`, so deleting a station unassigns rather than blocks (unlike menu_items' `restrict`).
 
 ## Menu & stations
 - **menu_categories / menu_items / menu_item_variants** — the menu. `is_deleted` soft-delete.
