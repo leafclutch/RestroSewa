@@ -99,6 +99,11 @@ export default async function EmployeeDashboardPage({
   // Billing staff (process_payments) may correct a bill's tender once a Security PIN is set —
   // the PIN is the real gate (verified + audited server-side); admin passes the permission too.
   const canEditTender = config.securityEnabled && hasPermission(restaurantUser, PERMISSIONS.PROCESS_PAYMENTS);
+  // The "M" shortcut to mock billing. Same shape as canEditTender: the Security PIN is the
+  // real gate (re-verified in `unlockMockBill`), and `print_mock_bills` — this feature's own
+  // permission, off every job preset — decides who is even offered it. No PIN set ⇒ the
+  // button doesn't exist, and neither does the route.
+  const canMockBill = config.securityEnabled && hasPermission(restaurantUser, PERMISSIONS.PRINT_MOCK_BILLS);
 
   const SCROLLABLE: SectionKey[] = ["orders", "tables", "walkins", "rooms", "sales", "credits", "menu", "stock", "purchases", "vendors"];
   const focusSection: SectionKey | null = openCreditId
@@ -265,6 +270,7 @@ export default async function EmployeeDashboardPage({
   return (
     <StaffDashboard
       sections={sections}
+      canMockBill={canMockBill}
       // Just billed to credit, or arrived from a tapped push → land in that
       // section rather than at the top of the dashboard.
       focus={focusSection}

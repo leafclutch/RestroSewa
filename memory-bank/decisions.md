@@ -255,3 +255,97 @@ follow-up. This exists so future work doesn't re-propose things already chosen o
   `summariseWaste` lives in `lib/waste.ts`, called by the action for the period and by the screen
   after a station filter — the same totals function either way. It is NOT a server action: pure
   arithmetic behind a ~130ms round trip is precisely the mistake the performance model warns about.
+
+- **Mock bills write NOTHING, and that is enforced structurally rather than by convention
+  (2026-08-07).** The Mock Bill feature had to print a document indistinguishable from a real
+  receipt while touching no stock, sale, finance figure, credit, vendor balance, bill number, OT
+  number, push or email. Two decisions carry the whole guarantee.
+
+  **(1) No `mock_bills` / `mock_bill_items` tables — nothing is persisted at all.** The obvious
+  design (mirror tables, filtered out of every report) was rejected because it inverts the safety
+  property. Every figure in this app is DERIVED from `payments`, `session_order_items`, `purchases`
+  and `stock_adjustments`; a mock row that is never written is invisible to all of them by
+  construction, whereas mirror tables would create a standing "and exclude the mock ones" clause
+  that some future `finance_report` or waste report author has to remember. Isolation you cannot
+  forget beats isolation you must maintain. The cost is real and accepted: a mock bill cannot be
+  saved or reused, and dies with the tab.
+
+  **(2) The feature's entire server surface is ONE function that checks a PIN.**
+  `app/actions/mock-bill.ts` exports only `unlockMockBill`; it constructs no Supabase client, calls
+  no RPC, and imports nothing from `actions/pos|stock|finance|purchases|credits|notifications|push`.
+  `lib/mock-bill/draft.ts` has zero runtime imports. There is no code that COULD write. That claim
+  is asserted against the SOURCE by `lib/mock-bill/isolation.test.ts` rather than against behaviour,
+  because a write that only fires on one path is exactly what a behavioural test misses. The one row
+  the feature ever writes is a `security_audit_log` entry, which no money or stock report reads.
+
+  **The mark is a caller-supplied STRING, not a prop on the shared component.** A mock bill differs
+  from a real one by a trailing "· M" on the number ("1024 · M"). The editor passes
+  `billNo={markBillNumber(n)}`, so `BillTicket` never learns mock bills exist — the alternative (a
+  `isMock` prop) would put mock-awareness inside the component that prints every real receipt in the
+  business. The single shared-component concession is `grandTotalOverride?: number`, undefined for
+  every real caller, so real output is byte-identical; it exists because a demonstrator must be able
+  to type a total rather than back-solve it out of prices.
+
+  **The PIN gate lives ON the page, not behind a token.** `/employee/mock-bill` renders a locked
+  shell; the editor component is not mounted until `unlockMockBill` returns ok. Rejected a
+  short-lived signed cookie (needs a new secret, and a cookie is a second thing that can be wrong)
+  and a dashboard-only overlay (no deep link, no PWA back button). Because the editor's existence —
+  not merely its visibility — depends on a verified server response, there is no URL that reaches
+  it. Gated on `close_bills`: someone who cannot settle a bill has no business printing something
+  that looks like one. See `modules/mock-bill.md`.
+
+- **Mock billing got its OWN permission rather than riding on `close_bills` (2026-08-07).**
+  `print_mock_bills` (group "Mock Billing"), granted per staff member in the super-admin editor.
+  *Reason:* producing a receipt indistinguishable from a real one is a distinct act from settling a
+  real table — the same reasoning that split `manage_custom_items` out of `create_orders`. It also
+  makes the useful case expressible: a demo or sales account can hold this and **nothing else**, no
+  tables, no orders, no money. **Off every job preset**, like `view_payroll`, so nobody acquires the
+  ability by inheriting a Cashier template. The Security PIN stays on top: the permission says
+  *who*, the PIN says *prove it*. **Deploy consequence:** the gate got narrower, so every cashier
+  who could reach mock billing loses the M button until an admin ticks the new box.
+
+  *No plumbing was needed to make the checkbox appear*, and that is worth knowing before anyone goes
+  looking for a UI to edit: `PermissionPicker` renders `PERMISSION_GROUPS` verbatim and
+  `parsePermissions` (`app/actions/staff.ts`) validates against `Object.values(PERMISSIONS)`, so
+  `lib/permissions.ts` is the single source for the editor, the presets and the server-side
+  whitelist alike. Adding a permission anywhere else is a mistake.
+
+  *A guard bug worth remembering, found by this change.* `isolation.test.ts` strips comments before
+  searching source, and it stripped BLOCK comments first. `dashboard/page.tsx` contains the line
+  comment `// ?focus=<section> — … a redirected legacy /employee/* page`, whose `/*` opened a match
+  that ran to the next `*/` in the file and swallowed 3,689 characters — including the permission
+  check being asserted. Line comments must be stripped FIRST. The guard had been passing for the
+  wrong reason; a naive regex over source is fine as a tripwire but is not a parser, and its failure
+  mode is silence.
+
+- **The self-hosted stack's proxy attachment is now self-healing, and "degraded" has TWO causes —
+  check the proxy network FIRST (2026-08-09).** The stack served nothing externally (bare
+  `404 page not found`, `503 no available server`) while **all 14 containers were healthy** and Kong
+  answered correctly on its own container IP from inside the droplet. Cause: `coolify-proxy` was not
+  attached to the stack's Docker network, so Traefik built the router from Kong's labels but had no
+  path to the backend. The proxy container had been **recreated 2026-08-06 18:09 / started
+  2026-08-07 12:09** and came back attached to `coolify` and the sibling stack but not this one; the
+  stack network itself was never recreated (`created 2026-07-30`, same id).
+
+  **Why this is worth recording as a decision:** the 2026-08-03 outage had the *same external
+  symptom* and a completely different cause (the Coolify `is_directory` data bug). Assuming the old
+  cause cost half a session. A bare `404 page not found` is **Traefik's default body**, not evidence
+  of anything specific. **Triage order:** `df -h` + `free -m` → `docker ps -a` (all healthy?) → curl
+  Kong on its **container IP from the droplet** → **diff `docker inspect coolify-proxy` networks
+  against the stack network** → only then the `is_directory` check.
+
+  **Fixed durably rather than by hand.** `docker network connect` is runtime state: it survives a
+  proxy *restart* but not a *recreation*, so the manual fix would have failed the same way at the
+  next Coolify upgrade. Installed `/usr/local/bin/coolify-proxy-net-reconcile.sh` +
+  `coolify-proxy-net.timer` (boot + every 5 min). It joins **only** networks containing a
+  `traefik.enable=true` container — so it cannot wire the proxy into an unrelated network — and is
+  idempotent, needing no edit when new stacks appear. Verified by deliberately detaching the proxy
+  and watching the reconciler restore it and `/pg/query` return `200`. This converts a total outage
+  into a ≤5-minute blip; it does not replace fixing a cause, it bounds the blast radius.
+
+  Also corrected in the same session: the `is_directory` landmine is **already defused** (all 20
+  rows correct, verified on disk too), the stack **is** a registered Coolify service (`services.id
+  = 3` — the "hand-run outside Coolify" theory was wrong), and the droplet was **one migration
+  behind** (`20260806000000`, since applied) with **`pg_cron` missing** (since installed; the JOB is
+  still deliberately deferred to cutover). Droplet data is stale (payments 469 vs prod 847), so the
+  cutover re-clone is mandatory regardless.

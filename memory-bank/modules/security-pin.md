@@ -25,6 +25,12 @@ edits".
   notes. Reuses the record-purchase form in edit mode; surfaced in the purchase detail modal.
 - **Security activity** — read-only audit list on the Settings page (who / what / when / outcome
   / before→after).
+- **Open the Mock Bill screen** (`open_mock_bill`, 2026-08-07) — the first reuse of the service by
+  an operation that CHANGES NOTHING. Gated because a mock bill prints indistinguishably from a real
+  one, so who produced one is the thing worth recording. Open to `close_bills` holders; success is
+  logged explicitly (no RPC to be atomic with), a missing permission logs `blocked`. It needed **no
+  migration** — `security_audit_log.operation` is plain `text` with no CHECK constraint, so a new
+  operation is a one-line addition to the `SecurityOperation` union. See `modules/mock-bill.md`.
 
 # Business Rules
 - **PIN-gated always.** The **payment tender** edit (Sales) is open to **billing staff**

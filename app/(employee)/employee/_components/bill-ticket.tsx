@@ -474,6 +474,7 @@ export function BillTicket({
   credit,
   customer,
   discount = 0,
+  grandTotalOverride,
 }: {
   restaurant: RestaurantInfo;
   billNo: string;
@@ -494,6 +495,16 @@ export function BillTicket({
   /** Knocked off at payment. Only a paid bill has one — the pre-payment preview is
    *  printed before the cashier has entered it, so it passes 0. */
   discount?: number;
+  /**
+   * Replaces the computed total on the TOTAL line. **Only the Mock Billing screen passes
+   * this** — a real bill's total is derived from its own lines and must never be typed.
+   *
+   * Every real caller (the session preview, the Sales reprint, the room folio) omits it, so
+   * this is `undefined` on every printed receipt in the business and their output is
+   * unchanged. It exists so a demonstrator can show an arbitrary figure without having to
+   * back-solve it out of prices and discounts.
+   */
+  grandTotalOverride?: number;
 }) {
   const hasCustomer = !!(
     customer &&
@@ -514,7 +525,9 @@ export function BillTicket({
   const taxable = Math.max(0, subtotal - discount);
   const tax = taxable * (taxPct / 100);
   const service = taxable * (svcPct / 100);
-  const grandTotal = taxable + tax + service;
+  // The override (mock bills only) replaces the figure on the TOTAL line and nothing else —
+  // subtotal, tax, service and discount all still print their own derived values.
+  const grandTotal = grandTotalOverride ?? taxable + tax + service;
 
   // Show the tender split whenever the bill was settled with more than one.
   const parts = payment

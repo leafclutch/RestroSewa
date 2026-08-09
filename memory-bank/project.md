@@ -7,7 +7,8 @@
 >    For a specific feature, load its **`modules/<feature>.md`** — that file is the feature's
 >    single source of truth. Load only what the task needs (typically 2–4 small files), not the
 >    whole bank. Modules: admin, staff, customer, finance, stock, rooms, printing, notifications,
->    pwa, auth, permissions, realtime, qr, tables, walkins, settings.
+>    pwa, auth, permissions, realtime, qr, tables, walkins, settings, security-pin, custom-items,
+>    mock-bill.
 > 2. Use this bank before analysing code — it is the source of truth for project knowledge.
 > 3. When a task finishes: **append/edit only the affected files** (never rewrite whole files).
 >    Move the finished task from `current-task.md` → `completed.md`; log user-facing changes in

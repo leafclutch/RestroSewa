@@ -15,7 +15,11 @@ import type { RestaurantUserContext } from "@/lib/auth/guards";
 /** Every operation the Security PIN gates. Add a member when a new sensitive op reuses it. */
 export type SecurityOperation =
   | "edit_payment_tender"
-  | "edit_purchase";
+  | "edit_purchase"
+  // Opening the Mock Billing screen. Unlike the two above it changes NOTHING — it is
+  // gated because a mock bill prints indistinguishably from a real one, so who opened
+  // the tool (and who tried and failed) is the thing worth recording.
+  | "open_mock_bill";
 
 export type SecurityAuditRow = {
   id: string;

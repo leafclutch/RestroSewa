@@ -25,6 +25,11 @@ the reference for *what* and *how*.
 - Custom items: `manage_custom_items` (own group) — add an off-menu line with a STAFF-TYPED price.
   Held apart from `create_orders` because a normal order can never set its own price
   (`lib/order-items.ts`); Cashier + Manager presets include it. See `modules/custom-items.md`.
+- Mock Billing: `print_mock_bills` (own group, 2026-08-07) — opens the PIN-gated mock billing
+  screen. Standalone, NOT a rider on `close_bills`, and **on NO preset** (like Payroll): a mock bill
+  prints indistinguishably from a real one, so it is only ever granted deliberately. Being holdable
+  alone is the point — that is how you make a demo/sales account with no other access. See
+  `modules/mock-bill.md`.
 - Menu: `view_menu`, `manage_menu`
 - Tables: `view_tables`, `manage_tables`
 - Walk-ins: `view_walkins`, `manage_walkins`
