@@ -54,6 +54,10 @@ Billing permissions gate printing/bills; OT numbering config is owner-only (Sett
 # Known Limitations
 - Currently thermal printers; kitchen and bar separated by workstation. No multi-printer routing
   layer (each station prints its own ticket).
+- `BillTicket` has one prop no real bill ever passes — `grandTotalOverride`, used only by the
+  PIN-gated Mock Bill screen (`modules/mock-bill.md`), which renders through this SAME component so
+  a demo bill and a real one cannot be told apart on paper. If you change how a bill totals or
+  formats, `lib/mock-bill/draft.ts`'s `deriveTotals` mirrors it and must move too.
 
 # Future Improvements
 - Multiple-printer routing / network print server; PDF/A4 bill option.

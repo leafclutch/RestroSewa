@@ -6,60 +6,140 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
-**Workstation reporting: Purchases by station + a new Deduction Report (2026-08-06) — CODE COMPLETE,
-verified on DEV.** The follow-on the mapping's analysis pointed at: purchases and waste were the two
-things the POS could never answer by station.
+**Mock Bill / Demo Bill (2026-08-07) — CODE COMPLETE, not yet exercised in a browser.**
+A Security-PIN-gated workspace at `/employee/mock-bill`, reached from a small **M** button on the
+staff dashboard, that composes and prints a bill **identical on paper** to a real one while writing
+nothing anywhere. For demos, customer previews, training and print-alignment testing.
 
-**A wrong premise, corrected before building.** The request was "add the workstation filter to
-purchase and waste reports". There WAS no waste report — `stock_adjustments` rows were written by
-the Manual Deduction form and then only ever read one product at a time inside `product_history`.
-So that half was building a report, not filtering one.
+**The isolation guarantee is structural, not policed** — the reason this design was chosen over the
+brief's own suggestion of `mock_bills` / `mock_bill_items` tables. Every figure in this app is
+DERIVED from `payments` / `session_order_items` / `purchases` / `stock_adjustments`, so a row that
+is never written is invisible to stock, finance, sales, analytics, credits, vendor balances, bill
+and OT numbers, push and the daily email — by construction. Mirror tables would instead have
+created a permanent "and exclude the mock ones" clause for every future report author. Nothing is
+persisted: the draft is React state and dies with the tab.
 
-**Purchases filter at the LINE, not the bill.** One supplier bill routinely mixes 4kg of chicken
-(Kitchen) with two crates of beer (Bar), and `purchases.total_amount` is the sum of both — so
-filtering bills would have reported the chicken as bar spend. Picking a station switches the list to
-purchase LINES with their own total; "All" is the familiar bill list, untouched. Verified with a
-deliberately mixed ₹9,060 bill: Bar took 8848 + CocaCola, Kitchen took 8848 + Chicken, neither saw
-the other's lines. Note Bar + Kitchen can EXCEED the bill total when a product is on both stations —
-the banner says so rather than hiding it.
+**The feature's entire server surface is one function that checks a PIN** (`unlockMockBill`). It
+constructs no Supabase client, calls no RPC, and imports nothing from
+`actions/pos|stock|finance|purchases|credits|notifications|push`. `lib/mock-bill/draft.ts` has zero
+runtime imports. `lib/mock-bill/isolation.test.ts` asserts both against the SOURCE (15 tests, all
+passing) rather than against behaviour — a write that fires on only one path is what a behavioural
+test misses.
 
-**Deduction Report** (`/admin/deductions`, `/employee/deductions`, `view_stock`, read-only) — named
-"Waste report" when first built, then renamed **throughout**: label, heading, routes, files
-(`app/actions/deductions.ts`, `lib/deductions.ts`) and identifiers (`DeductionRow`,
-`getDeductionReport`, `summariseDeductions`, `deductionsHref`). The reason label **"Waste"** was
-deliberately left alone — it is one of the six deduction reasons and `stock_adjustments.kind` still
-stores `waste`. Period picker reusing
-`businessPeriodBounds`, station + reason filters, value-removed total and a by-reason breakdown.
-Corrections that ADD stock are counted separately and never netted against the loss. Value uses each
-product's CURRENT `last_unit_cost` — an estimate the screen states, and one my own test proved:
-recording a purchase moved the value of that product's earlier waste (₹5,952 → ₹5,953).
+**Printing is the SAME component, not a copy.** `BillTicket` + `PrintModal` are purely
+presentational, so the mock screen produces props and never renders a ticket line itself. That is
+what makes "identical" true by construction and keeps it true when the real bill next changes. The
+one distinguishing mark is a trailing **"· M"** on the bill number ("1024 · M"), applied by the
+CALLER as a plain string — `BillTicket` never learns mock bills exist. No watermark, no
+MOCK/DEMO/TEST anywhere.
 
-**Shared, not copied three times:** `lib/workstations/stations.ts` holds the one definition of the
-filter rule (`matchesStation`, the `all`/`none` sentinels, `filterableStations`) and
-`components/station-chips.tsx` the one chip row; Stock was refactored onto both. `lib/deductions.ts`
-holds `summariseDeductions` so the action and the screen total identically — the screen re-totals after a
-station filter with no round trip. (A first draft had that as a server action; pure arithmetic over
-a round trip is exactly wrong in a latency-bound app.)
+**Migration: none.** `security_audit_log.operation` is plain `text` with no CHECK constraint, so
+`open_mock_bill` was a one-line addition to the `SecurityOperation` union.
 
-Files: `app/actions/deductions.ts`, `lib/deductions.ts`, `lib/workstations/stations.ts`,
-`components/station-chips.tsx`, `app/(admin)/admin/deductions/*`,
-`app/(employee)/employee/deductions/*` (new); `app/actions/purchases.ts` (`getPurchaseLines`), both
-purchases pages + client, both stock pages + client.
+**Files:** `lib/mock-bill/draft.ts`, `lib/mock-bill/isolation.test.ts`, `app/actions/mock-bill.ts`,
+`app/(employee)/employee/mock-bill/{page.tsx,_components/mock-bill-client.tsx,_components/mock-bill-editor.tsx}`
+(new); `lib/security/authorize.ts` (+1 operation), `_components/bill-ticket.tsx` (+
+`grandTotalOverride`, mock-only, undefined for every real caller so real bills are byte-identical),
+`dashboard/page.tsx` + `dashboard/_components/staff-dashboard.tsx` (the M button).
 
-**Verified on DEV in a browser:** waste totals reconcile (3337.47 + 1304.97 + 710 + 600 = 5952.44,
-with a +₹330 correction excluded); the kitchen filter re-totals to ₹5,292 and drops the Bar-only
-product and its correction; station switches fire **0 fetch calls** on all three screens; "All"
-restores the bill list; 375px has no horizontal overflow; the employee routes render on employee
-chrome. Fixed one real defect found this way: JSX ate the space before an em dash, rendering
-"purchases— other". `tsc` and `build` clean. Dev data restored (seeded waste rows and the test
-purchase deleted, `last_unit_cost` recomputed from remaining purchases, assignments cleared).
+**Its own permission: `print_mock_bills`** (group "Mock Billing", label "Print Mock Bills"), ticked
+per staff member in the super-admin restaurant detail screen. NOT a rider on `close_bills` — a
+receipt indistinguishable from a real one is a distinct act from settling a real table, and a
+demo/sales account should be grantable with this and nothing else. **Off every job preset**, like
+Payroll. Needed no UI work: `PermissionPicker` renders `PERMISSION_GROUPS` verbatim and
+`parsePermissions` validates against `Object.values(PERMISSIONS)`, so `lib/permissions.ts` is the
+single source. ⚠️ **Deploy consequence — the gate got NARROWER:** every cashier/receptionist who
+could reach mock billing loses the M button until an admin ticks the new box. Owners
+(`restaurant_admin`) bypass all checks and are unaffected.
 
-**Remaining — ops only:** unchanged from below — apply `20260806000000` to production. No new
-migration: both features read tables that already exist.
+**Six bill states, because "unpaid" is two different documents.** Cash / online / card / mixed /
+**unpaid** (the PRE-payment bill, "Status: UNPAID") / **credit** — the latter being an *unpaid bill*
+in this app's own vocabulary: closed with money still owed, printing Credit ID, "Credit a/c",
+ON CREDIT or PARTIALLY PAID, and BALANCE DUE, with an optional down payment (cash / online /
+cash+online). The credit `tendered` is DERIVED from the tender split, exactly as `paid-bill.tsx`
+does it, so a mixed down payment can never disagree with the amounts printed beside it; the balance
+floors at zero.
+
+**Verified so far:** `npx tsc --noEmit` clean; `npm run build` clean with `/employee/mock-bill`
+registered; `node --test lib/mock-bill/isolation.test.ts` 23/23; only the mock editor passes
+`grandTotalOverride` (the folio, Sales reprint and session preview pass nothing); an
+unauthenticated GET of the route returns `307 → /login`.
+
+**Remaining — in-app QA (needs a login and a Security PIN set on DEV):**
+1. **Print parity.** Print a real pre-payment bill to PDF, rebuild it on the mock page, print to
+   PDF, diff. The only difference must be the " · M". Repeat at 58mm and 80mm.
+2. **Isolation by measurement.** Record `dashboard_stats` / `finance_report` / `stock_report` /
+   `restaurants.bill_number_next` / `workstations.ot_next`, run a full mock session with several
+   prints, re-read and assert every value is unchanged; check Sales, Credits and the bell.
+3. **Access control.** No `print_mock_bills` ⇒ no button and the route redirects; PIN cleared ⇒ same;
+   direct URL ⇒ locked shell only; wrong PIN denied; both outcomes visible in Admin → Settings →
+   Security activity.
+4. **Devices** — phone portrait, tablet, installed PWA: item add/delete/reorder, the print modal
+   opening on-screen (not trapped off-viewport), the sticky totals rail.
+5. Nothing committed — user drives git.
+
+---
+
+## Parallel track — self-hosted stack (ops, 2026-08-09)
+**Outage fixed + made self-healing; cutover gaps partly closed.** The DigitalOcean/Coolify stack
+(`lvs0ylfrwhzhnrsinuobbqt8`) served nothing externally while all 14 containers were healthy:
+`coolify-proxy` was not attached to the stack's Docker network, so Traefik had a router but no path
+to Kong. Root cause was the proxy container being **recreated 2026-08-06 / started 2026-08-07** and
+coming back without this network. Full write-up in `decisions.md`.
+
+**Done:** reconciler installed (`/usr/local/bin/coolify-proxy-net-reconcile.sh` +
+`coolify-proxy-net.timer`, boot + 5 min, only networks with a `traefik.enable=true` container,
+idempotent) — **verified by detaching the proxy and watching it self-heal**, `/pg/query` back to
+`200`. Migration `20260806000000` applied (ledger 76/76, RLS on, anon/authenticated zero).
+`pg_cron` 1.6 extension installed.
+
+`pg_cron` 1.6 extension installed, and the **daily-summary job is wired and PARKED**: vault secrets
+set, `daily-summary-emails` scheduled `*/15 * * * *`, `active = false`, with `app_base_url` deliberately
+pointed at `https://REPLACE-AT-CUTOVER.invalid`. Two interlocks on purpose — the droplet's
+`report_deliveries` dedupe is per-database, so a job aimed at the live app would **re-send daily
+reports real owners already had**. At cutover: set the real URL, then `cron.alter_job(…, active := true)`
+(a plain `update cron.job` is permission-denied as `postgres`).
+
+**Structure parity is 100% clean** against production — 46 tables, 452 columns, 65 enum labels, 57
+functions, 223 constraints, 158 indexes, 33 triggers, 322 grants. The 18 parity failures are purely
+DATA (stale snapshot), so a re-clone is sufficient; `clone-db --dry-run` resolves 15,139 rows.
+
+**Open before cutover:**
+1. ~~NO TLS~~ — **FIXED 2026-08-10.** Let's Encrypt cert via Traefik's file provider
+   (`/data/coolify/proxy/dynamic/lvs0-supabase-tls.yaml`), zero downtime, no containers recreated;
+   `.env.production001` moved to `https://`. Remaining: pick the **production domain** (sslip.io is
+   fine for a migration target, not for production) and optionally add an http→https redirect.
+2. ~~Realtime / `SUPABASE_DB_URL` gate~~ — **CLOSED: not an issue.** App and database move to DO
+   together, so the Docker-internal hostname resolves and `lib/realtime/bus.ts` works untouched. Only
+   a hybrid (Vercel app + DO database) would have broken it.
+3. ~~Data re-clone~~ — **DONE 2026-08-10.** 15,139 rows cloned + 4 storage objects with `logo_url`
+   repointed; `verify-parity` returns **ALL CHECKS PASSED**, including all 24 derived-value checks
+   (6 restaurants × dashboard_stats/finance_report/finance_transactions/stock_report) — the only
+   check that catches a mangled relationship. Droplet now reads restaurants 6 / payments 848 /
+   users 42, matching production. ⚠️ **Do not run `clone-db --reset` again once the trial customer
+   is onboarded — it empties the destination.**
+4. **Nightly backups now exist** (`restrosewa-db-backup.timer`, 21:15 UTC = 03:00 Nepal, 14 kept,
+   each dump verified with `pg_restore --list` before rotation). Previously the ONLY backup on the
+   droplet was Coolify's own database. **Same-disk only** — pair with DigitalOcean snapshots.
+5. **Sizing** — user chose to keep 3.9 GB / 2 vCPU despite 3.7 GB swap and load ~5.5. Note this will
+   make a trial customer's performance look worse than DO really is (two Supabase stacks + Coolify).
+6. **Rotate `GMAIL_APP_PASSWORD`** — exposed in a diff during the TLS work on 2026-08-10.
+
+*Skipped by decision:* the Coolify UI redeploy (1a) — superseded by the reconciler; fold into cutover.
+
+⚠️ **Do not diagnose the next "degraded" from the symptom.** A bare `404 page not found` is
+Traefik's default body and matched two completely different causes on 2026-08-03 and 2026-08-09.
+Triage order is in `decisions.md`.
 
 ---
 
 ## Previous feature — shipped
+**Workstation reporting: Purchases by station + a new Deduction Report (2026-08-06).**
+Shipped to production 2026-08-07 (`d59af56`); full write-up moved to `completed.md`. Nothing left.
+
+---
+
+## Earlier feature — shipped
 **Product ↔ Workstation mapping (2026-08-06) — CODE COMPLETE, verified on DEV.**
 Products had no station while menu items always have had one, so Stock was a single
 undifferentiated list. Added `product_workstations` (M2M, `restaurant_id` carried) +
@@ -88,9 +168,12 @@ controls. DB-level: cross-tenant station id dropped, workstation delete cascades
 blocking, `delete_product` still works on a product that has stations. `tsc` and `build` clean.
 Dev data was restored afterwards (test product deleted, all assignments cleared).
 
-**Remaining — ops only:** apply `20260806000000` to production (`node scripts/migrate.mjs up --prod
---yes`). Purely additive; the app tolerates the table being absent only insofar as the query would
-error, so **DB before app**.
+**Remaining — ops only:** none. `20260806000000` was applied to production on 2026-08-07 (see the
+current feature above for the verification). Note for next time: the app shipped BEFORE the
+migration for about a day, and it degraded quietly everywhere that only READS the mapping
+(`?? []` → everything reads as Unassigned) but not on `updateProduct`, which always calls
+`set_product_workstations` and so showed "Saved the product, but its workstations didn't change" on
+every product edit. **DB before app** for anything with a write path.
 
 ⚠️ `npm run lint` is misleading in this repo: the flat config has no `files` key, so ESLint 10 skips
 every `.ts`/`.tsx` file and only lints `.next/` build output (~2000 pre-existing errors). Unrelated

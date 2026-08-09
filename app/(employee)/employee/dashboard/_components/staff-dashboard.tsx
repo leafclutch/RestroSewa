@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { ListOrdered, Banknote, LayoutGrid, BedDouble, BookOpen, ChevronDown, HandCoins, ShoppingBag, Boxes, ShoppingCart, Truck } from "lucide-react";
 import { accentOf } from "@/lib/section-colors";
 import { PlatformLogo, PlatformWordmark } from "@/components/branding/platform-logo";
@@ -138,10 +139,17 @@ function SectionCard({ section, className }: { section: DashboardSection; classN
 export function StaffDashboard({
   sections,
   focus,
+  canMockBill = false,
 }: {
   sections: DashboardSection[];
   /** Section to scroll to on arrival — set when a bill was just put on credit. */
   focus?: SectionKey | null;
+  /**
+   * Shows the discreet "M" shortcut to the PIN-gated mock-billing workspace. Computed
+   * server-side from `close_bills` + a Security PIN being set; hiding it is convenience
+   * only, since both the route and the unlock action re-check.
+   */
+  canMockBill?: boolean;
 }) {
   const jump = (key: SectionKey) => {
     document.getElementById(`sec-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -178,8 +186,10 @@ export function StaffDashboard({
 
   return (
     <div className="pb-10">
-      {/* Quick-nav — sticky under the top bar; only shows when >1 section. */}
-      {sections.length > 1 && (
+      {/* Quick-nav — sticky under the top bar. Shows when there's more than one section to
+          jump between, OR when the mock-bill shortcut needs somewhere to live: a cashier
+          with thin permissions must not lose the button just because the row is short. */}
+      {(sections.length > 1 || canMockBill) && (
         <div
           // Parks directly under the sticky top bar (56px) rather than sliding
           // beneath it. z-30 keeps it below the bar and its notification panel.
@@ -188,7 +198,8 @@ export function StaffDashboard({
             top: 56,
           }}
         >
-          <div className="max-w-6xl mx-auto flex gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+          <div className="max-w-6xl mx-auto flex items-center gap-2">
+          <div className="flex gap-2 overflow-x-auto flex-1 min-w-0" style={{ scrollbarWidth: "none" }}>
             {sections.map((s) => {
               const Icon = SECTION_ICON[s.key];
               const accent = accentOf(s.key);
@@ -209,6 +220,23 @@ export function StaffDashboard({
                 </button>
               );
             })}
+          </div>
+
+            {/* Mock billing. Sits OUTSIDE the scroller so it stays put while the section
+                chips scroll under a thumb, and stays quiet — hairline and muted ink, not a
+                tinted section chip — because it is a back-office tool, not part of the
+                floor workflow. The PIN is asked for on the page itself. */}
+            {canMockBill && (
+              <Link
+                href="/employee/mock-bill"
+                aria-label="Mock bill"
+                title="Mock bill"
+                className="shrink-0 w-9 h-9 rounded-full border flex items-center justify-center text-sm font-medium bg-canvas transition-all duration-200 active:scale-95 shadow-xs"
+                style={{ borderColor: "var(--color-hairline)", color: "var(--color-ink-mute)" }}
+              >
+                M
+              </Link>
+            )}
           </div>
         </div>
       )}

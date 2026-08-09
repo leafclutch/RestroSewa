@@ -3,6 +3,30 @@
 Chronological log of meaningful shipped features (newest first). Not every commit — only
 features worth remembering. Dates are approximate to the work, not necessarily merge dates.
 
+## 2026-08-06/07 — Workstation reporting: Purchases by station + the Deduction Report
+Shipped to production 2026-08-07 (`d59af56`, migration `20260806000000` applied and verified
+against the live schema). Two things the POS could never answer by station.
+**A wrong premise, corrected before building:** the request was "add the workstation filter to the
+purchase and waste reports", but there WAS no waste report — `stock_adjustments` had been written
+since the stock module shipped and was only ever read one product at a time inside
+`product_history`. Half the task was building a report, not filtering one.
+**Purchases filter at the LINE, not the bill**, because one supplier bill routinely mixes chicken
+(Kitchen) with beer (Bar) and `purchases.total_amount` is the sum of both. Picking a station
+switches the list to purchase LINES with their own total; "All" keeps the familiar bill list. Bar +
+Kitchen can EXCEED a bill's total when a product belongs to both stations — stated on screen rather
+than hidden. Stat cards stay whole-restaurant: cash/online/credit are facts about a whole bill.
+**Deduction Report** (`/admin/deductions`, `/employee/deductions`, `view_stock`, read-only, no
+migration). Renamed throughout from "Waste report" — but the reason LABEL "Waste" was deliberately
+left alone, since it is one of the six deduction reasons and `stock_adjustments.kind` still stores
+`waste`. A correction that ADDS stock is counted separately and never nets against the loss.
+Value uses each product's CURRENT `last_unit_cost`, an estimate the screen states on its face —
+proved by the work itself: recording a purchase moved the value of that product's earlier waste.
+**Shared, not copied three times:** `lib/workstations/stations.ts` (`matchesStation`, the
+`all`/`none` sentinels) and `components/station-chips.tsx`; Stock was refactored onto both.
+`summariseDeductions` lives in `lib/deductions.ts` and is NOT a server action — pure arithmetic
+behind a ~130ms round trip is exactly what the performance model warns against. Station switches
+fire **0 fetch calls** on all three screens. See `decisions.md` for the full rules.
+
 ## 2026-08 — Room billing unification: one bill, before and after payment
 A room bill and a table bill were two different documents built by two different renderers, and
 the room one was wrong in three separate ways. There was never a separate billing *architecture*

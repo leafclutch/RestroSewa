@@ -12,6 +12,12 @@ export const PERMISSIONS = {
   // create_orders on purpose: a normal order can never set its own price (lib/order-items.ts),
   // so putting an arbitrary amount on a bill is a distinct, more-trusted act.
   MANAGE_CUSTOM_ITEMS: "manage_custom_items",
+  // Mock billing — printing a demo/training bill that is indistinguishable from a real one
+  // (see modules/mock-bill.md). Its OWN permission, not a rider on close_bills, for two
+  // reasons: producing a convincing receipt is a distinct act from settling a real table,
+  // and a demo/sales account should be grantable with this and nothing else. Still
+  // Security-PIN gated on top — this decides who is offered it, the PIN authorizes it.
+  PRINT_MOCK_BILLS: "print_mock_bills",
   // Menu
   VIEW_MENU:        "view_menu",
   MANAGE_MENU:      "manage_menu",
@@ -87,6 +93,15 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
       // Adding a manual/off-menu line with a staff-typed price. Separate from Create Orders
       // because it lets staff put an arbitrary amount on a bill.
       { key: "manage_custom_items", label: "Add Custom Items" },
+    ],
+  },
+  {
+    label: "Mock Billing",
+    items: [
+      // Off every preset on purpose — like Payroll, this is only ever granted deliberately.
+      // A mock bill prints indistinguishably from a real one, so nobody should acquire the
+      // ability by inheriting a job template.
+      { key: "print_mock_bills", label: "Print Mock Bills" },
     ],
   },
   {

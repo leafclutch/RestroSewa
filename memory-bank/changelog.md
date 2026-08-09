@@ -17,6 +17,22 @@ Versioning is informal (the app ships continuously); dates anchor the entries.
   **BILL** either way, printed slightly larger and bolder. Only the PAID/tender block changes. (If
   you've set the label to "Order No" in Settings, that still wins — and now applies to both.)
 ### Added
+- **New: Mock bills, for demos and training.** A small **M** button on the dashboard opens a mock
+  billing screen behind the Security PIN. It has its **own permission** — "Mock Billing → Print Mock
+  Bills", ticked per staff member on the staff screen. It is **off by default for everyone**,
+  including Cashiers and Managers, so you decide exactly who can demo; you can also make an account
+  that can print mock bills and do nothing else at all. Everything
+  on it is editable — restaurant header, table, customer, bill number, date and time, items, prices,
+  quantities, discount, tax, payment method, even the total — and it prints exactly like a real bill
+  on the same thermal paper. It covers every kind of bill you actually hand out: paid (cash, online,
+  card or a cash+online split), **unpaid** (the bill you print before taking payment), and **on
+  credit** — with a Credit ID, the account name, an optional amount paid at billing, and the balance
+  due, printing as ON CREDIT or PARTIALLY PAID just like the real thing. **Nothing you do there is saved or counted:** no stock is deducted, no
+  sale is recorded, no bill or ticket number is used up, and it never appears in Sales, Finance,
+  reports or the daily email. Mock bills carry one quiet mark so your team can recognise one — a
+  small "M" after the bill number ("Bill No 1024 · M"). Every attempt to open the screen, successful
+  or not, is listed in Admin → Settings → Security activity. If no Security PIN is set, the button
+  doesn't appear.
 - **Your phone number can now be printed on bills.** Admin → Settings → Bill header has a phone
   field next to the PAN; it prints on the line under the PAN. Leave it blank to omit it.
 - **New: a Deduction Report** (Stock → "Deduction report"). Everything deducted by hand —
