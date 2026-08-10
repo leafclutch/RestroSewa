@@ -319,7 +319,11 @@ export async function getAllMenuItems(restaurantId: string): Promise<MenuItemRow
     .eq("restaurant_id", restaurantId)
     .eq("is_deleted", false)
     .order("sort_order")
-    .order("name");
+    // Tiebreak on creation order, NOT name — the same rule getMenuCategories follows.
+    // A `name` tiebreak is what silently turned an unordered menu alphabetical on the
+    // customer site and the POS; with sort_order now always set this should never be
+    // reached, and if it ever is, it must not reintroduce the bug.
+    .order("created_at");
 
   if (!data) return [];
   return (data as Record<string, unknown>[]).map(normalizeItem);
@@ -338,7 +342,8 @@ export async function getMenuItemsByCategory(
     .eq("category_id", categoryId)
     .eq("is_deleted", false)
     .order("sort_order")
-    .order("name");
+    // See getAllMenuItems — creation order, never name.
+    .order("created_at");
 
   if (!data) return [];
   return (data as Record<string, unknown>[]).map(normalizeItem);
@@ -372,6 +377,21 @@ export async function createMenuItem(
 
   if (!cat) return { error: "Category not found." };
 
+  // Append to the END of the category, exactly as createCategory and createVariant do.
+  //
+  // This was the bug behind "the menu shows alphabetically": sort_order was never set, so
+  // every item sat at the default 0 and the `name` tiebreak in the read decided the order —
+  // on the customer site and the POS both. A menu typed in from a printed card came out
+  // rearranged. See 20260810000000_menu_item_order.sql.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: last } = await (service as any)
+    .from("menu_items")
+    .select("sort_order")
+    .eq("category_id", categoryId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any).from("menu_items").insert({
     restaurant_id: restaurantId,
@@ -382,6 +402,7 @@ export async function createMenuItem(
     price,
     food_type: foodType,
     availability_status: "available",
+    sort_order: Number(last?.sort_order ?? 0) + 1,
   });
 
   if (error) return { error: error.message };
@@ -454,6 +475,67 @@ export async function updateMenuItem(
   }).eq("id", id);
 
   if (error) return { error: error.message };
+  revalidatePath("/admin/menu");
+  revalidatePath("/employee/menu");
+  return null;
+}
+
+/**
+ * Move an item up or down within its category.
+ *
+ * Mirrors `moveCategory` exactly, including the neighbour-not-index approach. Until this
+ * existed there was NO way to reorder items at all — which is why `sort_order` rotted
+ * unnoticed for so long: a wrong order could not be corrected, only lived with.
+ *
+ * The neighbour search is scoped to the item's own category, so "up" at the top of a
+ * category is a no-op rather than a jump into the category above.
+ */
+export async function moveItem(
+  id: string,
+  direction: "up" | "down"
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!hasPermission(ru, PERMISSIONS.MANAGE_MENU)) return { error: "Permission denied." };
+
+  const service = createServiceClient();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: me } = await (service as any)
+    .from("menu_items")
+    .select("id, sort_order, category_id")
+    .eq("id", id)
+    .eq("restaurant_id", ru.restaurant_id)
+    .eq("is_deleted", false)
+    .maybeSingle();
+
+  if (!me) return { error: "Item not found." };
+
+  // The nearest neighbour on that side — not `sort_order ± 1`, which breaks the moment
+  // positions aren't perfectly contiguous (a deleted item leaves a gap).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: neighbour } = await (service as any)
+    .from("menu_items")
+    .select("id")
+    .eq("restaurant_id", ru.restaurant_id)
+    .eq("category_id", me.category_id)
+    .eq("is_deleted", false)
+    .filter("sort_order", direction === "up" ? "lt" : "gt", me.sort_order)
+    .order("sort_order", { ascending: direction !== "up" })
+    .limit(1)
+    .maybeSingle();
+
+  // Already first / last in its category — a no-op, not an error.
+  if (!neighbour) return null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).rpc("swap_menu_item_order", {
+    p_restaurant_id: ru.restaurant_id,
+    p_a: me.id,
+    p_b: neighbour.id,
+  });
+
+  if (error) return { error: "Could not reorder the item." };
+
   revalidatePath("/admin/menu");
   revalidatePath("/employee/menu");
   return null;

@@ -127,6 +127,38 @@ DATA (stale snapshot), so a re-clone is sufficient; `clone-db --dry-run` resolve
 
 *Skipped by decision:* the Coolify UI redeploy (1a) — superseded by the reconciler; fold into cutover.
 
+### Restaurant moved self-hosted → hosted production (2026-08-10)
+**"Hotel GlasGow In & Restaurant"** (`a8177433-e9ea-45a3-869f-4eb7dbab752a`) was onboarded on the
+**DigitalOcean stack**, not on dev and not on production — so the live app could not see it. All
+**87 rows** were copied to hosted production (`qsccnzgrhrnjggyymefr`) with every primary key
+preserved: 6 `auth.users` + 6 `auth.identities`, the restaurant, 6 staff, 2 table groups, 8 tables,
+4 room types, 18 rooms, 24 `restaurant_user_room_types`, 12 `restaurant_user_table_groups`.
+It has **no menu items, no products and no workstations** — those still have to be built in the
+live app before it can take an order.
+
+Why it was a plain insert and not `clone-db.mjs`: that script is whole-database, and it *refuses*
+to write to production by design. This was a scoped, additive, single-transaction copy instead.
+
+Points worth keeping:
+- **No `session_replication_role = replica`** — we are not superuser on hosted Supabase. Checked
+  first that the only triggers on the destination tables are the `rs_notify_change()` NOTIFY pair,
+  which rewrite nothing, so FK insert order was the only thing carrying correctness.
+- **`postgres` on hosted Supabase CAN insert into `auth.users` / `auth.identities`.** Copying the
+  bcrypt hash means all 6 staff PINs work unchanged and no password was ever seen or reset.
+- **The destination being a real `pg` connection bought a whole-run transaction**, which the HTTP
+  shim cannot give (each request is its own connection) — worth having against a live database.
+- ⚠️ **Both databases now hold this restaurant with the SAME primary keys.** If the customer trades
+  on the DO stack *and* on production they diverge silently, and a cutover `clone-db --reset`
+  overwrites whichever side is behind. Pick ONE side for this client now.
+
+**Verified:** every one of the 10 relations hashes IDENTICAL to the source (server-side `md5` over
+`to_jsonb` per row under UTC, so nothing passes through a JS type); `dashboard_stats` and
+`finance_report` execute on production for the new id and return zeros, correct for a restaurant
+with no history; 8/8 QR tokens intact; all 6 `emp-<id>@restrosewa.internal` logins present with a
+password hash. *Note for next time:* a first pass compared JS values and reported 9 tables as
+differing — that was node-postgres parsing `timestamptz` into a millisecond `Date` while the HTTP
+shim returned all six digits as a string. **Never diff two databases through JS date values.**
+
 ⚠️ **Do not diagnose the next "degraded" from the symptom.** A bare `404 page not found` is
 Traefik's default body and matched two completely different causes on 2026-08-03 and 2026-08-09.
 Triage order is in `decisions.md`.

@@ -15,6 +15,7 @@ import {
   createMenuItem,
   updateMenuItem,
   softDeleteMenuItem,
+  moveItem,
   toggleCategoryStatus,
   toggleItemAvailability,
   deleteCategory,
@@ -956,10 +957,19 @@ function ItemEditPanel({
 
 // ─── Item Card ────────────────────────────────────────────────────────────────
 
-function ItemCard({ item }: { item: MenuItemRow }) {
+function ItemCard({
+  item,
+  isFirst = false,
+  isLast = false,
+}: {
+  item: MenuItemRow;
+  isFirst?: boolean;
+  isLast?: boolean;
+}) {
   const [editing, setEditing] = useState(false);
   const [, startToggle] = useTransition();
   const [, startDelete] = useTransition();
+  const [moving, startMove] = useTransition();
 
   const isAvailable = item.availability_status === "available";
 
@@ -980,6 +990,34 @@ function ItemCard({ item }: { item: MenuItemRow }) {
             <span className="ml-1.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>+variants</span>
           )}
         </p>
+
+        {/* Reorder within the category. This order is what the CUSTOMER menu and the POS
+            show, so the arrows are the only way to arrange it — the list is no longer
+            alphabetical. Same control the categories above have. */}
+        <div className="flex items-center shrink-0">
+          <button
+            type="button"
+            title="Move up"
+            aria-label={`Move ${item.name} up`}
+            disabled={isFirst || moving}
+            onClick={() => startMove(async () => { await moveItem(item.id, "up"); })}
+            className="p-1 rounded-md disabled:opacity-25"
+            style={{ color: "var(--color-ink-mute)" }}
+          >
+            <ChevronUp size={14} />
+          </button>
+          <button
+            type="button"
+            title="Move down"
+            aria-label={`Move ${item.name} down`}
+            disabled={isLast || moving}
+            onClick={() => startMove(async () => { await moveItem(item.id, "down"); })}
+            className="p-1 rounded-md disabled:opacity-25"
+            style={{ color: "var(--color-ink-mute)" }}
+          >
+            <ChevronDown size={14} />
+          </button>
+        </div>
 
         <StatusBadge status={item.availability_status} />
 
@@ -1273,8 +1311,13 @@ function CategoryAccordion({
               </button>
             </p>
           )}
-          {catItems.map((item) => (
-            <ItemCard key={item.id} item={item} />
+          {catItems.map((item, i) => (
+            <ItemCard
+              key={item.id}
+              item={item}
+              isFirst={i === 0}
+              isLast={i === catItems.length - 1}
+            />
           ))}
           {addingItem && (
             <AddItemForm
