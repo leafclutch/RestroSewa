@@ -1,0 +1,341 @@
+{
+  "_meta": {
+    "restaurant": "Hotel GlasGow In & Restaurant",
+    "restaurant_id": "a8177433-e9ea-45a3-869f-4eb7dbab752a",
+    "database": "HOSTED PRODUCTION (qsccnzgrhrnjggyymefr)",
+    "source": "7 photos in public/WhatsApp Image 2026-08-10 at 11.08.*.jpeg",
+    "parsed": "2026-08-10",
+    "workstations": {
+      "kitchen": "f5f068a1-0100-4830-baaf-031f4074670f",
+      "bar": "e9f51ce9-c74e-4b8d-a700-b0f8dbe89c86"
+    },
+    "note": "Menu prints '13% VAT' on every page. CONFIRMED 2026-08-10: prices are VAT-INCLUSIVE, so tax_percent stays 0 and the bill total equals the menu price.",
+    "confirmed_by_owner": [
+      "Breakfast prices as listed below (Cheese Omlet 150, Boil Egg 80) - confirmed.",
+      "Tea & Coffee -> Kitchen station - confirmed.",
+      "Combo rows split into variants: Dew/Pepsi/Slice, Fruit Juice, Alu/Paneer Paratha - confirmed."
+    ],
+    "STILL_WORTH_A_GLANCE": [
+      "Black Lebel Qtr (2200) and Double Black Qtr (2500) sat under camera glare in the photo.",
+      "Trangle Shape B.B.Q. Pizza 150 is much cheaper than the other pizzas (290-350)."
+    ]
+  },
+
+  "categories": [
+    { "name": "Breakfast", "station": "kitchen", "sort": 1, "items": [
+      { "name": "Plain Toast", "price": 85, "food_type": "veg" },
+      { "name": "Butter Toast", "price": 100, "food_type": "veg" },
+      { "name": "Jam Toast", "price": 100, "food_type": "veg" },
+      { "name": "Fried Egg", "price": 100, "food_type": "egg" },
+      { "name": "Masala Omlet", "price": 130, "food_type": "egg" },
+      { "name": "Cheese Omlet", "price": 150, "food_type": "egg", "_uncertain": "price" },
+      { "name": "Boil Egg", "price": 80, "food_type": "egg", "_uncertain": "price" },
+      { "name": "Alu/Paneer Paratha", "price": 120, "food_type": "veg",
+        "variants": [ { "name": "Alu", "price": 120 }, { "name": "Paneer", "price": 160 } ] }
+    ]},
+
+    { "name": "Tea & Coffee", "station": "kitchen", "sort": 2, "items": [
+      { "name": "Black Tea", "price": 25, "food_type": "veg" },
+      { "name": "Milk Tea", "price": 35, "food_type": "veg" },
+      { "name": "Black Coffee", "price": 40, "food_type": "veg" },
+      { "name": "Milk Coffee", "price": 50, "food_type": "veg" },
+      { "name": "Hot Chocolate", "price": 120, "food_type": "veg" },
+      { "name": "Cold Coffee", "price": 100, "food_type": "veg" },
+      { "name": "Milk Shake", "price": 100, "food_type": "veg" },
+      { "name": "Plain Lassi", "price": 90, "food_type": "veg" },
+      { "name": "Mineral Water", "price": 50, "food_type": "veg" },
+      { "name": "Fruit Lassi", "price": 150, "food_type": "veg" }
+    ]},
+
+    { "name": "Noodle", "station": "kitchen", "sort": 3, "items": [
+      { "name": "Veg Noodle", "price": 120, "food_type": "veg" },
+      { "name": "Egg Noodle", "price": 150, "food_type": "egg" },
+      { "name": "Chicken Noodle", "price": 180, "food_type": "non_veg" },
+      { "name": "Paneer Noodle", "price": 200, "food_type": "veg" },
+      { "name": "Mutton Noodle", "price": 250, "food_type": "non_veg" },
+      { "name": "Mushroom Noodle", "price": 200, "food_type": "veg" },
+      { "name": "Mix Noodle", "price": 280, "food_type": "non_veg" },
+      { "name": "Hakka Noodle", "price": 250, "food_type": "veg" },
+      { "name": "Sczwan Style Noodle", "price": 200, "food_type": "veg" }
+    ]},
+
+    { "name": "Cold Drink", "station": "bar", "sort": 4, "items": [
+      { "name": "Dew/Pepsi/Slice", "price": 80, "food_type": "veg", "variants": [
+        { "name": "Dew", "price": 80 }, { "name": "Pepsi", "price": 80 }, { "name": "Slice", "price": 80 } ] },
+      { "name": "Red Bull", "price": 250, "food_type": "veg" },
+      { "name": "Can Juice", "price": 150, "food_type": "veg" },
+      { "name": "Fruit Juice", "price": 120, "food_type": "veg", "variants": [
+        { "name": "Mix", "price": 120 }, { "name": "Mango", "price": 120 },
+        { "name": "Orange", "price": 120 }, { "name": "Guava", "price": 120 },
+        { "name": "Pineapple", "price": 120 } ] }
+    ]},
+
+    { "name": "Mo:Mo", "station": "kitchen", "sort": 5, "items": [
+      { "name": "Veg Mo:Mo", "price": 150, "food_type": "veg" },
+      { "name": "Veg 'C' Mo:Mo", "price": 180, "food_type": "veg" },
+      { "name": "Veg Open Mo:Mo", "price": 180, "food_type": "veg" },
+      { "name": "Veg Fry Mo:Mo", "price": 180, "food_type": "veg" },
+      { "name": "Veg Kothey Mo:Mo", "price": 180, "food_type": "veg" },
+      { "name": "Veg Soup Mo:Mo", "price": 180, "food_type": "veg" },
+      { "name": "Chicken Mo:Mo", "price": 220, "food_type": "non_veg" },
+      { "name": "Chicken 'C' Mo:Mo", "price": 220, "food_type": "non_veg" },
+      { "name": "Chicken Open Mo:Mo", "price": 220, "food_type": "non_veg" },
+      { "name": "Chicken Fry Mo:Mo", "price": 220, "food_type": "non_veg" },
+      { "name": "Chicken Kothey Mo:Mo", "price": 220, "food_type": "non_veg" },
+      { "name": "Chicken Soup Mo:Mo", "price": 220, "food_type": "non_veg" },
+      { "name": "Mutton Mo:Mo", "price": 250, "food_type": "non_veg" },
+      { "name": "Mutton 'C' Mo:Mo", "price": 280, "food_type": "non_veg" },
+      { "name": "Mutton Open Mo:Mo", "price": 280, "food_type": "non_veg" },
+      { "name": "Mutton Fry Mo:Mo", "price": 280, "food_type": "non_veg" },
+      { "name": "Mutton Kothey Mo:Mo", "price": 280, "food_type": "non_veg" },
+      { "name": "Mutton Soup Mo:Mo", "price": 290, "food_type": "non_veg" }
+    ]},
+
+    { "name": "Fish", "station": "kitchen", "sort": 6, "items": [
+      { "name": "Fish Fry with Bone", "price": 350, "food_type": "non_veg" }
+    ]},
+
+    { "name": "Choupsey", "station": "kitchen", "sort": 7, "items": [
+      { "name": "Veg Choupsey", "price": 180, "food_type": "veg" },
+      { "name": "Chicken Choupsey", "price": 230, "food_type": "non_veg" },
+      { "name": "American Choupsey", "price": 290, "food_type": "non_veg" }
+    ]},
+
+    { "name": "Sausage", "station": "kitchen", "sort": 8, "items": [
+      { "name": "Boiled Sausage", "price": 200, "food_type": "non_veg" },
+      { "name": "Fry Sausage", "price": 250, "food_type": "non_veg" },
+      { "name": "Stick Sausage", "price": 220, "food_type": "non_veg" },
+      { "name": "Chilly Sausage", "price": 300, "food_type": "non_veg" }
+    ]},
+
+    { "name": "Veg Snacks", "station": "kitchen", "sort": 9, "items": [
+      { "name": "Veg Boil", "price": 170, "food_type": "veg" },
+      { "name": "Mix Veg Boil", "price": 200, "food_type": "veg" },
+      { "name": "Cheese Ball", "price": 200, "food_type": "veg" },
+      { "name": "Crispy Chilly Potato", "price": 170, "food_type": "veg" },
+      { "name": "Mushroom Chilly", "price": 280, "food_type": "veg" },
+      { "name": "Mushroom Choila", "price": 250, "food_type": "veg" },
+      { "name": "Bhatmass Sadheko", "price": 150, "food_type": "veg" },
+      { "name": "Wai Wai Sadheko", "price": 150, "food_type": "veg" },
+      { "name": "Peanuts Sadheko", "price": 150, "food_type": "veg" },
+      { "name": "Ghamanja", "price": 180, "food_type": "veg" },
+      { "name": "French Fry", "price": 180, "food_type": "veg" },
+      { "name": "Prawan Chips", "price": 150, "food_type": "veg" },
+      { "name": "Kajoo Fry & Dry", "price": 300, "food_type": "veg" },
+      { "name": "Corn Salt Paper", "price": 230, "food_type": "veg" },
+      { "name": "Chilly Paneer", "price": 300, "food_type": "veg" },
+      { "name": "Paneer 65", "price": 290, "food_type": "veg" },
+      { "name": "Crunchy Paneer", "price": 290, "food_type": "veg" },
+      { "name": "Veg Tempuri", "price": 250, "food_type": "veg" }
+    ]},
+
+    { "name": "Biryani & Rice", "station": "kitchen", "sort": 10, "items": [
+      { "name": "Veg Biryani", "price": 280, "food_type": "veg" },
+      { "name": "Chicken Biryani", "price": 320, "food_type": "non_veg" },
+      { "name": "Egg Biryani", "price": 300, "food_type": "egg" },
+      { "name": "Mutton Biryani", "price": 380, "food_type": "non_veg" },
+      { "name": "Chicken Hydrabadi Biryani", "price": 350, "food_type": "non_veg" },
+      { "name": "Jeera Rice", "price": 150, "food_type": "veg" },
+      { "name": "Plain Rice", "price": 120, "food_type": "veg" },
+      { "name": "Veg Pulau", "price": 175, "food_type": "veg" },
+      { "name": "Peas Pulau", "price": 175, "food_type": "veg" }
+    ]},
+
+    { "name": "Pizza", "station": "kitchen", "sort": 11, "items": [
+      { "name": "Veg & Cheese Pizza", "price": 290, "food_type": "veg" },
+      { "name": "Chicken Pizza", "price": 320, "food_type": "non_veg" },
+      { "name": "Trangle Shape B.B.Q. Pizza", "price": 150, "food_type": "non_veg", "_uncertain": "price" },
+      { "name": "Mix Pizza", "price": 350, "food_type": "non_veg" }
+    ]},
+
+    { "name": "Non-Veg Snacks", "station": "kitchen", "sort": 12, "items": [
+      { "name": "Chicken Drums of Heaven", "price": 350, "food_type": "non_veg" },
+      { "name": "Duck Choila", "price": 350, "food_type": "non_veg" },
+      { "name": "Crispy Chicken", "price": 300, "food_type": "non_veg" },
+      { "name": "Chicken Roast", "price": 300, "food_type": "non_veg" },
+      { "name": "Crunchy Chicken", "price": 300, "food_type": "non_veg" },
+      { "name": "Chilly Wings", "price": 350, "food_type": "non_veg" },
+      { "name": "Flackey Chicken Fry", "price": 350, "food_type": "non_veg" },
+      { "name": "B.B.Q Wings", "price": 350, "food_type": "non_veg" },
+      { "name": "Timur Chicken", "price": 350, "food_type": "non_veg" },
+      { "name": "Chicken Manchurian", "price": 320, "food_type": "non_veg" },
+      { "name": "Chicken 65", "price": 300, "food_type": "non_veg" },
+      { "name": "Chicken Leg Pcs", "price": 350, "food_type": "non_veg" },
+      { "name": "Chicken Chilly", "price": 320, "food_type": "non_veg" },
+      { "name": "Chicken Tass", "price": 300, "food_type": "non_veg" },
+      { "name": "Chicken Sadheko", "price": 290, "food_type": "non_veg" },
+      { "name": "Chicken Chhoila", "price": 300, "food_type": "non_veg" },
+      { "name": "Chicken Lalipop", "price": 330, "food_type": "non_veg" },
+      { "name": "Gralic Chicken", "price": 330, "food_type": "non_veg" },
+      { "name": "Szechuan Chicken", "price": 350, "food_type": "non_veg" },
+      { "name": "Non Veg Mix Boil", "price": 300, "food_type": "non_veg" }
+    ]},
+
+    { "name": "Thuppa", "station": "kitchen", "sort": 13, "items": [
+      { "name": "Veg Thuppa", "price": 150, "food_type": "veg" },
+      { "name": "Mushroom Thuppa", "price": 170, "food_type": "veg" },
+      { "name": "Chicken Thuppa", "price": 190, "food_type": "non_veg" },
+      { "name": "Mutton Thuppa", "price": 230, "food_type": "non_veg" },
+      { "name": "Mix Thuppa", "price": 250, "food_type": "non_veg" }
+    ]},
+
+    { "name": "Soup", "station": "kitchen", "sort": 14, "items": [
+      { "name": "Veg Soup", "price": 120, "food_type": "veg" },
+      { "name": "Mushroom Soup", "price": 150, "food_type": "veg" },
+      { "name": "Chicken Soup", "price": 180, "food_type": "non_veg" },
+      { "name": "Veg Hot & Sour Soup", "price": 130, "food_type": "veg" },
+      { "name": "Chicken Hot & Sour Soup", "price": 180, "food_type": "non_veg" }
+    ]},
+
+    { "name": "Mutton Item", "station": "kitchen", "sort": 15, "items": [
+      { "name": "Mutton Fry", "price": 320, "food_type": "non_veg" },
+      { "name": "Mutton Tass", "price": 335, "food_type": "non_veg" },
+      { "name": "Mutton 65", "price": 350, "food_type": "non_veg" },
+      { "name": "Mutton Chilly", "price": 350, "food_type": "non_veg" },
+      { "name": "Mutton Sadheko", "price": 295, "food_type": "non_veg" },
+      { "name": "Mutton Choila", "price": 330, "food_type": "non_veg" }
+    ]},
+
+    { "name": "Indian Bread", "station": "kitchen", "sort": 16, "items": [
+      { "name": "Plain Naan (Tawa)", "price": 35, "food_type": "veg" },
+      { "name": "Butter Naan (Tawa)", "price": 40, "food_type": "veg" },
+      { "name": "Garlic Naan (Tawa)", "price": 40, "food_type": "veg" },
+      { "name": "Tawa Roti", "price": 25, "food_type": "veg" },
+      { "name": "Lachha Paratha (Tawa)", "price": 100, "food_type": "veg" }
+    ]},
+
+    { "name": "Non Veg Curry", "station": "kitchen", "sort": 17, "items": [
+      { "name": "Chicken Dopyaza", "price": 300, "food_type": "non_veg" },
+      { "name": "Chicken Curry", "price": 300, "food_type": "non_veg" },
+      { "name": "Mutton Curry", "price": 350, "food_type": "non_veg" },
+      { "name": "Butter Chicken Masala", "price": 450, "food_type": "non_veg" },
+      { "name": "Kadhai Chicken", "price": 300, "food_type": "non_veg" },
+      { "name": "Egg Curry", "price": 200, "food_type": "egg" },
+      { "name": "Balti Chicken", "price": 300, "food_type": "non_veg" }
+    ]},
+
+    { "name": "Thali Set", "station": "kitchen", "sort": 18, "items": [
+      { "name": "Veg Thali Set", "price": 350, "food_type": "veg",
+        "description": "Rice, Dal Fry, Mix Veg, Dal/Mohi etc." },
+      { "name": "Chicken Thali Set", "price": 450, "food_type": "non_veg",
+        "description": "Rice, Dal Fry, Mix Veg, Chicken Curry Dal/Mohi etc." },
+      { "name": "Mutton Thali Set", "price": 550, "food_type": "non_veg",
+        "description": "Rice, Dal Fry, Mix Veg, Mutton Curry Dal/Mohi etc." },
+      { "name": "Fish Thali Set", "price": 450, "food_type": "non_veg" }
+    ]},
+
+    { "name": "Fried Rice", "station": "kitchen", "sort": 19, "items": [
+      { "name": "Veg Fried Rice", "price": 175, "food_type": "veg" },
+      { "name": "Egg Fried Rice", "price": 200, "food_type": "egg" },
+      { "name": "Chicken Fried Rice", "price": 250, "food_type": "non_veg" },
+      { "name": "Mutton Fried Rice", "price": 270, "food_type": "non_veg" },
+      { "name": "Mix Fried Rice", "price": 295, "food_type": "non_veg" }
+    ]},
+
+    { "name": "Veg Curry", "station": "kitchen", "sort": 20, "items": [
+      { "name": "Mix Veg Curry", "price": 150, "food_type": "veg" },
+      { "name": "Matar Paneer", "price": 290, "food_type": "veg" },
+      { "name": "Butter Paneer Masala", "price": 450, "food_type": "veg" },
+      { "name": "Mushroom Curry", "price": 220, "food_type": "veg" },
+      { "name": "Shahi Paneer", "price": 300, "food_type": "veg" },
+      { "name": "Kadhai Paneer", "price": 330, "food_type": "veg" },
+      { "name": "Dal Fry", "price": 150, "food_type": "veg" }
+    ]},
+
+    { "name": "Papad", "station": "kitchen", "sort": 21, "items": [
+      { "name": "Papad Dry", "price": 30, "food_type": "veg" },
+      { "name": "Papad Fried", "price": 50, "food_type": "veg" },
+      { "name": "Papad Masala", "price": 100, "food_type": "veg" }
+    ]},
+
+    { "name": "Spring Roll", "station": "kitchen", "sort": 22, "items": [
+      { "name": "Veg Spring Roll", "price": 150, "food_type": "veg" },
+      { "name": "Egg Spring Roll", "price": 180, "food_type": "egg" },
+      { "name": "Chicken Spring Roll", "price": 200, "food_type": "non_veg" }
+    ]},
+
+    { "name": "Salad", "station": "kitchen", "sort": 23, "items": [
+      { "name": "Green Salad", "price": 120, "food_type": "veg" },
+      { "name": "Nepali Salad", "price": 120, "food_type": "veg" },
+      { "name": "Fruit Salad", "price": 300, "food_type": "veg" },
+      { "name": "Kuchumbar Salad", "price": 120, "food_type": "veg" }
+    ]},
+
+    { "name": "Pakauda", "station": "kitchen", "sort": 24, "items": [
+      { "name": "Mix Veg Pakauda", "price": 150, "food_type": "veg" },
+      { "name": "Egg Pakauda", "price": 150, "food_type": "egg" },
+      { "name": "Mushroom Pakauda", "price": 195, "food_type": "veg" },
+      { "name": "Tikka Pakauda", "price": 150, "food_type": "veg" },
+      { "name": "Paneer Pakauda", "price": 220, "food_type": "veg" }
+    ]},
+
+    { "name": "Hard Drinks", "station": "bar", "sort": 25,
+      "_variant_scheme": "Every item has 4 variants: 60Ml / Qtr / Half / Full. Item price = the 60Ml price (cheapest).",
+      "items": [
+      { "name": "8848", "price": 280, "food_type": "veg", "variants": [
+        { "name": "60Ml", "price": 280 }, { "name": "Qtr", "price": 750 },
+        { "name": "Half", "price": 1450 }, { "name": "Full", "price": 2800 } ] },
+      { "name": "Ruslan Vodka", "price": 250, "food_type": "veg", "variants": [
+        { "name": "60Ml", "price": 250 }, { "name": "Qtr", "price": 700 },
+        { "name": "Half", "price": 1350 }, { "name": "Full", "price": 2600 } ] },
+      { "name": "OD R.", "price": 325, "food_type": "veg", "variants": [
+        { "name": "60Ml", "price": 325 }, { "name": "Qtr", "price": 900 },
+        { "name": "Half", "price": 1750 }, { "name": "Full", "price": 3400 } ] },
+      { "name": "OD Black Chimney", "price": 400, "food_type": "veg", "variants": [
+        { "name": "60Ml", "price": 400 }, { "name": "Qtr", "price": 1100 },
+        { "name": "Half", "price": 2150 }, { "name": "Full", "price": 4200 } ] },
+      { "name": "Blue Riband Gin", "price": 300, "food_type": "veg", "variants": [
+        { "name": "60Ml", "price": 300 }, { "name": "Qtr", "price": 850 },
+        { "name": "Half", "price": 1650 }, { "name": "Full", "price": 3200 } ] },
+      { "name": "Royal Stage", "price": 260, "food_type": "veg", "variants": [
+        { "name": "60Ml", "price": 260 }, { "name": "Qtr", "price": 725 },
+        { "name": "Half", "price": 1350 }, { "name": "Full", "price": 2600 } ] },
+      { "name": "Blue Daimond", "price": 190, "food_type": "veg", "variants": [
+        { "name": "60Ml", "price": 190 }, { "name": "Qtr", "price": 500 },
+        { "name": "Half", "price": 950 }, { "name": "Full", "price": 1800 } ] },
+      { "name": "Kala Patthar", "price": 350, "food_type": "veg", "variants": [
+        { "name": "60Ml", "price": 350 }, { "name": "Qtr", "price": 925 },
+        { "name": "Half", "price": 1750 }, { "name": "Full", "price": 3400 } ] },
+      { "name": "Signature Red", "price": 300, "food_type": "veg", "variants": [
+        { "name": "60Ml", "price": 300 }, { "name": "Qtr", "price": 850 },
+        { "name": "Half", "price": 1650 }, { "name": "Full", "price": 3200 } ] },
+      { "name": "Signature Green", "price": 290, "food_type": "veg", "variants": [
+        { "name": "60Ml", "price": 290 }, { "name": "Qtr", "price": 800 },
+        { "name": "Half", "price": 1550 }, { "name": "Full", "price": 3000 } ] },
+      { "name": "Antiquity Blue", "price": 350, "food_type": "veg", "variants": [
+        { "name": "60Ml", "price": 350 }, { "name": "Qtr", "price": 950 },
+        { "name": "Half", "price": 1850 }, { "name": "Full", "price": 3600 } ] },
+      { "name": "Red Lebel", "price": 600, "food_type": "veg", "variants": [
+        { "name": "60Ml", "price": 600 }, { "name": "Qtr", "price": 1800 },
+        { "name": "Half", "price": 3600 }, { "name": "Full", "price": 7000 } ] },
+      { "name": "Black Lebel", "price": 800, "food_type": "veg", "_uncertain": "Qtr price under glare", "variants": [
+        { "name": "60Ml", "price": 800 }, { "name": "Qtr", "price": 2200 },
+        { "name": "Half", "price": 4400 }, { "name": "Full", "price": 8500 } ] },
+      { "name": "Double Black", "price": 900, "food_type": "veg", "_uncertain": "Qtr price under glare", "variants": [
+        { "name": "60Ml", "price": 900 }, { "name": "Qtr", "price": 2500 },
+        { "name": "Half", "price": 4900 }, { "name": "Full", "price": 9500 } ] },
+      { "name": "JD", "price": 740, "food_type": "veg", "variants": [
+        { "name": "60Ml", "price": 740 }, { "name": "Qtr", "price": 2200 },
+        { "name": "Half", "price": 4350 }, { "name": "Full", "price": 8500 } ] }
+    ]},
+
+    { "name": "Beer", "station": "bar", "sort": 26, "items": [
+      { "name": "Tuborg Gold", "price": 550, "food_type": "veg" },
+      { "name": "Tuborg Strong", "price": 500, "food_type": "veg" },
+      { "name": "Gurkha", "price": 500, "food_type": "veg" },
+      { "name": "Budwiser", "price": 550, "food_type": "veg" },
+      { "name": "Barahsinghe", "price": 550, "food_type": "veg" },
+      { "name": "Carlsberg", "price": 600, "food_type": "veg" },
+      { "name": "Gurkha Mini", "price": 280, "food_type": "veg" },
+      { "name": "Arna Mini", "price": 280, "food_type": "veg" },
+      { "name": "Apple Cider", "price": 250, "food_type": "veg" }
+    ]},
+
+    { "name": "Wine", "station": "bar", "sort": 27, "items": [
+      { "name": "Big Master", "price": 1200, "food_type": "veg" },
+      { "name": "JP Chenet", "price": 2250, "food_type": "veg" },
+      { "name": "Palacio", "price": 1800, "food_type": "veg" },
+      { "name": "Robbertson", "price": 2150, "food_type": "veg" }
+    ]}
+  ]
+}
