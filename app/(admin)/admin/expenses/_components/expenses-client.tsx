@@ -1,0 +1,1242 @@
+"use client";
+
+// Stock & Finance → Extra Expenses.
+//
+// The overheads a restaurant pays that are neither stock nor wages: rent, the
+// power bill, the water tanker. Every row here is money that has ALREADY left —
+// there is no "unpaid" state to chase, which is why this screen is a log with an
+// add form and nothing else.
+//
+// Periods resolve server-side through the same `periodBounds` the Finance report
+// uses, so "This Month" here and "This Month" there always cover the same hours.
+
+import { useCallback, useEffect, useState, useTransition } from "react";
+import {
+  addExtraExpense,
+  addSaving,
+  createSavingTitle,
+  deleteSavingTitle,
+  listExtraExpenses,
+  listSavings,
+  listSavingTitles,
+  renameSavingTitle,
+  withdrawSaving,
+} from "@/app/actions/expenses";
+import { removeExtraExpense, updateExtraExpense } from "@/app/actions/security";
+import { SPENDING_CATEGORIES, EXPENSE_CATEGORY_LABEL } from "@/lib/expenses";
+import type { ExpenseCategory, ExtraExpense, SavingTitle } from "@/lib/expenses";
+import { PERIOD_LABEL } from "@/lib/finance";
+import type { FinancePeriod } from "@/lib/finance";
+import { Button } from "@/components/ui/button";
+import { Modal } from "../../_components/modal";
+import {
+  Plus,
+  Receipt,
+  Pencil,
+  Trash2,
+  PiggyBank,
+  ChevronDown,
+  ChevronRight,
+  ArrowUpFromLine,
+} from "lucide-react";
+
+const PERIODS: FinancePeriod[] = ["today", "yesterday", "week", "month", "year"];
+
+const money2 = (n: number) =>
+  `${n < 0 ? "−" : ""}₹${Math.abs(n).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const METHOD_LABEL: Record<string, string> = {
+  cash: "Cash",
+  online: "Online",
+  mixed: "Cash + online",
+};
+
+const inputClass = "w-full h-10 rounded-sm border px-3 text-sm";
+const inputStyle = {
+  borderColor: "var(--color-hairline-input)",
+  background: "var(--color-canvas)",
+  color: "var(--color-ink)",
+};
+
+// ── The amount + tender fields, shared by the add form and the edit modal ─────
+// One component so the two cannot disagree about what a valid split is — the
+// same reason `AdvanceFields` exists on the room side. The server re-derives the
+// split from these inputs regardless (`resolveExpenseSplit`), so nothing here is
+// a security boundary.
+
+function AmountAndTender({
+  initialAmount = "",
+  initialMethod = "cash",
+  initialCash = "",
+  initialOnline = "",
+  onValidChange,
+}: {
+  initialAmount?: string;
+  initialMethod?: string;
+  initialCash?: string;
+  initialOnline?: string;
+  onValidChange?: (valid: boolean) => void;
+}) {
+  const [amount, setAmount] = useState(initialAmount);
+  const [method, setMethod] = useState(initialMethod);
+  const [cash, setCash] = useState(initialCash);
+  const [online, setOnline] = useState(initialOnline);
+
+  const amountNum = parseFloat(amount) || 0;
+  const cashNum = parseFloat(cash) || 0;
+  const onlineNum = parseFloat(online) || 0;
+
+  // Typing one half fills the other, so the pair always totals the amount.
+  function handleCash(v: string) {
+    setCash(v);
+    const n = parseFloat(v);
+    setOnline(
+      !isNaN(n) && n >= 0 ? Math.max(0, Math.round((amountNum - n) * 100) / 100).toFixed(2) : ""
+    );
+  }
+  function handleOnline(v: string) {
+    setOnline(v);
+    const n = parseFloat(v);
+    setCash(
+      !isNaN(n) && n >= 0 ? Math.max(0, Math.round((amountNum - n) * 100) / 100).toFixed(2) : ""
+    );
+  }
+  // A new amount strands any split typed against the old one.
+  function handleAmount(v: string) {
+    setAmount(v);
+    setCash("");
+    setOnline("");
+  }
+
+  const mixedOk =
+    method !== "mixed" ||
+    amountNum === 0 ||
+    (cash !== "" && online !== "" && Math.abs(cashNum + onlineNum - amountNum) < 0.01);
+  const valid = amountNum > 0 && mixedOk;
+
+  const [lastReported, setLastReported] = useState<boolean | null>(null);
+  if (onValidChange && lastReported !== valid) {
+    setLastReported(valid);
+    onValidChange(valid);
+  }
+
+  return (
+    <>
+      <div>
+        <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+          Amount
+        </label>
+        <input
+          name="amount"
+          type="number"
+          min="0"
+          step="0.01"
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => handleAmount(e.target.value)}
+          placeholder="0.00"
+          className={inputClass + " tabular-nums"}
+          style={inputStyle}
+        />
+      </div>
+
+      <input type="hidden" name="method" value={method} />
+      <div>
+        <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+          Paid by
+        </label>
+        <div className="flex flex-wrap gap-1.5">
+          {(["cash", "online", "mixed"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => {
+                setMethod(m);
+                setCash("");
+                setOnline("");
+              }}
+              className="text-xs px-3 py-1.5 rounded-full border transition-colors"
+              style={{
+                borderColor: method === m ? "var(--color-primary)" : "var(--color-hairline)",
+                background: method === m ? "var(--color-primary)" : "var(--color-canvas)",
+                color: method === m ? "#fff" : "var(--color-ink)",
+              }}
+            >
+              {METHOD_LABEL[m]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {method === "mixed" && (
+        <div className="grid grid-cols-2 gap-3">
+          {(
+            [
+              ["Cash", "cash_amount", cash, handleCash],
+              ["Online", "online_amount", online, handleOnline],
+            ] as const
+          ).map(([label, name, val, set]) => (
+            <div key={name}>
+              <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+                {label}
+              </label>
+              <input
+                name={name}
+                type="number"
+                min="0"
+                max={amountNum}
+                step="0.01"
+                inputMode="decimal"
+                value={val}
+                onChange={(e) => set(e.target.value)}
+                className={inputClass + " tabular-nums"}
+                style={inputStyle}
+              />
+            </div>
+          ))}
+          {!mixedOk && (
+            <p className="col-span-2 text-xs" style={{ color: "var(--color-ruby)" }}>
+              Cash and Online must add up to {money2(amountNum)}.
+            </p>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+// `saving` is absent from SPENDING_CATEGORIES on purpose — a saving needs a pot,
+// which this control cannot offer. Savings are recorded from the Saving tab.
+function CategorySelect({ value }: { value?: ExpenseCategory }) {
+  return (
+    <div>
+      <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+        What for
+      </label>
+      <select
+        name="category"
+        defaultValue={value ?? "rent"}
+        className={inputClass}
+        style={inputStyle}
+      >
+        {SPENDING_CATEGORIES.map((c) => (
+          <option key={c} value={c}>
+            {EXPENSE_CATEGORY_LABEL[c]}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function SavingTitleSelect({
+  titles,
+  value,
+}: {
+  titles: SavingTitle[];
+  value?: string | null;
+}) {
+  return (
+    <div>
+      <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+        Saving
+      </label>
+      <select
+        name="saving_title_id"
+        defaultValue={value ?? titles[0]?.id ?? ""}
+        className={inputClass}
+        style={inputStyle}
+      >
+        {titles.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+// ── Add ───────────────────────────────────────────────────────────────────────
+
+function AddExpenseForm({ onDone }: { onDone: () => void }) {
+  const [valid, setValid] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  // Called directly rather than through `useActionState` because the modal has to
+  // close on success and stay open on failure — which means the caller needs the
+  // result, not just the latest state.
+  function submit(formData: FormData) {
+    setError(null);
+    startTransition(async () => {
+      const res = await addExtraExpense(null, formData);
+      if (res && "error" in res) setError(res.error);
+      else onDone();
+    });
+  }
+
+  return (
+    <form action={submit} className="flex flex-col gap-3">
+      <CategorySelect />
+
+      <div>
+        <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+          Note <span style={{ opacity: 0.6 }}>(optional)</span>
+        </label>
+        <input
+          name="note"
+          placeholder="July bill, NEA"
+          autoComplete="off"
+          className={inputClass}
+          style={inputStyle}
+        />
+      </div>
+
+      <AmountAndTender onValidChange={setValid} />
+
+      {error && (
+        <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
+          {error}
+        </p>
+      )}
+
+      <div className="flex gap-2 justify-end pt-1">
+        <Button type="button" variant="secondary" size="sm" onClick={onDone}>
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" disabled={!valid || pending}>
+          {pending ? "Saving…" : "Record expense"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// ── Savings ───────────────────────────────────────────────────────────────────
+// A saving is an extra expense with a pot. It moves cash and bank exactly like
+// rent does and reaches Finance as one "Saving" line — the pots themselves live
+// only here, which is the point: Finance stays a summary, this page holds detail.
+
+function AddSavingForm({ titles, onDone }: { titles: SavingTitle[]; onDone: () => void }) {
+  const [valid, setValid] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function submit(formData: FormData) {
+    setError(null);
+    startTransition(async () => {
+      const res = await addSaving(null, formData);
+      if (res && "error" in res) setError(res.error);
+      else onDone();
+    });
+  }
+
+  return (
+    <form action={submit} className="flex flex-col gap-3">
+      <SavingTitleSelect titles={titles} />
+
+      <div>
+        <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+          Note <span style={{ opacity: 0.6 }}>(optional)</span>
+        </label>
+        <input
+          name="note"
+          placeholder="From August takings"
+          autoComplete="off"
+          className={inputClass}
+          style={inputStyle}
+        />
+      </div>
+
+      <AmountAndTender onValidChange={setValid} />
+
+      {error && (
+        <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
+          {error}
+        </p>
+      )}
+
+      <div className="flex gap-2 justify-end pt-1">
+        <Button type="button" variant="secondary" size="sm" onClick={onDone}>
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" disabled={!valid || pending}>
+          {pending ? "Saving…" : "Add to saving"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Take money back out of a pot.
+ *
+ * The form is entirely in POSITIVE numbers — "withdraw 3,000" is what a person
+ * means. The server negates it once, at the boundary, and stores a negative
+ * saving row. Nothing in this component knows about signs.
+ */
+function WithdrawSavingForm({
+  titles,
+  onDone,
+}: {
+  titles: SavingTitle[];
+  onDone: () => void;
+}) {
+  const [valid, setValid] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  // Only pots with something in them can be drawn from.
+  const funded = titles.filter((t) => t.total > 0.005);
+  const [titleId, setTitleId] = useState(funded[0]?.id ?? "");
+  const pot = funded.find((t) => t.id === titleId) ?? funded[0];
+
+  function submit(formData: FormData) {
+    setError(null);
+    startTransition(async () => {
+      const res = await withdrawSaving(null, formData);
+      if (res && "error" in res) setError(res.error);
+      else onDone();
+    });
+  }
+
+  if (funded.length === 0) {
+    return (
+      <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
+        None of your savings have money in them yet.
+      </p>
+    );
+  }
+
+  return (
+    <form action={submit} className="flex flex-col gap-3">
+      <div>
+        <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+          Take from
+        </label>
+        <select
+          name="saving_title_id"
+          value={titleId}
+          onChange={(e) => setTitleId(e.target.value)}
+          className={inputClass}
+          style={inputStyle}
+        >
+          {funded.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name} — {money2(t.total)}
+            </option>
+          ))}
+        </select>
+        {pot && (
+          <p className="text-xs mt-1.5" style={{ color: "var(--color-ink-mute)" }}>
+            Holds {money2(pot.total)} — {money2(pot.cash)} cash + {money2(pot.online)} online.
+          </p>
+        )}
+      </div>
+
+      <div>
+        <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+          Note <span style={{ opacity: 0.6 }}>(optional)</span>
+        </label>
+        <input
+          name="note"
+          placeholder="Towards the new oven"
+          autoComplete="off"
+          className={inputClass}
+          style={inputStyle}
+        />
+      </div>
+
+      <AmountAndTender onValidChange={setValid} />
+
+      <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+        This money comes back into your cash or bank. It is not a sale — it is your own money
+        returning, so it lowers the period&apos;s Saving figure rather than adding to income.
+      </p>
+
+      {error && (
+        <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
+          {error}
+        </p>
+      )}
+
+      <div className="flex gap-2 justify-end pt-1">
+        <Button type="button" variant="secondary" size="sm" onClick={onDone}>
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" disabled={!valid || pending}>
+          {pending ? "Working…" : "Withdraw"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function NewTitleForm({ onDone }: { onDone: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function submit(formData: FormData) {
+    setError(null);
+    startTransition(async () => {
+      const res = await createSavingTitle(null, formData);
+      if (res && "error" in res) setError(res.error);
+      else onDone();
+    });
+  }
+
+  return (
+    <form action={submit} className="flex flex-col gap-3">
+      <div>
+        <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+          Name
+        </label>
+        <input
+          name="name"
+          placeholder="Emergency Fund"
+          maxLength={60}
+          autoComplete="off"
+          autoFocus
+          className={inputClass}
+          style={inputStyle}
+        />
+        <p className="text-xs mt-1.5" style={{ color: "var(--color-ink-mute)" }}>
+          A pot you file money into. You can rename it later without changing anything already
+          saved under it.
+        </p>
+      </div>
+
+      {error && (
+        <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
+          {error}
+        </p>
+      )}
+
+      <div className="flex gap-2 justify-end pt-1">
+        <Button type="button" variant="secondary" size="sm" onClick={onDone}>
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" disabled={pending}>
+          {pending ? "Creating…" : "Create saving"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function SavingPot({
+  title,
+  entries,
+  canManage,
+  canEdit,
+  securityEnabled,
+  onEditEntry,
+  onChanged,
+}: {
+  title: SavingTitle;
+  entries: ExtraExpense[];
+  canManage: boolean;
+  canEdit: boolean;
+  securityEnabled: boolean;
+  onEditEntry: (e: ExtraExpense) => void;
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(title.name);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function rename() {
+    setError(null);
+    startTransition(async () => {
+      const res = await renameSavingTitle(title.id, name);
+      if (res && "error" in res) setError(res.error);
+      else {
+        setRenaming(false);
+        onChanged();
+      }
+    });
+  }
+
+  function remove() {
+    setError(null);
+    startTransition(async () => {
+      const res = await deleteSavingTitle(title.id);
+      if (res && "error" in res) setError(res.error);
+      else onChanged();
+    });
+  }
+
+  return (
+    <div style={{ borderTop: "1px solid var(--color-hairline)" }}>
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-2 min-w-0 text-left"
+        >
+          {open ? (
+            <ChevronDown size={15} style={{ color: "var(--color-ink-mute)" }} />
+          ) : (
+            <ChevronRight size={15} style={{ color: "var(--color-ink-mute)" }} />
+          )}
+          <span className="min-w-0">
+            <span className="text-sm block truncate" style={{ color: "var(--color-ink)" }}>
+              {title.name}
+            </span>
+            <span className="text-xs" style={{ color: "var(--color-ink-mute)", opacity: 0.8 }}>
+              {title.entryCount === 0
+                ? "Nothing saved yet"
+                : `${title.entryCount} ${
+                    title.entryCount === 1 ? "entry" : "entries"
+                  } · holds ${money2(title.cash)} cash + ${money2(title.online)} online`}
+            </span>
+          </span>
+        </button>
+        <span className="text-base tabular-nums shrink-0" style={{ color: "var(--color-ink)" }}>
+          {money2(title.total)}
+        </span>
+      </div>
+
+      {open && (
+        <div className="pb-2">
+          {entries.length === 0 ? (
+            <p className="text-xs px-4 pb-2 pl-11" style={{ color: "var(--color-ink-mute)" }}>
+              No money has been filed into this saving yet.
+            </p>
+          ) : (
+            entries.map((e) => (
+              <div key={e.id} className="flex items-start justify-between gap-3 px-4 py-1.5 pl-11">
+                <span className="text-xs min-w-0" style={{ color: "var(--color-ink-mute)" }}>
+                  {new Date(e.createdAt).toLocaleDateString("en-IN", { dateStyle: "medium" })}
+                  {" · "}
+                  {e.amount < 0 ? "Withdrawn" : "Added"}
+                  {" · "}
+                  {METHOD_LABEL[e.method] ?? e.method}
+                  {e.note && <span className="block truncate">{e.note}</span>}
+                </span>
+                <span className="flex items-center gap-2 shrink-0">
+                  {/* Money OUT of the business is red; a withdrawal is money
+                      coming back, so it reads green like any other inflow. */}
+                  <span
+                    className="text-xs tabular-nums"
+                    style={{ color: e.amount < 0 ? "#1a7a4a" : "#dc2626" }}
+                  >
+                    {e.amount < 0 ? `+${money2(Math.abs(e.amount))}` : money2(e.amount)}
+                  </span>
+                  {canEdit && securityEnabled && (
+                    <button
+                      type="button"
+                      onClick={() => onEditEntry(e)}
+                      aria-label="Edit saving entry"
+                      className="p-1 rounded-md"
+                      style={{ color: "var(--color-ink-mute)" }}
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  )}
+                </span>
+              </div>
+            ))
+          )}
+
+          {canManage && (
+            <div className="px-4 pl-11 pt-1 flex flex-wrap items-center gap-2">
+              {renaming ? (
+                <>
+                  <input
+                    value={name}
+                    onChange={(ev) => setName(ev.target.value)}
+                    maxLength={60}
+                    className="h-8 rounded-sm border px-2 text-xs"
+                    style={inputStyle}
+                  />
+                  <Button type="button" size="sm" onClick={rename} disabled={pending}>
+                    Save
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setRenaming(false);
+                      setName(title.name);
+                      setError(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setRenaming(true)}
+                    className="text-xs underline"
+                    style={{ color: "var(--color-ink-mute)" }}
+                  >
+                    Rename
+                  </button>
+                  {/* Offered only for an empty pot. The FK is `on delete restrict`,
+                      so a pot with money in it cannot be deleted even if this were
+                      bypassed — the entries would otherwise be stranded while
+                      Finance still counted them. */}
+                  {title.entryCount === 0 && (
+                    <button
+                      type="button"
+                      onClick={remove}
+                      disabled={pending}
+                      className="text-xs underline"
+                      style={{ color: "var(--color-ruby)" }}
+                    >
+                      Delete
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {error && (
+            <p className="text-xs px-4 pl-11 pt-1" style={{ color: "var(--color-ruby)" }}>
+              {error}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Edit / delete (Security PIN) ──────────────────────────────────────────────
+
+function EditExpenseForm({
+  expense,
+  titles,
+  onDone,
+}: {
+  expense: ExtraExpense;
+  titles: SavingTitle[];
+  onDone: () => void;
+}) {
+  // A saving stays a saving: it swaps the category picker for a pot picker. The
+  // server refuses to convert between the two, and a DB constraint makes the
+  // mismatched state unrepresentable anyway.
+  const isSaving = expense.category === "saving";
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [valid, setValid] = useState(true);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  function submit(formData: FormData) {
+    const amount = parseFloat(String(formData.get("amount") ?? "0")) || 0;
+    const method = String(formData.get("method") ?? "cash");
+    const cash =
+      method === "cash" ? amount
+      : method === "online" ? 0
+      : parseFloat(String(formData.get("cash_amount") ?? "0")) || 0;
+    const online =
+      method === "online" ? amount
+      : method === "cash" ? 0
+      : parseFloat(String(formData.get("online_amount") ?? "0")) || 0;
+
+    startTransition(async () => {
+      const res = await updateExtraExpense(pin, expense.id, {
+        category: isSaving ? "saving" : String(formData.get("category") ?? expense.category),
+        note: String(formData.get("note") ?? "").trim() || null,
+        amount,
+        method,
+        cash,
+        online,
+        savingTitleId: isSaving
+          ? String(formData.get("saving_title_id") ?? expense.savingTitleId ?? "")
+          : null,
+      });
+      if (res && "error" in res) setError(res.error);
+      else onDone();
+    });
+  }
+
+  function remove() {
+    setError(null);
+    startTransition(async () => {
+      const res = await removeExtraExpense(pin, expense.id);
+      if (res && "error" in res) setError(res.error);
+      else onDone();
+    });
+  }
+
+  return (
+    <form action={submit} className="flex flex-col gap-3">
+      {isSaving ? (
+        <SavingTitleSelect titles={titles} value={expense.savingTitleId} />
+      ) : (
+        <CategorySelect value={expense.category} />
+      )}
+
+      <div>
+        <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+          Note <span style={{ opacity: 0.6 }}>(optional)</span>
+        </label>
+        <input
+          name="note"
+          defaultValue={expense.note ?? ""}
+          autoComplete="off"
+          className={inputClass}
+          style={inputStyle}
+        />
+      </div>
+
+      {/* Absolute values throughout: a withdrawal is stored negative, but nobody
+          edits "minus three thousand". The server re-applies the sign from the
+          row being edited, so it cannot be flipped from here. */}
+      <AmountAndTender
+        initialAmount={String(Math.abs(expense.amount))}
+        initialMethod={expense.method}
+        initialCash={expense.method === "mixed" ? String(Math.abs(expense.cash)) : ""}
+        initialOnline={expense.method === "mixed" ? String(Math.abs(expense.online)) : ""}
+        onValidChange={setValid}
+      />
+
+      <div className="pt-1">
+        <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+          Security PIN
+        </label>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          placeholder="••••"
+          className={inputClass + " tracking-[0.3em]"}
+          style={inputStyle}
+        />
+        <p className="text-xs mt-1.5" style={{ color: "var(--color-ink-mute)" }}>
+          This expense has already been counted into a day&apos;s cash balance. Every change is logged.
+        </p>
+      </div>
+
+      {error && (
+        <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
+          {error}
+        </p>
+      )}
+
+      {confirmingDelete ? (
+        <div
+          className="rounded-lg border px-3 py-2.5 flex flex-col gap-2"
+          style={{
+            background: "var(--color-warning-bg)",
+            borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)",
+          }}
+        >
+          <p className="text-xs" style={{ color: "var(--color-warning)" }}>
+            Delete this {money2(Math.abs(expense.amount))}{" "}
+            {expense.amount < 0 ? "withdrawal" : "expense"}? Cash for that day goes back{" "}
+            {expense.amount < 0 ? "down" : "up"} by the same amount
+            {expense.amount < 0 ? ", and the saving regains it" : ""}. Only the audit log will
+            remember it.
+          </p>
+          <div className="flex gap-2 justify-end">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setConfirmingDelete(false)}>
+              Keep it
+            </Button>
+            <Button type="button" size="sm" onClick={remove} disabled={!pin || pending}>
+              {pending ? "Deleting…" : "Delete"}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-2 justify-between pt-1">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setConfirmingDelete(true)}
+          >
+            <Trash2 size={14} /> Delete
+          </Button>
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={onDone}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" disabled={!valid || !pin || pending}>
+              {pending ? "Saving…" : "Save changes"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </form>
+  );
+}
+
+// ── Screen ────────────────────────────────────────────────────────────────────
+
+export function ExpensesClient({
+  initialExpenses,
+  initialTitles,
+  initialSavings,
+  canManage,
+  canEdit,
+  securityEnabled,
+}: {
+  initialExpenses: ExtraExpense[];
+  initialTitles: SavingTitle[];
+  initialSavings: ExtraExpense[];
+  canManage: boolean;
+  canEdit: boolean;
+  securityEnabled: boolean;
+}) {
+  const [tab, setTab] = useState<"expenses" | "saving">("expenses");
+  const [expenses, setExpenses] = useState(initialExpenses);
+  const [titles, setTitles] = useState(initialTitles);
+  const [savings, setSavings] = useState(initialSavings);
+  const [period, setPeriod] = useState<FinancePeriod>("month");
+  const [loading, setLoading] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [addingSaving, setAddingSaving] = useState(false);
+  const [addingTitle, setAddingTitle] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [editing, setEditing] = useState<ExtraExpense | null>(null);
+
+  const load = useCallback(async (p: FinancePeriod) => {
+    setLoading(true);
+    try {
+      setExpenses(await listExtraExpenses({ period: p }));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadSavings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [t, s] = await Promise.all([listSavingTitles(), listSavings()]);
+      setTitles(t);
+      setSavings(s);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (period === "month") return; // the server already sent this one
+    load(period);
+  }, [period, load]);
+
+  const total = expenses.reduce((s, e) => s + e.amount, 0);
+  const cash = expenses.reduce((s, e) => s + e.cash, 0);
+  const online = expenses.reduce((s, e) => s + e.online, 0);
+
+  // Signed rows mean these are already NET of withdrawals — nothing to subtract.
+  const savedTotal = titles.reduce((s, t) => s + t.total, 0);
+  const savedCash = titles.reduce((s, t) => s + t.cash, 0);
+  const savedOnline = titles.reduce((s, t) => s + t.online, 0);
+  const hasFundedPot = titles.some((t) => t.total > 0.005);
+
+  const showSaving = tab === "saving";
+
+  async function afterChange() {
+    setAdding(false);
+    setAddingSaving(false);
+    setAddingTitle(false);
+    setWithdrawing(false);
+    setEditing(null);
+    // Both lists move together: a saving is an expense row, so an edit can change
+    // either view's totals.
+    await Promise.all([load(period), loadSavings()]);
+  }
+
+  return (
+    <div className="p-4 sm:p-6 max-w-4xl mx-auto">
+      <div className="flex items-start justify-between gap-3 mb-1 flex-wrap">
+        <div>
+          <h1
+            className="text-2xl"
+            style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}
+          >
+            Extra Expenses
+          </h1>
+          <p className="text-sm mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
+            {showSaving
+              ? "Money set aside, by pot — all time"
+              : "Rent, electricity and other overheads"}
+            {loading && <span className="ml-2">Updating…</span>}
+          </p>
+        </div>
+        {canManage && !showSaving && (
+          <Button size="sm" onClick={() => setAdding(true)}>
+            <Plus size={14} /> Add expense
+          </Button>
+        )}
+        {canManage && showSaving && (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setAddingTitle(true)}>
+              <Plus size={14} /> New saving
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setWithdrawing(true)}
+              disabled={!hasFundedPot}
+            >
+              <ArrowUpFromLine size={14} /> Withdraw
+            </Button>
+            <Button size="sm" onClick={() => setAddingSaving(true)} disabled={titles.length === 0}>
+              <PiggyBank size={14} /> Add money
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Two views of the same table. Savings are excluded from the Expenses list
+          because they appear here, grouped by pot — showing them in both would be
+          the same money listed twice. */}
+      <div className="flex gap-2 mt-4">
+        {(
+          [
+            ["expenses", "Expenses"],
+            ["saving", "Saving"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className="text-sm px-3 py-1.5 rounded-full border whitespace-nowrap transition-colors"
+            style={{
+              borderColor: tab === key ? "var(--color-primary)" : "var(--color-hairline)",
+              background: tab === key ? "var(--color-primary)" : "var(--color-canvas)",
+              color: tab === key ? "#fff" : "var(--color-ink)",
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* The period picker belongs to spending only. A pot's balance is not a
+          period figure — "how much is in the emergency fund" has one answer — so
+          offering a period on the Saving tab would invite a misreading. */}
+      {!showSaving && (
+        <div className="flex gap-2 overflow-x-auto my-4" style={{ scrollbarWidth: "none" }}>
+          {PERIODS.map((p) => (
+            <button
+              key={p}
+              onClick={() => setPeriod(p)}
+              className="text-sm px-3 py-1.5 rounded-full border whitespace-nowrap transition-colors"
+              style={{
+                borderColor: period === p ? "var(--color-primary)" : "var(--color-hairline)",
+                background: period === p ? "var(--color-primary)" : "var(--color-canvas)",
+                color: period === p ? "#fff" : "var(--color-ink)",
+              }}
+            >
+              {PERIOD_LABEL[p]}
+            </button>
+          ))}
+        </div>
+      )}
+      {showSaving && <div className="h-4" />}
+
+      {/* Totals. Split by tender because that is how it lands on the four
+          balances — cash out of the till, online out of the bank. */}
+      <section
+        className="rounded-xl border overflow-hidden mb-4"
+        style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+      >
+        <div className="grid grid-cols-3 divide-x" style={{ borderColor: "var(--color-hairline)" }}>
+          {(
+            showSaving
+              ? ([
+                  ["Cash", savedCash],
+                  ["Online", savedOnline],
+                  ["Saved", savedTotal],
+                ] as const)
+              : ([
+                  ["Cash", cash],
+                  ["Online", online],
+                  ["Total", total],
+                ] as const)
+          ).map(([label, value], i) => (
+            <div key={label} className="px-4 py-3">
+              <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                {label}
+              </p>
+              <p
+                className="text-lg tabular-nums mt-0.5"
+                style={{
+                  color: i === 2 && value > 0 ? "#dc2626" : "var(--color-ink)",
+                  fontWeight: i === 2 ? 500 : 400,
+                }}
+              >
+                {money2(value)}
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {showSaving ? (
+        titles.length === 0 ? (
+          <div
+            className="rounded-xl border px-4 py-10 text-center"
+            style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+          >
+            <PiggyBank
+              size={22}
+              className="mx-auto mb-2"
+              style={{ color: "var(--color-ink-mute)", opacity: 0.5 }}
+            />
+            <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
+              No savings yet. Create one — an emergency fund, a new oven — then file money into it.
+            </p>
+          </div>
+        ) : (
+          <section
+            className="rounded-xl border overflow-hidden"
+            style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+          >
+            {titles.map((t) => (
+              <SavingPot
+                key={t.id}
+                title={t}
+                entries={savings.filter((s) => s.savingTitleId === t.id)}
+                canManage={canManage}
+                canEdit={canEdit}
+                securityEnabled={securityEnabled}
+                onEditEntry={setEditing}
+                onChanged={afterChange}
+              />
+            ))}
+          </section>
+        )
+      ) : expenses.length === 0 ? (
+        <div
+          className="rounded-xl border px-4 py-10 text-center"
+          style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+        >
+          <Receipt size={22} className="mx-auto mb-2" style={{ color: "var(--color-ink-mute)", opacity: 0.5 }} />
+          <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
+            No expenses recorded for {PERIOD_LABEL[period].toLowerCase()}.
+          </p>
+        </div>
+      ) : (
+        <section
+          className="rounded-xl border overflow-hidden"
+          style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+        >
+          {expenses.map((e, i) => (
+            <div
+              key={e.id}
+              className="flex items-start justify-between gap-3 px-4 py-3"
+              style={{ borderTop: i === 0 ? "none" : "1px solid var(--color-hairline)" }}
+            >
+              <div className="min-w-0">
+                <p className="text-sm" style={{ color: "var(--color-ink)" }}>
+                  {e.categoryLabel}
+                  {e.updatedAt && (
+                    <span className="text-xs ml-2" style={{ color: "var(--color-warning)" }}>
+                      edited
+                    </span>
+                  )}
+                </p>
+                {e.note && (
+                  <p className="text-xs mt-0.5 truncate" style={{ color: "var(--color-ink-mute)" }}>
+                    {e.note}
+                  </p>
+                )}
+                <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)", opacity: 0.8 }}>
+                  {new Date(e.createdAt).toLocaleString("en-IN", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })}
+                  {" · "}
+                  {METHOD_LABEL[e.method] ?? e.method}
+                  {e.method === "mixed" && ` (${money2(e.cash)} + ${money2(e.online)})`}
+                  {e.createdByName ? ` · ${e.createdByName}` : ""}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-sm tabular-nums" style={{ color: "#dc2626" }}>
+                  {money2(e.amount)}
+                </span>
+                {canEdit && securityEnabled && (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(e)}
+                    aria-label="Edit expense"
+                    className="p-1.5 rounded-md transition-colors"
+                    style={{ color: "var(--color-ink-mute)" }}
+                  >
+                    <Pencil size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {canEdit && !securityEnabled && expenses.length > 0 && (
+        <p className="text-xs mt-3" style={{ color: "var(--color-ink-mute)" }}>
+          Set a Security PIN in Settings to correct or remove an expense.
+        </p>
+      )}
+
+      <Modal open={adding} title="Record an expense" onClose={() => setAdding(false)}>
+        <AddExpenseForm onDone={afterChange} />
+      </Modal>
+
+      <Modal open={addingTitle} title="New saving" onClose={() => setAddingTitle(false)}>
+        <NewTitleForm onDone={afterChange} />
+      </Modal>
+
+      <Modal
+        open={addingSaving}
+        title="Add to a saving"
+        subtitle="Money set aside — it leaves your cash or bank like any expense"
+        onClose={() => setAddingSaving(false)}
+      >
+        <AddSavingForm titles={titles} onDone={afterChange} />
+      </Modal>
+
+      <Modal
+        open={withdrawing}
+        title="Withdraw from a saving"
+        subtitle="Money coming back into your cash or bank"
+        onClose={() => setWithdrawing(false)}
+      >
+        <WithdrawSavingForm titles={titles} onDone={afterChange} />
+      </Modal>
+
+      {/* Keyed on the row so switching rows remounts the form — otherwise the
+          amount/tender fields keep the previous expense's state. */}
+      <Modal
+        open={!!editing}
+        title={editing && editing.amount < 0 ? "Correct this withdrawal" : "Correct this expense"}
+        subtitle={
+          editing
+            ? `${editing.savingTitleName ?? editing.categoryLabel}${
+                editing.amount < 0 ? " · withdrawal" : ""
+              } · ${money2(Math.abs(editing.amount))}`
+            : undefined
+        }
+        onClose={() => setEditing(null)}
+      >
+        {editing && (
+          <EditExpenseForm
+            key={editing.id}
+            expense={editing}
+            titles={titles}
+            onDone={afterChange}
+          />
+        )}
+      </Modal>
+    </div>
+  );
+}

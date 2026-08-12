@@ -8,6 +8,8 @@ import {
   getPeriodPurchases,
 } from "@/app/actions/finance";
 import { getPayrollSummary } from "@/app/actions/payroll";
+import { getRestaurantConfig } from "@/lib/restaurant-info";
+import { hasRooms } from "@/lib/business-type";
 import { FinanceClient } from "./_components/finance-client";
 
 // Stock & Finance → Daily Finance. Gated on `view_finance`, which is deliberately
@@ -20,7 +22,7 @@ export default async function FinancePage() {
     redirect("/employee/dashboard");
   }
 
-  const [report, opening, purchases, payroll, ledger] = await Promise.all([
+  const [report, opening, purchases, payroll, ledger, config] = await Promise.all([
     getFinanceReport({ period: "today" }),
     getOpeningBalance(),
     getPeriodPurchases({ period: "today" }),
@@ -28,6 +30,9 @@ export default async function FinancePage() {
     // it is a company expense, not a window onto any individual's salary.
     getPayrollSummary({ period: "today" }),
     getFinanceTransactions({ period: "today" }),
+    // Cached — the same config every other screen reads. Only the business type is
+    // wanted here, to decide whether the hotel side of the sheet exists at all.
+    getRestaurantConfig(restaurantUser.restaurant_id),
   ]);
 
   return (
@@ -39,6 +44,10 @@ export default async function FinancePage() {
       initialLedger={ledger}
       // Seeding the opening balance re-bases every balance, so it needs write access.
       canManage={STOCK_ACCESS.canManageStock(restaurantUser)}
+      // A restaurant-only client has no rooms, so the Room sales and Room advances
+      // blocks are not shown at all — the same `hasRooms` gate the sidebar,
+      // /admin/rooms and the staff dashboard already use.
+      showRooms={hasRooms(config.businessType)}
     />
   );
 }

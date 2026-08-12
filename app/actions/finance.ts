@@ -11,6 +11,7 @@ import {
   PURCHASE_STATUS_LABEL,
   TX_LABEL,
 } from "@/lib/finance";
+import { expenseCategoryLabel } from "@/lib/expenses";
 import type {
   FinancePeriod,
   FinancePurchase,
@@ -33,12 +34,31 @@ const EMPTY = (period: FinancePeriod, from: string, to: string): FinanceReport =
   salesCash: 0,
   salesOnline: 0,
   salesCard: 0,
+  salesAdvance: 0,
+  salesAdvanceCash: 0,
+  salesAdvanceOnline: 0,
   salesCredit: 0,
+  salesRoomCash: 0,
+  salesRoomOnline: 0,
+  salesRoomCard: 0,
+  salesRoomCredit: 0,
+  salesRoomTotal: 0,
+  salesTableCash: 0,
+  salesTableOnline: 0,
+  salesTableCard: 0,
+  salesTableCredit: 0,
+  salesTableTotal: 0,
   salesTotal: 0,
+  discountsTotal: 0,
+  discountedBills: 0,
   purchasesCash: 0,
   purchasesOnline: 0,
   purchasesCredit: 0,
   purchasesTotal: 0,
+  extraExpensesCash: 0,
+  extraExpensesOnline: 0,
+  extraExpensesTotal: 0,
+  extraExpensesByCategory: [],
   customerCreditCreated: 0,
   customerCreditCollected: 0,
   vendorCreditCreated: 0,
@@ -57,6 +77,14 @@ const EMPTY = (period: FinancePeriod, from: string, to: string): FinanceReport =
   closingCreditToUs: 0,
   closingCreditByUs: 0,
   closingNet: 0,
+  advancesReceived: 0,
+  advancesRefunded: 0,
+  advancesCash: 0,
+  advancesOnline: 0,
+  refundsCash: 0,
+  refundsOnline: 0,
+  openingAdvancesHeld: 0,
+  closingAdvancesHeld: 0,
 });
 
 // ─── The report ───────────────────────────────────────────────────────────────
@@ -109,13 +137,43 @@ export async function getFinanceReport(params?: {
     salesCash: num(row.sales_cash),
     salesOnline: num(row.sales_online),
     salesCard: num(row.sales_card),
+    salesAdvance: num(row.sales_advance),
+    salesAdvanceCash: num(row.sales_advance_cash),
+    salesAdvanceOnline: num(row.sales_advance_online),
     salesCredit: num(row.sales_credit),
+    salesRoomCash: num(row.sales_room_cash),
+    salesRoomOnline: num(row.sales_room_online),
+    salesRoomCard: num(row.sales_room_card),
+    salesRoomCredit: num(row.sales_room_credit),
+    salesRoomTotal: num(row.sales_room_total),
+    salesTableCash: num(row.sales_table_cash),
+    salesTableOnline: num(row.sales_table_online),
+    salesTableCard: num(row.sales_table_card),
+    salesTableCredit: num(row.sales_table_credit),
+    salesTableTotal: num(row.sales_table_total),
     salesTotal: num(row.sales_total),
+
+    discountsTotal: num(row.discounts_total),
+    discountedBills: Number(row.discounted_bills ?? 0),
 
     purchasesCash: num(row.purchases_cash),
     purchasesOnline: num(row.purchases_online),
     purchasesCredit: num(row.purchases_credit),
     purchasesTotal: num(row.purchases_total),
+
+    extraExpensesCash: num(row.extra_expenses_cash),
+    extraExpensesOnline: num(row.extra_expenses_online),
+    extraExpensesTotal: num(row.extra_expenses_total),
+    // jsonb arrives already parsed. The label is resolved here rather than in SQL
+    // so `lib/expenses.ts` stays the only place a category is ever named.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    extraExpensesByCategory: ((row.extra_expenses_by_category ?? []) as any[]).map((c) => ({
+      category: String(c.category),
+      label: expenseCategoryLabel(String(c.category)),
+      cash: num(c.cash),
+      online: num(c.online),
+      total: num(c.total),
+    })),
 
     customerCreditCreated: num(row.customer_credit_created),
     customerCreditCollected: num(row.customer_credit_collected),
@@ -137,6 +195,15 @@ export async function getFinanceReport(params?: {
     closingCreditToUs: num(row.closing_credit_to_us),
     closingCreditByUs: num(row.closing_credit_by_us),
     closingNet: closingCash + closingOnline,
+
+    advancesReceived: num(row.advances_received),
+    advancesRefunded: num(row.advances_refunded),
+    advancesCash: num(row.advances_cash),
+    advancesOnline: num(row.advances_online),
+    refundsCash: num(row.refunds_cash),
+    refundsOnline: num(row.refunds_online),
+    openingAdvancesHeld: num(row.opening_advances_held),
+    closingAdvancesHeld: num(row.closing_advances_held),
   };
 }
 
@@ -172,6 +239,8 @@ export async function getFinanceTransactions(params?: {
     at: r.occurred_at,
     kind: r.kind as FinanceTxKind,
     party: r.party ?? null,
+    source: (r.source ?? null) as FinanceTransaction["source"],
+    sourceLabel: r.source_label ?? null,
     method: r.method ?? "",
     amount: num(r.amount),
     reference: r.reference ?? null,
@@ -364,19 +433,78 @@ export async function exportFinanceCsv(params?: {
     ["Online / Bank", fmt(report.openingOnline)],
     ["Credit to Us (receivable)", fmt(report.openingCreditToUs)],
     ["Credit by Us (payable)", fmt(report.openingCreditByUs)],
+    ["Advance Held (guests' money)", fmt(report.openingAdvancesHeld)],
     [],
-    ["SALES"],
-    ["Cash Sales", fmt(report.salesCash)],
-    ["Online Sales", fmt(report.salesOnline)],
-    ["Card Sales", fmt(report.salesCard)],
-    ["Credit Sales (billed, not collected)", fmt(report.salesCredit)],
-    ["Total Sales", fmt(report.salesTotal)],
+    // Two businesses under one roof, so two blocks. Room + restaurant always equals
+    // the grand total below them.
+    ["RESTAURANT SALES (tables & walk-ins)"],
+    ["Cash Sales", fmt(report.salesTableCash)],
+    ["Online Sales", fmt(report.salesTableOnline)],
+    ["Card Sales", fmt(report.salesTableCard)],
+    ["Credit Sales (billed, not collected)", fmt(report.salesTableCredit)],
+    ["Total Restaurant Sales", fmt(report.salesTableTotal)],
+    [],
+    // Advances are room-only by construction, so they appear here and nowhere else in
+    // Sales. Listed so the block adds up; the money itself was banked under ROOM
+    // ADVANCES on the day it arrived.
+    ...(report.salesRoomTotal > 0
+      ? [
+          ["ROOM SALES"],
+          ["Cash Sales", fmt(report.salesRoomCash)],
+          ["Online Sales", fmt(report.salesRoomOnline)],
+          ["Card Sales", fmt(report.salesRoomCard)],
+          ["Paid by Advance - Cash", fmt(report.salesAdvanceCash)],
+          ["Paid by Advance - Online", fmt(report.salesAdvanceOnline)],
+          ["Credit Sales (billed, not collected)", fmt(report.salesRoomCredit)],
+          ["Total Room Sales", fmt(report.salesRoomTotal)],
+          [],
+        ]
+      : []),
+    ["TOTAL SALES", fmt(report.salesTotal)],
+    [],
+    // Reported, not accounted: the net IS the sale, so no balance moves. Gross is
+    // stated so the two figures explain each other.
+    ["DISCOUNTS"],
+    ["Bills Discounted", report.discountedBills],
+    ["Sales Before Discount", fmt(report.salesTotal + report.discountsTotal)],
+    ["Discount Given", fmt(report.discountsTotal)],
+    [],
+    // Deliberately its OWN block, not a Sales line: a deposit is money in with no
+    // sale behind it yet. Adding it to Sales would double-count at checkout.
+    ["ROOM ADVANCES"],
+    ["Advances Received", fmt(report.advancesReceived)],
+    ["Advances Received - Cash", fmt(report.advancesCash)],
+    ["Advances Received - Online", fmt(report.advancesOnline)],
+    ["Advances Refunded", fmt(report.advancesRefunded)],
+    ["Advances Refunded - Cash", fmt(report.refundsCash)],
+    ["Advances Refunded - Online", fmt(report.refundsOnline)],
+    ["Advance Held at Period End", fmt(report.closingAdvancesHeld)],
     [],
     ["PURCHASES"],
     ["Cash Purchases", fmt(report.purchasesCash)],
     ["Online Purchases", fmt(report.purchasesOnline)],
     ["Credit Purchases (owed, not paid)", fmt(report.purchasesCredit)],
     ["Total Purchase Cost", fmt(report.purchasesTotal)],
+    [],
+    // Overheads. No credit line: an expense row IS the payment, so there is
+    // nothing here that has not already left the till.
+    ["EXTRA EXPENSES"],
+    ["Cash", fmt(report.extraExpensesCash)],
+    ["Online", fmt(report.extraExpensesOnline)],
+    ["Total Extra Expenses", fmt(report.extraExpensesTotal)],
+    ...(report.extraExpensesByCategory.length > 0
+      ? [
+          [],
+          ["EXTRA EXPENSES — BY CATEGORY"],
+          ["Category", "Cash", "Online", "Total"],
+          ...report.extraExpensesByCategory.map((c) => [
+            c.label,
+            fmt(c.cash),
+            fmt(c.online),
+            fmt(c.total),
+          ]),
+        ]
+      : []),
     [],
     // Each supplier bill behind that total — who, when, how much, how settled.
     ...(purchases.length > 0
@@ -438,6 +566,8 @@ export async function exportFinanceCsv(params?: {
     ["Online / Bank Balance", fmt(report.closingOnline)],
     ["Credit to Us (receivable)", fmt(report.closingCreditToUs)],
     ["Credit by Us (payable)", fmt(report.closingCreditByUs)],
+    // Part of the cash balance above belongs to guests until they check out.
+    ["Advance Held (guests' money)", fmt(report.closingAdvancesHeld)],
     ["Net Balance (cash + bank)", fmt(report.closingNet)],
     [],
     // The movement-by-movement explanation of every figure above. Balance
@@ -447,7 +577,7 @@ export async function exportFinanceCsv(params?: {
       ? [
           ["TRANSACTION HISTORY"],
           [
-            "Date & Time", "Transaction Type", "Person", "Payment Method", "Amount", "Reference",
+            "Date & Time", "Transaction Type", "Source", "Person", "Payment Method", "Amount", "Reference",
             "Cash Before", "Cash After",
             "Online Before", "Online After",
             "Credit to Us Before", "Credit to Us After",
@@ -457,7 +587,13 @@ export async function exportFinanceCsv(params?: {
           // the newest movement at the top.
           ...[...ledger].reverse().map((t) => [
             new Date(t.at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }),
-            TX_LABEL[t.kind] ?? t.kind,
+            // A sale names its side of the business; every other kind is itself.
+            t.kind === "sale" && t.source
+              ? t.source === "room"
+                ? "Room Sale"
+                : "Restaurant Sale"
+              : TX_LABEL[t.kind] ?? t.kind,
+            t.sourceLabel ?? "",
             t.party ?? "",
             PURCHASE_METHOD_LABEL[t.method] ?? t.method,
             fmt(t.amount),

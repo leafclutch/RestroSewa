@@ -14,6 +14,7 @@ import {
   Truck,
   Package,
   ShoppingCart,
+  Receipt,
   Wallet,
   Settings,
   LogOut,
@@ -34,10 +35,11 @@ type NavItem = {
    *   "stock"     — the Stock page (view_stock/manage_stock)
    *   "purchases" — the Purchases page (any stock right OR manage_purchases)
    *   "vendors"   — the Vendors page (any stock right OR manage_vendors)
+   *   "expenses"  — the Extra Expenses page (manage_expenses OR view_finance)
    *   "finance"   — the Finance report (view_finance only)
    * Absent ⇒ always shown (the base nav).
    */
-  needs?: "stock" | "purchases" | "vendors" | "finance";
+  needs?: "stock" | "purchases" | "vendors" | "expenses" | "finance";
 };
 
 const NAV: NavItem[] = [
@@ -58,6 +60,10 @@ const STOCK_NAV: NavItem[] = [
   { label: "Stock",     href: "/admin/stock",     icon: Package,      exact: false, needs: "stock" },
   { label: "Purchases", href: "/admin/purchases", icon: ShoppingCart, exact: false, needs: "purchases" },
   { label: "Vendors",   href: "/admin/vendors",   icon: Truck,        exact: false, needs: "vendors" },
+  // Overheads: rent, electricity, water. Sits beside Purchases because both are
+  // money going out, and immediately before Finance because that is where its
+  // total lands.
+  { label: "Extra Expenses", href: "/admin/expenses", icon: Receipt, exact: false, needs: "expenses" },
   { label: "Finance",   href: "/admin/finance",   icon: Wallet,       exact: false, needs: "finance" },
 ];
 
@@ -65,6 +71,7 @@ const stockNavFor = (
   canSeeStock: boolean,
   canSeePurchases: boolean,
   canSeeVendors: boolean,
+  canSeeExpenses: boolean,
   canSeeFinance: boolean
 ) =>
   STOCK_NAV.filter((i) =>
@@ -74,6 +81,8 @@ const stockNavFor = (
       ? canSeePurchases
       : i.needs === "vendors"
       ? canSeeVendors
+      : i.needs === "expenses"
+      ? canSeeExpenses
       : canSeeStock
   );
 
@@ -129,6 +138,7 @@ function NavLinks({
   showStock,
   showPurchases,
   showVendors,
+  showExpenses,
   showFinance,
   showRooms,
   showSettings,
@@ -139,13 +149,14 @@ function NavLinks({
   showStock: boolean;
   showPurchases: boolean;
   showVendors: boolean;
+  showExpenses: boolean;
   showFinance: boolean;
   showRooms: boolean;
   showSettings: boolean;
   rail?: boolean;
   onNavigate?: () => void;
 }) {
-  const stockItems = stockNavFor(showStock, showPurchases, showVendors, showFinance);
+  const stockItems = stockNavFor(showStock, showPurchases, showVendors, showExpenses, showFinance);
   // Rooms only exist for a hotel / restaurant+hotel client — drop the link entirely
   // for a restaurant-only client (the page also redirects).
   const nav = showRooms ? NAV : NAV.filter((i) => i.href !== "/admin/rooms");
@@ -190,6 +201,7 @@ export function AdminSidebar({
   showStock = false,
   showPurchases = false,
   showVendors = false,
+  showExpenses = false,
   showFinance = false,
   showRooms = false,
   showSettings = false,
@@ -199,6 +211,7 @@ export function AdminSidebar({
   showStock?: boolean;
   showPurchases?: boolean;
   showVendors?: boolean;
+  showExpenses?: boolean;
   showFinance?: boolean;
   showRooms?: boolean;
   showSettings?: boolean;
@@ -268,7 +281,7 @@ export function AdminSidebar({
         {/* The nav itself scrolls if it ever outgrows the viewport, so Sign out
             can never be pushed off-screen. */}
         <nav className="flex-1 min-h-0 overflow-y-auto px-2 lg:px-3 py-4 flex flex-col gap-0.5">
-          <NavLinks pathname={pathname} showStock={showStock} showPurchases={showPurchases} showVendors={showVendors} showFinance={showFinance} showRooms={showRooms} showSettings={showSettings} rail />
+          <NavLinks pathname={pathname} showStock={showStock} showPurchases={showPurchases} showVendors={showVendors} showExpenses={showExpenses} showFinance={showFinance} showRooms={showRooms} showSettings={showSettings} rail />
         </nav>
 
         <div
@@ -374,6 +387,7 @@ export function AdminSidebar({
                 showStock={showStock}
                 showPurchases={showPurchases}
                 showVendors={showVendors}
+                showExpenses={showExpenses}
                 showFinance={showFinance}
                 showRooms={showRooms}
                 showSettings={showSettings}

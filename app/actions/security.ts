@@ -191,6 +191,106 @@ export async function updatePaymentTender(
   return { ok: true };
 }
 
+// ─── Room advances ────────────────────────────────────────────────────────────
+// Correcting a deposit is a heavier act than re-splitting a tender. A tender edit only
+// moves money between columns on a bill that already balances; an advance edit rewrites
+// a figure that has ALREADY been counted into a day's cash-in-hand, with no bill to
+// reconcile it against. Hence admin-only AND the Security PIN, and only while the stay
+// is still open — once it is settled the advance is frozen inside a closed bill.
+
+function friendlyAdvanceError(code: string): string {
+  if (code.includes("ADVANCE_STAY_CLOSED")) {
+    return "This stay has been settled — its advances can no longer be changed.";
+  }
+  if (code.includes("ADVANCE_NOT_FOUND")) return "That advance no longer exists.";
+  if (code.includes("INVALID_ADVANCE")) return "The amount and its split don't match.";
+  return "Could not update the advance.";
+}
+
+export async function updateRoomAdvance(
+  pin: string,
+  advanceId: string,
+  split: { amount: number; cash: number; online: number; card: number; method: string }
+): Promise<ActionResult> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+
+  const authorized = await verifySecurityPin(restaurantUser, "edit_room_advance", pin, {
+    type: "room_advance",
+    id: advanceId,
+  });
+  if (!authorized) return { error: "Incorrect Security PIN." };
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).rpc("edit_room_advance", {
+    p_restaurant_id: restaurantUser.restaurant_id,
+    p_actor_id: restaurantUser.id,
+    p_actor_name: restaurantUser.display_name ?? null,
+    p_advance_id: advanceId,
+    p_amount: split.amount,
+    p_cash: split.cash,
+    p_online: split.online,
+    p_card: split.card,
+    p_method: split.method,
+  });
+
+  if (error) {
+    // The PIN was right but the edit was refused — record the attempt.
+    await logSecurityEvent({
+      restaurantId: restaurantUser.restaurant_id,
+      actor: restaurantUser,
+      operation: "edit_room_advance",
+      targetType: "room_advance",
+      targetId: advanceId,
+      outcome: "blocked",
+      detail: { code: error.message },
+    });
+    return { error: friendlyAdvanceError(error.message ?? "") };
+  }
+
+  for (const p of ["/admin/finance", "/admin/dashboard", "/employee/dashboard"]) {
+    revalidatePath(p);
+  }
+  return { ok: true };
+}
+
+export async function removeRoomAdvance(pin: string, advanceId: string): Promise<ActionResult> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+
+  const authorized = await verifySecurityPin(restaurantUser, "edit_room_advance", pin, {
+    type: "room_advance",
+    id: advanceId,
+  });
+  if (!authorized) return { error: "Incorrect Security PIN." };
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).rpc("delete_room_advance", {
+    p_restaurant_id: restaurantUser.restaurant_id,
+    p_actor_id: restaurantUser.id,
+    p_actor_name: restaurantUser.display_name ?? null,
+    p_advance_id: advanceId,
+  });
+
+  if (error) {
+    await logSecurityEvent({
+      restaurantId: restaurantUser.restaurant_id,
+      actor: restaurantUser,
+      operation: "edit_room_advance",
+      targetType: "room_advance",
+      targetId: advanceId,
+      outcome: "blocked",
+      detail: { code: error.message },
+    });
+    return { error: friendlyAdvanceError(error.message ?? "") };
+  }
+
+  for (const p of ["/admin/finance", "/admin/dashboard", "/employee/dashboard"]) {
+    revalidatePath(p);
+  }
+  return { ok: true };
+}
+
 export type PurchaseEditInput = {
   vendorId: string;
   method: "cash" | "online" | "credit" | "mixed";
@@ -242,6 +342,240 @@ export async function updatePurchase(
   }
 
   for (const p of ["/admin/purchases", "/admin/stock", "/admin/finance", "/admin/dashboard"]) {
+    revalidatePath(p);
+  }
+  return { ok: true };
+}
+
+// ─── Extra expenses ───────────────────────────────────────────────────────────
+// Correcting an overhead is the same class of act as correcting a room advance: the
+// row has ALREADY been subtracted from a day's cash-in-hand, and unlike a bill there
+// is nothing to reconcile it against — no customer, no vendor statement, no stock
+// movement. A wrong figure left standing, or a right one quietly deleted, breaks a
+// till count that nobody can afterwards explain. Hence admin-only AND the PIN.
+//
+// Unlike the advance edits, these have no RPC of their own to log success
+// atomically — an expense row is a plain insert, so there is nothing for a function
+// to wrap. Success is therefore logged explicitly here, which is exactly the case
+// `logSecurityEvent` documents itself as covering.
+
+/** Loads the row and proves it belongs to this restaurant before touching it. */
+async function ownedExpense(restaurantId: string, expenseId: string) {
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("extra_expenses")
+    .select("id, category, amount, payment_method, cash_amount, online_amount, saving_title_id")
+    .eq("id", expenseId)
+    .eq("restaurant_id", restaurantId)
+    .maybeSingle();
+  return data ?? null;
+}
+
+export async function updateExtraExpense(
+  pin: string,
+  expenseId: string,
+  next: {
+    category: string;
+    note: string | null;
+    amount: number;
+    method: string;
+    cash: number;
+    online: number;
+    /** Which pot a saving belongs to. Ignored for every other category. */
+    savingTitleId?: string | null;
+  }
+): Promise<ActionResult> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+
+  const authorized = await verifySecurityPin(restaurantUser, "edit_extra_expense", pin, {
+    type: "extra_expense",
+    id: expenseId,
+  });
+  if (!authorized) return { error: "Incorrect Security PIN." };
+
+  const before = await ownedExpense(restaurantUser.restaurant_id, expenseId);
+  if (!before) return { error: "That expense no longer exists." };
+
+  // A saving stays a saving and an expense stays an expense. Letting the category
+  // cross that line would mean a row losing or gaining a pot mid-edit, which the
+  // DB constraint would reject anyway — better to say so plainly than surface a
+  // constraint violation.
+  const isSaving = before.category === "saving";
+  const category = isSaving ? "saving" : next.category;
+  if (!isSaving && next.category === "saving") {
+    return { error: "An expense cannot be turned into a saving. Delete it and record it again." };
+  }
+
+  // A withdrawal stays a withdrawal. The form works in positive numbers — nobody
+  // types "minus three thousand" — so the sign is re-applied here from the row
+  // being edited rather than trusted from the client.
+  const wasWithdrawal = isSaving && Number(before.amount) < 0;
+  const sign = wasWithdrawal ? -1 : 1;
+  const amount = Math.abs(next.amount) * sign;
+  const cash = Math.abs(next.cash) * sign;
+  const online = Math.abs(next.online) * sign;
+
+  let savingTitleId: string | null = null;
+  if (isSaving) {
+    savingTitleId = next.savingTitleId ?? before.saving_title_id ?? null;
+    if (!savingTitleId) return { error: "Choose which saving this goes into." };
+
+    const svc = createServiceClient();
+    // Tenancy again: the pot must be this restaurant's, or an edit could move
+    // money into another tenant's saving.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: title } = await (svc as any)
+      .from("saving_titles")
+      .select("id")
+      .eq("id", savingTitleId)
+      .eq("restaurant_id", restaurantUser.restaurant_id)
+      .maybeSingle();
+    if (!title) return { error: "That saving no longer exists." };
+
+    // Growing a withdrawal — or moving it to a smaller pot — must not take that
+    // pot negative. The balance is measured WITHOUT this row, since this row is
+    // about to be replaced.
+    if (wasWithdrawal) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: rows } = await (svc as any)
+        .from("extra_expenses")
+        .select("id, amount")
+        .eq("restaurant_id", restaurantUser.restaurant_id)
+        .eq("saving_title_id", savingTitleId);
+      const heldWithoutThis = ((rows ?? []) as { id: string; amount: number }[])
+        .filter((r) => r.id !== expenseId)
+        .reduce((s, r) => s + Number(r.amount ?? 0), 0);
+      if (Math.abs(amount) > heldWithoutThis + 0.005) {
+        return { error: "That is more than this saving holds." };
+      }
+    }
+  }
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("extra_expenses")
+    .update({
+      category,
+      note: next.note,
+      amount,
+      payment_method: next.method,
+      cash_amount: cash,
+      online_amount: online,
+      saving_title_id: savingTitleId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", expenseId)
+    .eq("restaurant_id", restaurantUser.restaurant_id);
+
+  if (error) {
+    await logSecurityEvent({
+      restaurantId: restaurantUser.restaurant_id,
+      actor: restaurantUser,
+      operation: "edit_extra_expense",
+      targetType: "extra_expense",
+      targetId: expenseId,
+      outcome: "blocked",
+      detail: { code: error.message },
+    });
+    return {
+      error: (error.message ?? "").includes("extra_expenses_split_check")
+        ? "Cash and online together must equal the amount."
+        : "Could not update the expense.",
+    };
+  }
+
+  // The BEFORE figures are the point of this record: the row itself now holds only
+  // the corrected values, so without them the log would say an edit happened but
+  // not what it changed — which is the one question anyone asks it afterwards.
+  await logSecurityEvent({
+    restaurantId: restaurantUser.restaurant_id,
+    actor: restaurantUser,
+    operation: "edit_extra_expense",
+    targetType: "extra_expense",
+    targetId: expenseId,
+    outcome: "success",
+    detail: {
+      before: {
+        category: before.category,
+        amount: Number(before.amount),
+        method: before.payment_method,
+        cash: Number(before.cash_amount),
+        online: Number(before.online_amount),
+        savingTitleId: before.saving_title_id ?? null,
+      },
+      after: {
+        category,
+        amount,
+        method: next.method,
+        cash,
+        online,
+        savingTitleId,
+      },
+    },
+  });
+
+  for (const p of ["/admin/expenses", "/admin/finance", "/admin/dashboard"]) {
+    revalidatePath(p);
+  }
+  return { ok: true };
+}
+
+export async function removeExtraExpense(pin: string, expenseId: string): Promise<ActionResult> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+
+  const authorized = await verifySecurityPin(restaurantUser, "delete_extra_expense", pin, {
+    type: "extra_expense",
+    id: expenseId,
+  });
+  if (!authorized) return { error: "Incorrect Security PIN." };
+
+  const before = await ownedExpense(restaurantUser.restaurant_id, expenseId);
+  if (!before) return { error: "That expense no longer exists." };
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("extra_expenses")
+    .delete()
+    .eq("id", expenseId)
+    .eq("restaurant_id", restaurantUser.restaurant_id);
+
+  if (error) {
+    await logSecurityEvent({
+      restaurantId: restaurantUser.restaurant_id,
+      actor: restaurantUser,
+      operation: "delete_extra_expense",
+      targetType: "extra_expense",
+      targetId: expenseId,
+      outcome: "blocked",
+      detail: { code: error.message },
+    });
+    return { error: "Could not delete the expense." };
+  }
+
+  // A deletion leaves nothing behind, so the audit row IS the only remaining
+  // record that this money was ever recorded as spent.
+  await logSecurityEvent({
+    restaurantId: restaurantUser.restaurant_id,
+    actor: restaurantUser,
+    operation: "delete_extra_expense",
+    targetType: "extra_expense",
+    targetId: expenseId,
+    outcome: "success",
+    detail: {
+      deleted: {
+        category: before.category,
+        amount: Number(before.amount),
+        method: before.payment_method,
+        cash: Number(before.cash_amount),
+        online: Number(before.online_amount),
+      },
+    },
+  });
+
+  for (const p of ["/admin/expenses", "/admin/finance", "/admin/dashboard"]) {
     revalidatePath(p);
   }
   return { ok: true };

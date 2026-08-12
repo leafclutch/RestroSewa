@@ -17,7 +17,8 @@ import {
   PURCHASE_STATUS_COLOR,
   PURCHASE_STATUS_LABEL,
   TX_LABEL,
-  TX_TONE,
+  txFlow,
+  txTone,
 } from "@/lib/finance";
 import type {
   FinancePeriod,
@@ -71,7 +72,9 @@ function Section({
   title: string;
   note?: string;
   // `display` overrides the money formatting — used for counts ("3 customers").
-  rows: { label: string; value: number; hint?: string; tone?: string; display?: string }[];
+  // `sub` indents a row beneath the one above it, for a breakdown that explains a
+  // figure rather than adding to the section's own total.
+  rows: { label: string; value: number; hint?: string; tone?: string; display?: string; sub?: boolean }[];
   total?: { label: string; value: number; tone?: string };
   children?: React.ReactNode;
 }) {
@@ -96,10 +99,17 @@ function Section({
       {rows.map((r, i) => (
         <div
           key={r.label}
-          className="flex items-baseline justify-between gap-3 px-4 py-2.5"
-          style={{ borderTop: i === 0 ? "none" : "1px solid var(--color-hairline)" }}
+          className={
+            "flex items-baseline justify-between gap-3 px-4 " + (r.sub ? "py-1.5" : "py-2.5")
+          }
+          // A sub-row explains the row above it, so it gets no rule of its own —
+          // otherwise a four-category breakdown reads as four more expenses.
+          style={{ borderTop: i === 0 || r.sub ? "none" : "1px solid var(--color-hairline)" }}
         >
-          <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
+          <span
+            className={r.sub ? "text-xs pl-4" : "text-sm"}
+            style={{ color: "var(--color-ink-mute)", opacity: r.sub ? 0.8 : 1 }}
+          >
             {r.label}
             {r.hint && (
               <span className="block text-xs" style={{ color: "var(--color-ink-mute)", opacity: 0.75 }}>
@@ -107,7 +117,10 @@ function Section({
               </span>
             )}
           </span>
-          <span className="text-sm tabular-nums shrink-0" style={{ color: r.tone ?? "var(--color-ink)" }}>
+          <span
+            className={(r.sub ? "text-xs" : "text-sm") + " tabular-nums shrink-0"}
+            style={{ color: r.tone ?? "var(--color-ink)", opacity: r.sub ? 0.8 : 1 }}
+          >
             {r.display ?? money2(r.value)}
           </span>
         </div>
@@ -188,8 +201,31 @@ function PurchaseLine({ p }: { p: FinancePurchase }) {
  * money in AND writes the receivable down — which is exactly the thing the old
  * report could not show.
  */
-function LedgerRow({ t }: { t: FinanceTransaction }) {
-  const tone = TX_TONE[t.kind] ?? "var(--color-ink)";
+function LedgerRow({ t, showRooms }: { t: FinanceTransaction; showRooms: boolean }) {
+  // A sale says which side of the business raised it — but only for a client that
+  // HAS both sides. For a restaurant-only client every sale is a restaurant sale,
+  // so "Restaurant sale" would be noise on every row; it stays plain "Sale",
+  // matching the Sales block above, which collapses to one heading the same way.
+  const label =
+    t.kind === "sale" && t.source && showRooms
+      ? t.source === "room"
+        ? "Room sale"
+        : "Restaurant sale"
+      : TX_LABEL[t.kind] ?? t.kind;
+  // "Room 203 · Ram Bahadur" — the place first, then whoever the bill belongs to.
+  // `party` is untouched by the migration, so a credit sale keeps its customer.
+  const who = [t.sourceLabel, t.party].filter(Boolean).join(" · ");
+  // Direction comes from what the row DID, never from what it is called. See
+  // `txFlow` — a refund and a withdrawal both invert their kind's usual meaning.
+  const flow = txFlow(t);
+  const tone = txTone(flow);
+  const moved = Math.abs(flow) > 0.005;
+  // The headline is the money that actually changed hands, so its sign is always
+  // truthful. Where the transaction is WORTH more than what moved — a part-cash
+  // part-credit bill — the full value is printed beside it rather than dropped,
+  // because "-3,000 of 5,000" is the honest reading and "-5,000" is not.
+  const face = Math.abs(t.amount);
+  const differs = moved && Math.abs(Math.abs(flow) - face) > 0.005;
   const when = new Date(t.at);
 
   const legs: { label: string; before: number; after: number; delta: number }[] = [];
@@ -207,8 +243,8 @@ function LedgerRow({ t }: { t: FinanceTransaction }) {
       <div className="flex items-baseline justify-between gap-3">
         <span className="min-w-0">
           <span className="block text-sm" style={{ color: "var(--color-ink)" }}>
-            {TX_LABEL[t.kind] ?? t.kind}
-            {t.party && <span style={{ color: "var(--color-ink-mute)" }}> · {t.party}</span>}
+            {label}
+            {who && <span style={{ color: "var(--color-ink-mute)" }}> · {who}</span>}
           </span>
           <span className="block text-xs" style={{ color: "var(--color-ink-mute)" }}>
             {when.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}{" "}
@@ -218,8 +254,22 @@ function LedgerRow({ t }: { t: FinanceTransaction }) {
             {t.reference && <span> · {t.reference}</span>}
           </span>
         </span>
-        <span className="text-sm tabular-nums shrink-0" style={{ color: tone }}>
-          {money2(t.amount)}
+        <span className="text-sm tabular-nums shrink-0 text-right">
+          <span style={{ color: tone }}>
+            {moved
+              ? `${flow > 0 ? "+" : "−"}${money2(Math.abs(flow))}`
+              : money2(face)}
+          </span>
+          {differs && (
+            <span className="block text-xs" style={{ color: "var(--color-ink-mute)" }}>
+              of {money2(face)}
+            </span>
+          )}
+          {!moved && (
+            <span className="block text-xs" style={{ color: "var(--color-ink-mute)" }}>
+              no money moved
+            </span>
+          )}
         </span>
       </div>
 
@@ -239,7 +289,15 @@ function LedgerRow({ t }: { t: FinanceTransaction }) {
   );
 }
 
-function LedgerSection({ rows, periodLabel }: { rows: FinanceTransaction[]; periodLabel: string }) {
+function LedgerSection({
+  rows,
+  periodLabel,
+  showRooms,
+}: {
+  rows: FinanceTransaction[];
+  periodLabel: string;
+  showRooms: boolean;
+}) {
   // A busy month can run to thousands of movements; rendering them all would
   // stall the page for a number nobody reads to the end of.
   const [limit, setLimit] = useState(40);
@@ -268,7 +326,7 @@ function LedgerSection({ rows, periodLabel }: { rows: FinanceTransaction[]; peri
       </div>
 
       {shown.map((t, i) => (
-        <LedgerRow key={`${t.at}-${t.kind}-${t.reference ?? i}`} t={t} />
+        <LedgerRow key={`${t.at}-${t.kind}-${t.reference ?? i}`} t={t} showRooms={showRooms} />
       ))}
 
       {rows.length > shown.length && (
@@ -380,6 +438,7 @@ export function FinanceClient({
   initialPayroll,
   initialLedger,
   canManage,
+  showRooms = false,
 }: {
   initial: FinanceReport;
   initialOpening: OpeningBalance;
@@ -387,6 +446,9 @@ export function FinanceClient({
   initialPayroll: PayrollSummary;
   initialLedger: FinanceTransaction[];
   canManage: boolean;
+  /** Hotel side of the sheet. False for a restaurant-only client, which has no rooms
+   *  and so no room sales and no deposits — the blocks are not rendered at all. */
+  showRooms?: boolean;
 }) {
   const [report, setReport] = useState(initial);
   const [opening, setOpening] = useState(initialOpening);
@@ -492,7 +554,8 @@ export function FinanceClient({
   // A "salary payment" on the Expenses list means the settlement, so the advances
   // are shown on their own line rather than counted twice.
   const salaryFinal = report.salaryTotal - report.salaryAdvance;
-  const totalExpenses = purchasesPaid + report.vendorCreditPaid + report.salaryTotal;
+  const totalExpenses =
+    purchasesPaid + report.vendorCreditPaid + report.salaryTotal + report.extraExpensesTotal;
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto">
@@ -661,28 +724,152 @@ export function FinanceClient({
               value: report.openingCreditByUs,
               tone: report.openingCreditByUs > 0 ? WE_OWE : undefined,
             },
+            // Only shown once a hotel actually holds one — a restaurant-only client
+            // never sees a row it can't produce.
+            ...(report.openingAdvancesHeld > 0
+              ? [
+                  {
+                    label: "Advance held",
+                    hint: "Guests' deposits, not yet billed",
+                    value: report.openingAdvancesHeld,
+                    tone: WE_OWE,
+                  },
+                ]
+              : []),
           ]}
           total={{ label: "Cash + bank", value: report.openingCash + report.openingOnline }}
         />
 
+        {/* Two businesses under one roof get two blocks. A restaurant-only client sees
+            just this one, still headed "Sales", so nothing changes for them. */}
         <Section
-          title={`Sales · ${periodLabel}`}
-          note="Total is the full value billed — credit included (accrual)"
+          title={`${showRooms ? "Restaurant sales" : "Sales"} · ${periodLabel}`}
+          note={
+            showRooms
+              ? "Tables and walk-ins. Total is the full value billed — credit included (accrual)"
+              : "Total is the full value billed — credit included (accrual)"
+          }
           rows={[
-            { label: "Cash sales", value: report.salesCash, tone: "#1a7a4a" },
-            { label: "Online sales", value: report.salesOnline, tone: "#1a7a4a" },
-            ...(report.salesCard > 0
-              ? [{ label: "Card sales", value: report.salesCard, tone: "#1a7a4a" }]
+            { label: "Cash sales", value: report.salesTableCash, tone: "#1a7a4a" },
+            { label: "Online sales", value: report.salesTableOnline, tone: "#1a7a4a" },
+            ...(report.salesTableCard > 0
+              ? [{ label: "Card sales", value: report.salesTableCard, tone: "#1a7a4a" }]
               : []),
             {
               label: "Credit sales",
-              value: report.salesCredit,
+              value: report.salesTableCredit,
               hint: "Billed but not collected",
               tone: "#f97316",
             },
           ]}
-          total={{ label: "Total sales", value: report.salesTotal }}
+          total={{
+            label: showRooms ? "Total restaurant sales" : "Total sales",
+            value: report.salesTableTotal,
+          }}
         />
+
+        {showRooms && (
+          <Section
+            title={`Room sales · ${periodLabel}`}
+            note="Hotel stays — room charge, extras and room service"
+            rows={[
+              { label: "Cash sales", value: report.salesRoomCash, tone: "#1a7a4a" },
+              { label: "Online sales", value: report.salesRoomOnline, tone: "#1a7a4a" },
+              ...(report.salesRoomCard > 0
+                ? [{ label: "Card sales", value: report.salesRoomCard, tone: "#1a7a4a" }]
+                : []),
+              // Settled by a deposit taken earlier. Advances are room-only by
+              // construction, so these belong here and appear nowhere else in Sales.
+              // Without them a fully prepaid stay showed a total with no sale beneath
+              // it. The money itself was banked under Room advances, on the day it
+              // arrived — split by tender so a mixed deposit isn't one opaque figure.
+              ...(report.salesAdvanceCash > 0
+                ? [
+                    {
+                      label: "Paid by advance — cash",
+                      hint: "Deposit taken earlier in the stay",
+                      value: report.salesAdvanceCash,
+                      tone: "#1a7a4a",
+                    },
+                  ]
+                : []),
+              ...(report.salesAdvanceOnline > 0
+                ? [
+                    {
+                      label: "Paid by advance — online",
+                      hint: "Deposit taken earlier in the stay",
+                      value: report.salesAdvanceOnline,
+                      tone: "#1a7a4a",
+                    },
+                  ]
+                : []),
+              {
+                label: "Credit sales",
+                value: report.salesRoomCredit,
+                hint: "Billed but not collected",
+                tone: "#f97316",
+              },
+            ]}
+            total={{ label: "Total room sales", value: report.salesRoomTotal }}
+          />
+        )}
+
+        {/* The two blocks above always sum to this, so it is stated once rather than
+            left for the reader to add up. */}
+        {showRooms && (
+          <Section
+            title={`All sales · ${periodLabel}`}
+            note="Restaurant and rooms together"
+            rows={[
+              { label: "Restaurant", value: report.salesTableTotal },
+              { label: "Rooms", value: report.salesRoomTotal },
+            ]}
+            total={{ label: "Total sales", value: report.salesTotal, tone: "var(--color-primary)" }}
+          />
+        )}
+
+        {/* Deliberately its OWN section rather than a Sales line. A deposit is money in
+            with NO sale behind it yet — the sale books in full at checkout — so folding
+            it into Room sales would count the same rupee twice and make that total
+            untrue. Hidden entirely for a restaurant, which has no rooms to deposit
+            against. */}
+        {showRooms &&
+          (report.advancesReceived > 0 ||
+            report.advancesRefunded > 0 ||
+            report.closingAdvancesHeld > 0) && (
+          <Section
+            title={`Room advances · ${periodLabel}`}
+            note="Deposits taken before billing — cash movement, not sales"
+            rows={[
+              { label: "Advances received", value: report.advancesReceived, tone: "#1a7a4a" },
+              // The split behind that headline. A deposit can be taken part in cash and
+              // part by transfer, and an owner reconciling a till needs to know which.
+              ...(report.advancesCash > 0
+                ? [{ label: "— cash", value: report.advancesCash }]
+                : []),
+              ...(report.advancesOnline > 0
+                ? [{ label: "— online", value: report.advancesOnline }]
+                : []),
+              ...(report.advancesRefunded > 0
+                ? [
+                    {
+                      label: "Advances refunded",
+                      hint: "Unused deposits handed back at checkout",
+                      value: report.advancesRefunded,
+                      tone: WE_OWE,
+                    },
+                  ]
+                : []),
+              ...(report.refundsCash > 0
+                ? [{ label: "— cash", value: report.refundsCash, tone: WE_OWE }]
+                : []),
+              ...(report.refundsOnline > 0
+                ? [{ label: "— online", value: report.refundsOnline, tone: WE_OWE }]
+                : []),
+            ]}
+            total={{ label: "Held at period end", value: report.closingAdvancesHeld }}
+          />
+        )}
 
         {/* Everything that left the business, gathered in one place. The figures
             are already on this page — spread across Purchases, Vendor credits and
@@ -690,7 +877,7 @@ export function FinanceClient({
             have to add up three sections to find out. */}
         <Section
           title={`Expenses · ${periodLabel}`}
-          note="All money out — purchases, vendors and staff"
+          note="All money out — purchases, vendors, staff and overheads"
           rows={[
             {
               label: "Product purchases",
@@ -715,6 +902,20 @@ export function FinanceClient({
               value: report.salaryAdvance,
               tone: report.salaryAdvance > 0 ? "#f97316" : undefined,
             },
+            {
+              label: "Extra expenses",
+              hint: "Rent, electricity and other overheads",
+              value: report.extraExpensesTotal,
+              tone: report.extraExpensesTotal > 0 ? WE_OWE : undefined,
+            },
+            // The breakdown answers "where did it go" without opening another
+            // page. Categories with no spend never reach here, so a quiet period
+            // simply shows the one line above.
+            ...report.extraExpensesByCategory.map((c) => ({
+              label: c.label,
+              value: c.total,
+              sub: true,
+            })),
           ]}
           total={{ label: "Total money out", value: totalExpenses, tone: totalExpenses > 0 ? WE_OWE : undefined }}
         />
@@ -891,6 +1092,38 @@ export function FinanceClient({
           }}
         />
 
+        {/* Sits immediately before Closing so the last thing read before the
+            balances is what was given away to earn them.
+
+            Deliberately its OWN block and NOT part of Sales: the net amount IS
+            the sale everywhere in this app, so the discount has already been
+            taken off every figure above. Listing it as a Sales row would invite
+            subtracting it twice. It moves no balance at all, which is why it has
+            no ledger row and no effect on Closing. */}
+        <Section
+          title={`Discounts · ${periodLabel}`}
+          note="Given away at the till — already deducted from every sales figure above"
+          rows={[
+            {
+              label: "Bills discounted",
+              value: report.discountedBills,
+              display:
+                report.discountedBills === 1 ? "1 bill" : `${report.discountedBills} bills`,
+            },
+            {
+              label: "Sales before discount",
+              hint: "What those bills would have come to",
+              value: report.salesTotal + report.discountsTotal,
+            },
+            { label: "Sales after discount", value: report.salesTotal },
+          ]}
+          total={{
+            label: "Discount given",
+            value: report.discountsTotal,
+            tone: report.discountsTotal > 0 ? "#f97316" : undefined,
+          }}
+        />
+
         <Section
           title="Closing balance"
           note="Opening + money collected − money spent"
@@ -909,13 +1142,25 @@ export function FinanceClient({
               value: report.closingCreditByUs,
               tone: report.closingCreditByUs > 0 ? WE_OWE : undefined,
             },
+            // Part of the cash balance above is NOT yours yet. Saying so is the whole
+            // reason this figure exists — otherwise the till simply looks fuller.
+            ...(report.closingAdvancesHeld > 0
+              ? [
+                  {
+                    label: "Advance held",
+                    hint: "Included in cash above, but owed to guests",
+                    value: report.closingAdvancesHeld,
+                    tone: WE_OWE,
+                  },
+                ]
+              : []),
           ]}
           total={{ label: "Net balance (cash + bank)", value: report.closingNet, tone: "var(--color-primary)" }}
         />
 
         {/* The ledger behind every figure above. Deliberately last: the summary
             answers "where do I stand", this answers "why". */}
-        <LedgerSection rows={ledger} periodLabel={periodLabel} />
+        <LedgerSection rows={ledger} periodLabel={periodLabel} showRooms={showRooms} />
       </div>
 
       <Modal

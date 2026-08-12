@@ -4,6 +4,94 @@ Human-readable release notes. Newest first. Group entries by Added / Changed / F
 Versioning is informal (the app ships continuously); dates anchor the entries.
 
 ## [Unreleased] — 2026-08
+### Added
+- **Transaction history now says where a sale came from.** Every sale used to read just "Sale".
+  It now reads **"Room sale · Room 203"** or **"Restaurant sale · Table 5"** (walk-ins show their
+  slot), and a bill on credit still shows the customer beside it — "Room sale · Room 203 · Ram
+  Bahadur". The CSV export gains a **Source** column with the same detail. A restaurant without
+  rooms keeps the plain "Sale" wording, exactly as its Sales block stays a single heading.
+- **Discounts now appear in Finance, not just the emailed report.** A new **Discounts** block on
+  `/admin/finance`, sitting just above Closing balance: how many bills were discounted, what those
+  bills would have come to, what they actually came to, and the total given away. Also in the CSV
+  export. The daily PDF now reads the same figure from the same place, so the two can't disagree.
+  Note it changes no balance — every sales figure on the page is already after discount, so this
+  block explains what was foregone rather than adding another deduction.
+
+### Fixed
+- **Transaction history now shows money the way it actually moved.** Each row was coloured by what
+  it was *called* rather than which way the money went, so several read backwards: a refunded room
+  deposit showed green as if money came in, a saving withdrawal showed red as if money went out,
+  and a sale on credit showed green although nothing was collected. Every row now reads
+  **green +amount for money in, red −amount for money out**, and events that moved no money (a
+  credit sale, a purchase entirely on credit, a carried-over balance) say **"no money moved"**
+  instead of borrowing a colour. Where a bill is worth more than what changed hands, the full
+  value is shown beneath — "−₹3,000 / of ₹5,000" — rather than overstating the outflow.
+
+### Added
+- **New: Extra Expenses.** A new page under Stock & Finance for the overheads that are neither
+  stock nor wages — rent, electricity, water, gas, internet, maintenance, marketing, licences,
+  transport and anything else. Pick a category, add a note ("July bill, NEA"), enter the amount
+  and say whether it was paid in **Cash, Online, or both**. Until now that money left the till and
+  the books never learned about it, so closing cash was wrong by exactly the rent.
+  - It flows straight into the four balances: cash out of the till, online out of the bank, on the
+    day you record it. The Finance ledger shows each one as its own line.
+  - The **Expenses** section of the Finance report gains an **Extra expenses** line with the
+    categories that actually had spend listed beneath it, so "where did the cash go" is answerable
+    without opening another page. The same lines appear in the CSV export and the daily PDF.
+  - **Estimated profit is now sales − purchases − salaries − extra expenses.** It was overstating
+    profit by every overhead you paid.
+  - An expense is always money that has **already left** — there's no "unpaid bill" state to chase.
+    Log it the day you pay it.
+  - Recording needs the new **Manage Extra Expenses** permission; correcting or deleting one is
+    owner-only and needs the **Security PIN**, because the row has already moved a day's cash
+    balance. Every correction and deletion is logged with its before-and-after figures.
+- **New: Saving, inside Extra Expenses.** A **Saving** tab where you create named pots — an
+  emergency fund, a new oven, next year's licence — and file money into each one, in cash, online
+  or both, exactly like any other expense. Open a pot to see everything ever put into it and what
+  it holds in total.
+  - Money set aside leaves your cash or bank the day you file it, and shows in Finance as a
+    single **Saving** line. The pot names and their entries stay on the Extra Expenses page —
+    the finance report deliberately doesn't repeat them.
+  - Rename a pot at any time; everything already filed under it follows the new name. A pot with
+    money in it **cannot** be deleted, so nothing is ever stranded.
+  - Saving counts against estimated profit like any other expense, so a month where you save
+    heavily will read as a leaner month.
+  - **Withdraw** takes money back out of a pot, in cash, online or both. It returns to your cash
+    or bank the day you record it, the pot balance drops by the same amount, and the period's
+    **Saving** figure is net — deposits less withdrawals. You cannot take out more than a pot
+    holds. Because saving lowers estimated profit, withdrawing raises it again; over any stretch
+    covering both, the two cancel out.
+- **New: advance payments on rooms.** Take a deposit at check-in — there's now an optional
+  **Advance payment** box on the check-in form (Cash / Online / Card / Cash + Online) — and take
+  more later from the room's folio at any time during the stay. At checkout the bill shows
+  **Grand total → Advance received → Balance payable**, and the guest only pays the balance; the
+  printed bill and the Sales reprint show the same three lines. If the deposit came to more than
+  the final bill, checkout shows **Refund due** instead and records the money going back, as cash
+  or a transfer.
+  - The money lands in your cash-in-hand **the day you take it**, so an evening till count now
+    matches the report — but it is **not** counted as a sale until the guest checks out, so no day
+    is inflated by a deposit and no bill is counted twice.
+  - Sales now carries **Paid by advance — cash** and **— online** lines, so a stay settled by its
+    deposit shows up as a sale instead of only lifting the total, and a mixed deposit doesn't
+    collapse into one figure. The Sales rows add up exactly again.
+  - **A refund can be split too** — return part in cash and transfer the rest, with the deposit's
+    own make-up shown beside it ("Held as ₹3,000 cash + ₹2,000 online") so you can see what's
+    actually there to give back.
+  - Every advance figure in Finance now shows its cash/online split — received, refunded, and the
+    part applied to a bill — on screen, in the CSV and in the daily PDF.
+- **Finance now separates Restaurant sales from Room sales.** Tables and walk-ins in one block,
+  hotel stays in another, and an **All sales** line showing the two together — so you can see at a
+  glance what the kitchen earned and what the rooms earned. The advance lines live in Room sales,
+  where they belong. **A restaurant without rooms sees none of this** — one block, still headed
+  "Sales", exactly as before. Applies on screen, in the CSV export and in the daily PDF.
+  - Finance gains a **Room advances** section (received / refunded) and an **Advance held** figure
+    on the opening and closing balances — guests' money that is sitting in your till but isn't
+    yours yet. It's in the CSV export and the daily PDF too.
+  - A mistyped deposit can be removed from the folio by the **owner only**, using the Security PIN,
+    and only while the guest is still checked in. Every attempt is recorded in
+    Admin → Settings → Security activity.
+  - Taking an advance needs no new permission — anyone who can check a guest in can take one.
+
 ### Fixed
 - **The Place order button sat below the bottom of the screen when adding items to a table.** With a
   full menu you had to scroll to reach it. The menu now scrolls inside the page and the order bar

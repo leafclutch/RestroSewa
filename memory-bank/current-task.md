@@ -6,6 +6,221 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
+**Extra Expenses (2026-08-13) — CODE COMPLETE on DEV, not yet exercised in a browser.**
+Overheads that are neither stock nor people: rent, electricity, water, gas, internet, maintenance,
+marketing, licenses, transport, other. New page `/admin/expenses` in the Stock & Finance nav group.
+Spec: `docs/superpowers/specs/2026-08-13-extra-expenses-design.md`.
+
+**The model is deliberately the thinnest thing that is true.** An expense row IS the payment —
+no status column, no payable, no settle-later screen, no RPCs. `extra_expenses` is the shape of
+`purchases` minus the credit leg, written by a plain insert with `resolveSplit()` validating and
+the CHECK (`cash + online = amount`) as the backstop. A bill that has arrived unpaid is simply not
+an expense yet. `credit` is excluded from `payment_method` for the same reason `salary_payments`
+excludes it: "we didn't pay" is the absence of a payment, not a kind of one.
+
+**Decisions worth not re-litigating:**
+- **No back-dating.** The expense lands on the business day it is recorded. Back-dating would
+  silently rewrite a day whose PDF is already sent and marked in `report_deliveries`.
+- **Category is a CHECK, and every key is a single word.** `finance_transactions` labels a ledger
+  row `initcap(category)`, so a label like "Licenses & Taxes" in `lib/expenses.ts` would make one
+  expense read two ways on two screens. Labels equal `initcap(key)` by construction.
+- **`canViewExpenses` does NOT pass on a stock right** (unlike Purchases/Vendors) — the overheads
+  list is the landlord and the power bill, not the store room. `manage_expenses` OR `view_finance`.
+- Edit/delete: admin role + Security PIN, logged with **before/after** figures. These are the first
+  PIN ops with no RPC of their own, so they call `logSecurityEvent` for success themselves.
+
+**Savings (same day, second round).** "Saving" is the **eleventh category**, plus a `saving_title_id`
+pointing at a new `saving_titles` table (the pots). Because it is just a category, it reached the
+period total, the split, the ledger, the CSV, the PDF and the profit subtraction **with zero changes
+to either finance function** — which is exactly why it was modelled this way rather than as its own
+table. Finance shows ONE "Saving" line and never the per-title detail; the pots live only on
+`/admin/expenses`. Savings DO reduce estimated profit (user's explicit call). A pot's total is
+ALL-TIME and the period picker is hidden on that tab. Two constraints carry the guarantees:
+`(category='saving') = (saving_title_id is not null)` and `on delete restrict` on the FK — a pot
+with money in it cannot be deleted (API returns 409, verified).
+
+**Withdrawals (third round, same day).** A withdrawal is a **negative saving row** — the
+`room_advances` signed-row trick again, and again it needed **no change to either finance
+function**: every figure already SUMS these rows, so pot balance, period total, both cash balances
+and the ledger delta come out right from the signs alone. `extra_expenses_total` is therefore NET
+for the period. The load-bearing new constraint is `cash_amount * amount >= 0` (and the same for
+online): without it a row could be `amount −5000, cash +8000, online −13000`, which satisfies the
+split check and would credit the till 8,000 that never existed. Over-withdrawal is refused on both
+create and edit (the edit measures the pot excluding the row being replaced). The form is all
+positive numbers; the sign is applied once at the server boundary and re-applied from the existing
+row on edit, so a deposit cannot be flipped into a withdrawal from the client.
+⚠️ Since saving cuts profit, withdrawing RAISES it — accepted, and the mirror of the earlier
+choice; it cancels over any period holding both.
+
+**Migrations (DEV only — user migrates prod):** `20260813000000` the table;
+`20260813000100` `finance_report` (+4 appended columns incl. `extra_expenses_by_category` jsonb)
+and `finance_transactions` (+`extra_expense` kind). Both bodies rebuilt from `pg_get_functiondef`,
+never the repo files — the same trap as last time. `20260814000000` `saving_titles` +
+`saving_title_id` + the widened category CHECK — **touches no function at all**;
+`20260814100000` the signed-amount + sign-agreement constraints — **also touches no function**;
+`20260815000000` `finance_report` +`discounts_total`/`discounted_bills` (generated from the live
+definition by targeted insertion rather than retyping a 300-line body); `20260815100000`
+`finance_transactions` +`source`/`source_label` on the sale branch (generated the same way, with
+anchor assertions — 9 branches touched, verified 121 ledger rows before AND after, so the three
+new LEFT JOINs cause no fan-out).
+
+**Ledger colouring fixed the same day (no migration).** `TX_TONE` (one colour per KIND) was wrong
+for every row that can point both ways; direction now comes from `txFlow = cashDelta + onlineDelta`.
+Measured: **15 of 121** real DEV rows were mis-coloured — advance refunds, saving withdrawals,
+credit sales, fully-credit purchases, salary advances. `TX_TONE` deleted; do not reintroduce.
+
+⚠️ **The two functions had to move together.** `closing_cash` lives in `finance_report` and the
+running balance in `finance_transactions`; a leg in one and not the other breaks
+`opening + Σ deltas == closing` with nothing else failing. The opening legs are floored at
+`finance_openings.effective_from` like `pur`/`vp`/`sal` (the seed already covers pre-books
+movement); the credit legs beside them are unfloored on purpose — do not "make them consistent".
+
+**Estimated profit is now `sales − purchases − salaries − extra expenses`** in the daily PDF. The
+dashboard's "Today's profit" tile was left alone: it is `sales − COGS` from `dashboard_stats`, a
+different formula, and aligning them is an open decision.
+
+**Verified on DEV (measured, not assumed):** `npx tsc --noEmit` clean; `npm run build` clean
+(`/admin/expenses` registered); `node --test` 16/16. With four expenses spanning all three tenders:
+split adds to total ✓, categories add to total ✓, each category adds up ✓, two `rent` rows merged
+into one 38,000 line ordered biggest-first ✓, closing cash fell by exactly 31,200 and bank by
+21,400 with sales/opening/purchases unmoved ✓, **ledger reconciled 0.0000 on both legs** ✓,
+carry-forward 0.0000 ✓, a pre-books-dated expense moved neither opening nor closing ✓, and the
+PostgREST embed (`restaurant_users!extra_expenses_created_by_fkey`) returns 200 ✓. All test rows
+deleted; `finance_report` returns the exact pre-work baseline (22,569.96 / −13,089.84).
+
+**Remaining:**
+1. **In-app QA on DEV**: add cash / online / mixed expenses; confirm the Finance Expenses block and
+   its category lines; correct one and delete one behind the PIN; check both appear in
+   Settings → Security activity; confirm a non-admin sees no edit control and a `manage_expenses`
+   staffer sees the page but not the pencil.
+   Savings: create a pot, file cash/online/mixed into it, rename it, confirm a pot with money
+   refuses to delete, and confirm Finance shows one "Saving" line with no pot names.
+2. **Production migrations `20260813000000`, `20260813000100`, `20260814000000`,
+   `20260814100000`, `20260815000000` and `20260815100000` are PENDING**, on top of the seven
+   already outstanding — **thirteen total**. **DB before app.**
+3. Nothing committed — user drives git.
+
+---
+
+## Previous feature
+**Room advance payments (2026-08-11 → 12) — CODE COMPLETE on DEV, not yet exercised in a browser.**
+A deposit taken at check-in (optional section on the check-in form) and again mid-stay from the
+folio, deducted from the bill at checkout, refunded if it overshoots, and carried correctly through
+cash-in-hand and every report. Spec: `docs/superpowers/specs/2026-08-11-room-advance-payments-design.md`;
+plan: `docs/superpowers/plans/2026-08-11-room-advance-payments.md`.
+
+**The money model, which is the whole design.** Cash lands the day the deposit is taken; the SALE
+still books in full at checkout. That is the app's existing accrual rule pointed the other way
+(credit = sale first, money later; an advance = money first, sale later). Consequence: a **fifth
+balance, "advances held"** — guests' money in the till that isn't yours yet — derived exactly like
+the two credit balances (`Σ room_advances.amount − Σ payments.advance_amount`, both as-of), so it
+carries forward and cannot drift.
+
+**`room_advances.amount` is SIGNED** (positive = taken, negative = refunded). That one decision
+removes a refund table, a refund flag, a second code path, and any refund branch in the finance
+cash legs — the sums already carry the signs. Held on a stay = `sum(amount)`.
+
+⚠️ **The dangerous change, and the reason it was done in one migration:** `payments.advance_amount`
+rewrites the invariant `left on credit = total − (cash+online+card)` into `… + advance_amount`.
+Miss one reader and a prepaid bill silently raises debt nobody owes. Moved together:
+`finance_transactions` (sale branch + method classifier), `check_out_room` (the credit fork),
+`close_bill_with_credit`, `edit_payment_tender` (tender clamped to `total − advance`).
+**`credits.down_payment` now INCLUDES the advance** — which is why `finance_report`'s customer-credit
+leg (`bill_amount − down_payment`) needed no change at all.
+
+**`dashboard_stats` needed NO change** (it has no cash balance, and `sales_total` still reads the
+full bill from one payment row). Stock, purchases, vendors, payroll, bill numbering untouched.
+
+**Migrations (DEV only — user migrates prod):** `20260811000000` table + `payments.advance_amount`;
+`20260811000100` `record_/edit_/delete_room_advance` + `check_in_room` (+6 defaulted params);
+`20260811000200` `check_out_room` (+`p_refund_cash/online`) + `close_bill_with_credit` (+`p_advance`)
++ `edit_payment_tender`; `20260811000300` `finance_report` (4 new columns, appended) +
+`finance_transactions` (new `room_advance` kind); **`20260812000000` `sales_advance`**;
+**`20260812100000` the six split columns**. Split into six rather than the spec's one so each
+applied and verified on its own.
+
+**Second round of user feedback, 2026-08-12 — the cash/online split.** A mixed deposit reported as
+one opaque number: the BALANCES always carried the split (they read `room_advances.cash_amount` /
+`online_amount`) but every figure the report *stated* was a bare total. And a refund could only be
+all-cash or all-online — even though `check_out_room` has accepted `p_refund_cash` **and**
+`p_refund_online` since it was written, so **the mixed refund was a UI-only fix, no migration.**
+Now reported split everywhere: `advances_cash`/`_online`, `refunds_cash`/`_online`,
+`sales_advance_cash`/`_online`. The Sales identity became
+`cash + online + card + advance_cash + advance_online + credit = total`.
+The Sales split is keyed on the PAYMENT's date but reads the STAY's rows
+(`payments → sessions.room_stay_id → room_advances`), uses the NET rows (so a refund is already
+netted — it is cash *retained*, not cash taken), and derives online as `applied − cash` with cash
+clamped to `[0, applied]` so the two can never fail to sum to `sales_advance`.
+The ledger needed nothing: it already carried per-row cash/online legs and labelled `mixed`.
+
+**Third round, 2026-08-12 — Sales split by source (`20260812200000`).** One "Sales" figure mixed
+two businesses. Now `sales_room_*` and `sales_table_*` (cash/online/card/credit/total), room + table
+= the plain figure. A payment is a ROOM sale when `payments.room_stay_id` is set **or** its session
+carries `room_stay_id` / `room_id` / `type='room_service'` — three markers because `room_id`
+survives a session transfer while a creation-time type might not. Measured first: 15 room_service
+payments (all with both room columns), 67 table, 1 walk-in, **zero** hanging off
+`payments.room_stay_id`. The screen shows **Restaurant sales**, **Room sales** (carrying the
+advance lines) and an **All sales** reconciliation block; Room sales and Room advances are gated on
+`hasRooms(config.businessType)` via the cached `getRestaurantConfig`, the same gate the sidebar and
+`/admin/rooms` use. A restaurant-only client sees one block still headed "Sales".
+**The emailed daily PDF splits on the SAME `hasRooms` rule** — `buildDailySummary` now reads
+`restaurants.type` inside its existing `Promise.all` (no extra round trip) and carries `showRooms`
+on the model. It first gated on room ACTIVITY, which was wrong: a hotel with a quiet day would have
+lost its Room block and the emailed report would have disagreed with the screen for the same period.
+
+**Defect found by the user in-app on 2026-08-12, and fixed.** After a checkout the sale did not show
+in Admin → Finance → Sales. Cause: the Sales block lists cash/online/card/credit and an advance is
+none of those, so a prepaid bill added its full value to `sales_total` while contributing NOTHING to
+any row beneath it — **the section silently stopped adding up** (measured on DEV: total 9,500, rows
+3,000, gap 6,500). Fixed by `sales_advance` (Σ `payments.advance_amount` in period), which makes the
+identity exact: `cash + online + card + advance + credit = total` — exact because
+`credits.down_payment` already includes the advance, so the credit leg is the remainder after it.
+Verified PASS today and over all history. **Lesson: a new way to settle a bill needs a Sales LINE,
+not just a balance leg** — the four checkout-shape tests all passed while this was broken, because
+they asserted on `payments` columns rather than on the report the owner actually reads.
+
+**Two traps hit and worth keeping:**
+1. `log_security_event`'s `p_target_id` is **uuid**, not text — the plan had `::text`. Checked the
+   live signature before writing the call.
+2. The live `finance_report`/`finance_transactions` had **already moved on** from migration
+   `20260720000000` (mixed-payments replaced `method='cash'` filters with `cash_amount`/
+   `online_amount` columns in `crp`/`vp`/`sal`). Both new bodies were built from
+   `pg_get_functiondef` dumps, not the repo file — copying the file would have silently reverted
+   mixed payments.
+
+**Verified on DEV (measured, not assumed):**
+- `npx tsc --noEmit` clean; `npm run build` clean; `node --test` **39/39** (8 new folio-maths tests,
+  2 new bill-mapper tests, mock-bill isolation still green).
+- Four checkout shapes, **18/18 assertions**: fully prepaid (no credit row), part prepaid, overshoot
+  (negative row written, net held = bill), and **credit + deposit** — customer balance moved by
+  **2,000**, not 7,000. That last one is the phantom-debt regression.
+- Money model: advance day = cash **+5,000** / sales **+0** / held **+5,000**; checkout day = sales
+  **+8,000** / cash **+3,000** / held back to **0**.
+- **Reconciliation**: `opening + Σ ledger deltas == closing` on cash, bank AND credit, over a period
+  containing an advance, a checkout and a refund. This is the only check that catches a movement
+  added to one function and not the other.
+- Tender-edit clamp: 8,000 on a bill holding a 5,000 advance → `SPLIT_MISMATCH`; 1,000+2,000 accepted.
+- **No-advance regression, 7/7**: a room checkout with no deposit writes `advance_amount = 0`, no
+  advance rows, and moves cash/sales by exactly the bill.
+- **Deploy-window safety**: the deployed app's old 12-name `close_bill_with_credit` and
+  `check_out_room` calls still resolve (they reach business logic, not `42883`/`42725`).
+- All test data removed; `finance_report` returns the **exact** pre-work baseline
+  (closing cash 21,819.96 / sales 86,600 / credit 1,500 / 10,000), advance rows 0.
+
+**Remaining:**
+1. **In-app QA on DEV** (needs a login): check in with a deposit; top up from the folio; check out
+   above and below the deposit; a credit checkout with a deposit; the printed bill's three lines at
+   58mm and 80mm; the folio Advances block on a phone and in the installed PWA.
+2. **Access control**: a non-admin sees no remove control; a wrong Security PIN is refused; both
+   outcomes visible in Admin → Settings → Security activity.
+3. **Production migrations `20260811000000`–`20260811000300`, `20260812000000`,
+   `20260812100000` and `20260812200000` are PENDING** — user applies them.
+   **DB before app**: the app writes `advance_amount`, so the column must exist first.
+4. Nothing committed — user drives git.
+
+---
+
+## Earlier feature
 **Mock Bill / Demo Bill (2026-08-07) — CODE COMPLETE, not yet exercised in a browser.**
 A Security-PIN-gated workspace at `/employee/mock-bill`, reached from a small **M** button on the
 staff dashboard, that composes and prints a bill **identical on paper** to a real one while writing

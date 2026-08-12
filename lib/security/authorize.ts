@@ -19,7 +19,18 @@ export type SecurityOperation =
   // Opening the Mock Billing screen. Unlike the two above it changes NOTHING — it is
   // gated because a mock bill prints indistinguishably from a real one, so who opened
   // the tool (and who tried and failed) is the thing worth recording.
-  | "open_mock_bill";
+  | "open_mock_bill"
+  // Correcting or removing a room advance. Unlike a tender edit, which only moves money
+  // between columns, this rewrites a figure that has ALREADY been counted into a day's
+  // cash balance — so a wrong advance left standing corrupts a till reconciliation that
+  // nobody can later explain.
+  | "edit_room_advance"
+  // Correcting or removing an overhead (rent, electricity). Same reasoning as a
+  // room advance: the row has ALREADY been subtracted from a day's cash balance,
+  // so a wrong figure left standing — or a right one quietly deleted — breaks a
+  // till reconciliation with nothing left to explain it.
+  | "edit_extra_expense"
+  | "delete_extra_expense";
 
 export type SecurityAuditRow = {
   id: string;

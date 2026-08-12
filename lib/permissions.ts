@@ -46,6 +46,11 @@ export const PERMISSIONS = {
   // level from counting stock. See STOCK_ACCESS.canManagePurchases / canManageVendors.
   MANAGE_PURCHASES: "manage_purchases",
   MANAGE_VENDORS:   "manage_vendors",
+  // Overheads — rent, electricity, water. Its own lane rather than a rider on
+  // manage_purchases: recording a supplier bill and paying the landlord are
+  // different trust levels, and an owner must be able to hand a manager the
+  // second without the first. See STOCK_ACCESS.canManageExpenses.
+  MANAGE_EXPENSES:  "manage_expenses",
   VIEW_FINANCE:     "view_finance",
   // Reports
   VIEW_REPORTS:     "view_reports",
@@ -167,6 +172,14 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
       // Creating/editing/deleting vendors and paying what they're owed. Write
       // implies the read of the Vendors page. See STOCK_ACCESS.canManageVendors.
       { key: "manage_vendors", label: "Manage Vendors" },
+    ],
+  },
+  {
+    label: "Extra Expenses",
+    items: [
+      // Recording rent, electricity and the rest. Write implies the read of the
+      // Extra Expenses page. See STOCK_ACCESS.canManageExpenses.
+      { key: "manage_expenses", label: "Manage Extra Expenses" },
     ],
   },
   {
@@ -391,12 +404,27 @@ export const STOCK_ACCESS = {
   /** Creates/edits/deletes vendors and pays them. */
   canManageVendors: (u: { role: string; permissions: string[] }) =>
     hasPermission(u, P_.MANAGE_VENDORS),
+  /**
+   * Sees and records extra expenses (rent, electricity, …).
+   *
+   * Unlike Purchases and Vendors, a stock right does NOT open this page. Those
+   * two are the buying workflow a storekeeper already lives in; the overheads
+   * list is the landlord, the power bill and the licence fees — closer to the
+   * Finance report than to the store room. So it takes its own permission, and
+   * `view_finance` also passes because the report already prints every figure
+   * this page holds.
+   */
+  canViewExpenses: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.MANAGE_EXPENSES, P_.VIEW_FINANCE]),
+  /** Records, corrects and deletes extra expenses. */
+  canManageExpenses: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.MANAGE_EXPENSES),
   /** Sees the Daily Finance Report (takings, margins, all outstanding debt). */
   canViewFinance: (u: { role: string; permissions: string[] }) =>
     hasPermission(u, P_.VIEW_FINANCE),
   /** Shows the Stock & Finance group in the admin sidebar at all. */
   canSeeModule: (u: { role: string; permissions: string[] }) =>
-    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.MANAGE_PURCHASES, P_.MANAGE_VENDORS, P_.VIEW_FINANCE]),
+    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.MANAGE_PURCHASES, P_.MANAGE_VENDORS, P_.MANAGE_EXPENSES, P_.VIEW_FINANCE]),
 };
 
 // ─── Payroll (Staff → Payroll) ────────────────────────────────────────────────

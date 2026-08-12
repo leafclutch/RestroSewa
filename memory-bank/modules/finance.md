@@ -25,9 +25,106 @@ module covers the on-screen Finance report and the emailed daily report.
 - **Four balances**: cash, online/bank, credit-to-us (receivable), credit-by-us (payable).
   Closing = opening + in − out; a period's opening = the same sum at its start ⇒ carry-forward
   cannot drift. Credit moves NO cash the day it's created (accrual — the sale counts at billing).
+- **A fifth balance: advances held** — room deposits taken but not yet applied to a bill. Guests'
+  money sitting in the till. The accrual rule pointed the other way (cash first, sale later), and
+  derived exactly like the credit balances, so it carries forward and cannot drift:
+  `held(T) = Σ room_advances.amount [< T] − Σ payments.advance_amount [< T]`.
+  Refunds need no term — they are negative `room_advances` rows and every sum carries them.
+  **Sales are untouched by advances**: the whole bill still books at checkout.
 - Card is bank money for balances (own Sales line). Mixed = cash+online in lockstep.
-- **Estimated profit** = sales − purchases − salaries; it's optimistic (bought-stock cost, not
-  consumed; unlinked dishes have no cost) and must always be labelled an estimate.
+- **Sales is split by SOURCE: restaurant (tables + walk-ins) vs rooms.** `sales_room_*` and
+  `sales_table_*` (cash/online/card/credit/total); room + table always equals the plain
+  `sales_*` figure. A payment is a room sale when `payments.room_stay_id` is set, or its session
+  carries `room_stay_id` / `room_id` / `type = 'room_service'` — three markers, because `room_id`
+  survives a session transfer while a type set at creation might not. **The Room block is gated on
+  `hasRooms(businessType)`**, the same helper the sidebar and `/admin/rooms` use; a restaurant-only
+  client sees one block still headed "Sales". The emailed daily PDF uses the **same** gate —
+  `buildDailySummary` reads `restaurants.type` and carries `showRooms`; never gate that report on
+  room *activity*, or a hotel's quiet day drops the block and the PDF contradicts the screen.
+- **The Sales block must ADD UP**:
+  per block — `room: cash + online + card + advance_cash + advance_online + credit = room_total`
+  and `restaurant: cash + online + card + credit = table_total` (a table bill can never carry an
+  advance). Advances are room-only by construction, so they appear in the Room block and nowhere
+  else in Sales. The advance part is
+  settled by a deposit taken earlier — not new cash, which was banked under Room advances on the
+  day it arrived. Added 2026-08-12 after a fully prepaid room checkout showed a total with **no
+  sale beneath it** (measured: total 9,500, rows 3,000, gap 6,500). The credit leg is the remainder
+  AFTER the deposit, because `credits.down_payment` includes it — which is what makes it exact.
+- **Every advance figure is reported SPLIT by tender**: `advances_cash`/`advances_online`,
+  `refunds_cash`/`refunds_online`, `sales_advance_cash`/`sales_advance_online`. Card rides with
+  online (bank money). The balances always carried the split; only the reported figures didn't, so
+  a mixed deposit read as one opaque number.
+  - The Sales split is keyed on the **payment's** date but reads the **stay's** advance rows
+    (`payments → sessions.room_stay_id → room_advances`), which is what makes a deposit taken on
+    Monday show against Wednesday's sale.
+  - It uses the stay's **net** rows, so a refund is already netted off — the figure is cash
+    *retained*, not cash first taken. The online half is derived as `applied − cash` (cash clamped
+    to `[0, applied]`) so the two ALWAYS sum to `sales_advance`: the Sales block can never stop
+    adding up, which matters more than surfacing a hypothetical inconsistent row.
+- **Extra expenses are the fourth kind of money out** (after purchases, vendor repayments and
+  salary): the overheads that are neither stock nor people. `extra_expenses` is a plain table with
+  a cash/online split and **no credit leg** — the row IS the payment, so there is no status column,
+  no payable and no settle-later screen. A bill that has arrived unpaid is simply not an expense
+  yet. Reported as `extra_expenses_cash`/`_online`/`_total` plus `extra_expenses_by_category`
+  (jsonb, biggest first, empty categories absent — one round trip, because this app is
+  latency-bound). The opening legs are **floored at `finance_openings.effective_from`** like
+  `pur`/`vp`/`sal`, since the seed already accounts for pre-books movement; the credit legs
+  nearby are deliberately unfloored, so do not "make them consistent".
+  **Category keys are single words on purpose**: `finance_transactions` labels a ledger row with
+  `initcap(category)`, so a label like "Licenses & Taxes" in `lib/expenses.ts` would make the same
+  expense read two different ways on two screens.
+- **A SAVING is an extra expense with a pot** — the eleventh category, `saving`. Because it is just
+  a category, it reached the period total, the split, the ledger, the CSV, the PDF and the profit
+  subtraction **with no change to either finance function**; a separate `savings` table would have
+  needed a new leg in both, which is the pair that must always move together. Finance shows **one
+  "Saving" line and never the per-title detail** — that is deliberate, the pots live only on
+  `/admin/expenses`. Savings DO reduce estimated profit (the user's explicit call), so a month
+  with heavy saving reads as a weaker month.
+- **A WITHDRAWAL is a negative saving row** — `room_advances`' signed-row trick again, and again it
+  meant no change to either finance function: every figure already SUMS these rows, so pot balance,
+  period total, both cash balances and the ledger delta all come out right from the signs alone.
+  `extra_expenses_total` is therefore **net** for the period. Sign safety rests on
+  `cash_amount * amount >= 0` (and the same for online): without it a row could be `amount −5000,
+  cash +8000, online −13000`, which satisfies the split check and would credit the till 8,000 that
+  never existed. Withdrawing more than a pot holds is refused, on both create and edit.
+  ⚠️ Since saving cuts profit, withdrawing RAISES it — a month that empties a pot reads strong.
+  That is the mirror of treating saving as an expense and cancels over any period holding both;
+  the thing to revisit is whether saving should hit profit at all, not how withdrawals work.
+- **Discounts are REPORTED, never accounted.** `discounts_total` + `discounted_bills` on
+  `finance_report`, shown in their own block placed immediately BEFORE Closing balance, plus the
+  CSV. The net amount IS the sale everywhere (no gross/net split), so a discount touches no
+  balance, has **no ledger row**, and cannot change Closing — it is the one figure on the sheet
+  with no counterpart in `finance_transactions`, and that is correct, not an omission. Kept OUT of
+  the Sales block on purpose: every sales figure is already net, so a Sales row would invite
+  subtracting it twice. "Sales before discount" is `salesTotal + discountsTotal`, derived on the
+  client. `buildDailySummary` now reads the figure from `finance_report` instead of summing
+  `payments.discount_amount` itself, so screen, CSV and PDF state one number from one place.
+- **Estimated profit** = sales − purchases − salaries − extra expenses; it's optimistic
+  (bought-stock cost, not consumed; unlinked dishes have no cost) and must always be labelled an
+  estimate. The dashboard's "Today's profit" tile is deliberately NOT this formula — it is
+  `sales − COGS` from `dashboard_stats`, and aligning the two is an open decision.
+- **A ledger SALE names its side of the business.** `finance_transactions` carries `source`
+  (`room` | `walkin` | `table` | null) and `source_label` ("Room 203", "Table 5", "Walk-in 1"); the
+  screen renders "Room sale · Room 203 · Ram Bahadur". **`kind` stays `'sale'` for both** — the
+  ledger groups and reconciles by kind, so splitting it would ripple through `FinanceTxKind`,
+  `TX_LABEL` and every reader to say what two columns already say. `party` is untouched, so a
+  credit sale keeps its customer name. The room test is **copied verbatim from `paysrc`** in
+  `finance_report`; keep them identical or the ledger and the Sales block would classify the same
+  bill differently. The "Restaurant sale"/"Room sale" wording is gated on `showRooms`, the same
+  gate the Sales block uses — a restaurant-only client still reads plain "Sale".
+  ⚠️ The sale branch now LEFT JOINs sessions → room_stays → rooms and restaurant_tables. All are
+  to primary keys, so no fan-out; row count was 121 before and after, which is the check to
+  repeat if that branch is ever touched again.
+- **The ledger colours by DIRECTION, never by kind.** `txFlow(t) = cashDelta + onlineDelta` decides:
+  `> 0` green `+`, `< 0` red `−`, `0` amber "no money moved". The old `TX_TONE` map (one fixed
+  colour per kind) was wrong for every row that can point both ways, and measured on DEV it
+  mis-coloured **15 of 121** real rows: room-advance REFUNDS (green, but money out), saving
+  WITHDRAWALS (red, but money in), credit sales and fully-on-credit purchases (coloured as though
+  cash moved when none did), and salary advances (amber, but real money out). A kind cannot know
+  which way its own row went — only the deltas can. `TX_TONE` is deleted; do not reintroduce it.
+  The headline figure is the money that actually moved, with the transaction's own value printed
+  beneath it when the two differ ("−₹3,000 / of ₹5,000" for a part-cash part-credit bill), because
+  showing −₹5,000 there would claim 5,000 left the till.
 - Report exactly-once via `report_deliveries`; failures logged + retryable.
 
 # Important Components
@@ -37,12 +134,16 @@ module covers the on-screen Finance report and the emailed daily report.
   `lib/reports/pdf/report-document.ts`, `lib/email/mailer.ts`, `app/api/cron/daily-summary`.
 
 # Database Relations
-`payments`, `credits`/`credit_payments`, `purchases`/`vendor_payments`, `finance_openings`,
-`report_deliveries` — see `database.md`. Stock valuation reuses `stock_report` (see `modules/stock.md`).
+`payments`, `credits`/`credit_payments`, `purchases`/`vendor_payments`, `extra_expenses`,
+`finance_openings`, `report_deliveries` — see `database.md`. Stock valuation reuses `stock_report` (see `modules/stock.md`).
 
 # Permissions
 `view_finance` (separate from stock — it exposes takings, margins, all debt). Opening-balance
-write needs `manage_stock` + `view_finance`. Daily-report config is owner-only. See
+write needs `manage_stock` + `view_finance`. Daily-report config is owner-only.
+`manage_expenses` gates recording an overhead — its own lane, NOT a rider on `manage_purchases`,
+because paying the landlord and recording a supplier bill are different trust levels. Viewing
+`/admin/expenses` passes on `manage_expenses` OR `view_finance`; a stock right alone does **not**
+open it (unlike Purchases/Vendors). Correcting or deleting one is admin-role + Security PIN. See
 `modules/permissions.md`.
 
 # Known Limitations

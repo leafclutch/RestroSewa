@@ -36,7 +36,8 @@ the reference for *what* and *how*.
 - Rooms: `view_rooms`, `check_in`, `manage_rooms`
 - Billing: `process_payments`, `apply_discounts`, `refund_bills`
 - Stock: `view_stock`, `manage_stock`
-- Purchases: `manage_purchases` · Vendors: `manage_vendors` · Finance: `view_finance`
+- Purchases: `manage_purchases` · Vendors: `manage_vendors` · Extra Expenses: `manage_expenses`
+  · Finance: `view_finance`
 - Reports: `view_reports`
 - Staff: `view_staff`, `create_staff`, `edit_staff`, `delete_staff`
 - Payroll: `view_payroll`, `manage_payroll`
@@ -47,7 +48,11 @@ Helpers encode tiers so a manager needn't tick a read box under a write box:
   `canManageRooms` (manage). Three tiers — view is read-only, check_in starts stays, manage is CRUD.
 - **STOCK_ACCESS**: `canViewStock` (view|manage_stock) · `canManageStock` · `canViewPurchases`
   (view_stock|manage_stock|manage_purchases) · `canManagePurchases` · `canViewVendors`
-  (…|manage_vendors) · `canManageVendors` · `canViewFinance` · `canSeeModule`.
+  (…|manage_vendors) · `canManageVendors` · `canViewExpenses` (manage_expenses|view_finance) ·
+  `canManageExpenses` · `canViewFinance` · `canSeeModule`.
+  ⚠️ `canViewExpenses` deliberately does **NOT** pass on a stock right, unlike Purchases and
+  Vendors: those are the buying workflow a storekeeper lives in, whereas the overheads list is the
+  landlord and the power bill — closer to the Finance report than the store room.
 - **WALKIN_ACCESS**: `canViewWalkins` (view|manage — read-only section) · `canManageWalkins`
   (open/edit/order/bill/close). Enforced type-aware in shared session actions (`pos.ts`
   `walkInWriteBlocked`) since walk-ins reuse the table session pipeline.

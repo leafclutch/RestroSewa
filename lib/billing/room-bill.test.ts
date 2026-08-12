@@ -25,6 +25,11 @@ const folio = {
   servicePercent: 0,
   service: 0,
   grandTotal: 5000,
+  // No deposit taken, which is the case for every table bill and most stays: the
+  // balance due is simply the whole bill.
+  advancePaid: 0,
+  balanceDue: 5000,
+  refundDue: 0,
 };
 
 test("groups the folio into Room, Extras and Food sections", () => {
@@ -67,6 +72,24 @@ test("exposes the stay block for the hotel header", () => {
   assert.equal(bill.stay.rate, 2500);
   assert.equal(bill.stay.roomType, "Deluxe");
   assert.equal(bill.stay.checkIn, "2026-08-01T06:00:00.000Z");
+});
+
+test("carries the advance and balance through to the bill view", () => {
+  const bill = folioToBill({
+    folio: { ...folio, advancePaid: 2000, balanceDue: 3000, refundDue: 0 },
+    roomType: "Deluxe",
+  });
+  // The deposit is a PAYMENT against the bill, never a reduction of it — the sale
+  // recorded at checkout is still the whole 5,000.
+  assert.equal(bill.grandTotal, 5000);
+  assert.equal(bill.advancePaid, 2000);
+  assert.equal(bill.balanceDue, 3000);
+});
+
+test("a bill with no advance carries zeroes, not undefined", () => {
+  const bill = folioToBill({ folio, roomType: "Deluxe" });
+  assert.equal(bill.advancePaid, 0);
+  assert.equal(bill.balanceDue, bill.grandTotal);
 });
 
 test("a bare room stay with no extras and no food is still a whole bill", () => {
