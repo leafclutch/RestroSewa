@@ -6,6 +6,7 @@ import { buildVisibilityFilter, resolveViewerScope } from "@/lib/assignments";
 import { hasPermission, NAV_ACCESS, PERMISSIONS, ROOM_ACCESS } from "@/lib/permissions";
 import { buildFolio, CHARGE_TYPES } from "@/lib/room-billing";
 import type { RoomChargeType, RoomFolio } from "@/lib/room-billing";
+import { resolveSplit } from "@/lib/payment-split";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -272,6 +273,41 @@ export async function getRoomsOverview(): Promise<RoomOverview[]> {
   });
 }
 
+// ─── Advance payments ────────────────────────────────────────────────────────
+
+/**
+ * Resolve an advance into an explicit cash / online / card split.
+ *
+ * `record_room_advance` will not derive the split from the method the way the older
+ * payment RPCs do — its CHECK constraint demands the three columns sum to the amount —
+ * so the split is settled HERE and never taken from the form. A tampered request must
+ * not be able to claim ₹5,000 of cash against a ₹100 deposit: unlike a bill, this money
+ * lands in the day's cash balance immediately, with no bill to reconcile it against.
+ *
+ * Mixed validation goes through the shared `resolveSplit` so the tolerance and the
+ * wording match every other payment screen in the app.
+ */
+function resolveAdvanceSplit(
+  amount: number,
+  method: string,
+  formData: FormData,
+  prefix: string
+): { cash: number; online: number; card: number } | { error: string } {
+  if (amount === 0) return { cash: 0, online: 0, card: 0 };
+  if (method === "cash") return { cash: amount, online: 0, card: 0 };
+  if (method === "online") return { cash: 0, online: amount, card: 0 };
+  if (method === "card") return { cash: 0, online: 0, card: amount };
+
+  const split = resolveSplit(
+    "mixed",
+    amount,
+    String(formData.get(`${prefix}cash`) ?? ""),
+    String(formData.get(`${prefix}online`) ?? "")
+  );
+  if (!split.ok) return { error: split.error };
+  return { cash: split.cash ?? 0, online: split.online ?? 0, card: 0 };
+}
+
 // ─── Check in ────────────────────────────────────────────────────────────────
 
 export async function checkInRoom(
@@ -300,6 +336,24 @@ export async function checkInRoom(
   if (idType !== "citizenship" && idType !== "nid") return { error: "Choose an ID type." };
   if (!idNumber) return { error: "Enter the guest's ID number." };
   if (!address) return { error: "Enter the guest's permanent address." };
+
+  // The deposit. Entirely optional: blank or zero writes no row at all, so a check-in
+  // without one behaves exactly as it did before this feature existed.
+  const advAmount = parseFloat(String(formData.get("advance_amount") ?? "0")) || 0;
+  const advMethod = String(formData.get("advance_method") ?? "cash").toLowerCase();
+  const advNote = String(formData.get("advance_note") ?? "").trim();
+
+  if (advAmount < 0) return { error: "The advance cannot be negative." };
+  if (advAmount > 0 && !["cash", "online", "card", "mixed"].includes(advMethod)) {
+    return { error: "Choose how the advance was paid." };
+  }
+
+  // The split is DERIVED here rather than trusted from the form. The client sends what it
+  // thinks, and a tampered form must not be able to book ₹5,000 of cash against a ₹100
+  // deposit — that money goes straight into the day's cash balance. Only `mixed` needs the
+  // two numbers, and they have to add up.
+  const advSplit = resolveAdvanceSplit(advAmount, advMethod, formData, "advance_");
+  if ("error" in advSplit) return { error: advSplit.error };
 
   // The same room isolation that governs tables: staff may only work the rooms
   // they are assigned to.
@@ -338,6 +392,15 @@ export async function checkInRoom(
     p_guest_id_type: idType,
     p_guest_id_number: idNumber,
     p_guest_address: address,
+    // The deposit rides INSIDE the check-in transaction. A stay that exists without
+    // the money the guest just handed over is worse than a check-in that failed
+    // outright and can simply be retried.
+    p_advance_amount: advAmount,
+    p_advance_cash: advSplit.cash,
+    p_advance_online: advSplit.online,
+    p_advance_card: advSplit.card,
+    p_advance_method: advAmount > 0 ? advMethod : null,
+    p_advance_note: advNote || null,
   });
 
   if (error) {
@@ -350,6 +413,9 @@ export async function checkInRoom(
     if (msg.includes("ROOM_NEEDS_CLEANING"))
       return { error: "This room is still being cleaned. Mark it clean before checking a guest in." };
     if (msg.includes("GUEST_NAME_REQUIRED")) return { error: "Enter the guest's name." };
+    if (msg.includes("INVALID_ADVANCE")) {
+      return { error: "The advance amount and its split don't match." };
+    }
     if (msg.includes("ROOM_NOT_FOUND")) return { error: "That room no longer exists." };
     return { error: "Could not check the guest in. Please try again." };
   }
@@ -445,6 +511,32 @@ export type RoomFolioView = {
   folio: RoomFolio;
   /** Editable extras, so the panel can offer a remove button on each. */
   charges: { id: string; type: RoomChargeType; description: string; amount: number }[];
+  /** Deposits taken against this stay, oldest first. A refund is a NEGATIVE row. */
+  advances: RoomAdvance[];
+};
+
+/** One deposit (or, when `amount` is negative, one refund) against a stay. */
+export type RoomAdvance = {
+  id: string;
+  /** SIGNED: positive is money taken from the guest, negative is money handed back. */
+  amount: number;
+  cash: number;
+  online: number;
+  card: number;
+  method: string;
+  note: string | null;
+  created_at: string;
+};
+
+type RawAdvance = {
+  id: string;
+  amount: string | number;
+  cash_amount: string | number;
+  online_amount: string | number;
+  card_amount: string | number;
+  method: string;
+  note: string | null;
+  created_at: string;
 };
 
 /**
@@ -481,7 +573,7 @@ async function loadFolioInputs(stayId: string) {
   const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
   if (!visibility.seesAll && !visibility.canSeeRoom(stay.room_id)) return null;
 
-  const [typeRes, chargesRes, sessionRes, restRes] = await Promise.all([
+  const [typeRes, chargesRes, sessionRes, restRes, advancesRes] = await Promise.all([
     svc.from("room_types").select("name").eq("id", stay.rooms?.room_type_id).maybeSingle(),
     svc
       .from("room_charges")
@@ -490,6 +582,14 @@ async function loadFolioInputs(stayId: string) {
       .order("created_at"),
     svc.from("sessions").select("id, status").eq("room_stay_id", stayId).maybeSingle(),
     svc.from("restaurants").select("settings").eq("id", ru.restaurant_id).maybeSingle(),
+    // Deposits taken against this stay. In the SAME round trip as everything else —
+    // this app is latency-bound, so an extra sequential query would cost more than the
+    // query itself ever does.
+    svc
+      .from("room_advances")
+      .select("id, amount, cash_amount, online_amount, card_amount, method, note, created_at")
+      .eq("stay_id", stayId)
+      .order("created_at"),
   ]);
 
   // F&B ordered against this stay's session — this is what puts room service on
@@ -524,12 +624,24 @@ async function loadFolioInputs(stayId: string) {
     amount: Number(c.amount),
   }));
 
+  const advances: RoomAdvance[] = ((advancesRes.data ?? []) as RawAdvance[]).map((a) => ({
+    id: a.id,
+    amount: Number(a.amount),
+    cash: Number(a.cash_amount),
+    online: Number(a.online_amount),
+    card: Number(a.card_amount),
+    method: a.method,
+    note: a.note,
+    created_at: a.created_at,
+  }));
+
   return {
     ru,
     svc,
     stay,
     charges,
     food,
+    advances,
     sessionId,
     typeName: (typeRes.data?.name as string) ?? "—",
     config: {
@@ -600,13 +712,18 @@ export async function getRoomFolio(stayId: string): Promise<RoomFolioView | null
   const input = await loadFolioInputs(stayId);
   if (!input) return null;
 
-  const { svc, stay, charges, food, sessionId, typeName, config } = input;
+  const { svc, stay, charges, food, advances, sessionId, typeName, config } = input;
 
   // A closed stay's folio has to agree with the money that actually moved. Without this
   // the panel and the bill showed the PRE-discount total for every discounted checkout —
   // the guest paid 2,000 and the folio still read 2,180.
   const payment =
     stay.status !== "active" && sessionId ? await loadStayPayment(svc, sessionId) : null;
+
+  // Signed rows, so a refund has already netted itself off. On a CLOSED stay the refund
+  // row is part of this sum, which is exactly right: what the deposit ultimately paid
+  // towards the bill is what `payments.advance_amount` recorded.
+  const advancePaid = advances.reduce((s, a) => s + a.amount, 0);
 
   return {
     stay_id: stay.id,
@@ -624,6 +741,7 @@ export async function getRoomFolio(stayId: string): Promise<RoomFolioView | null
     session_id: sessionId,
     payment,
     charges,
+    advances,
     folio: buildFolio(
       {
         check_in_at: stay.check_in_at,
@@ -634,7 +752,9 @@ export async function getRoomFolio(stayId: string): Promise<RoomFolioView | null
       food,
       // The recorded discount is part of the frozen bill. `config` carries none for a live
       // stay, which is right: the cashier hasn't decided one yet.
-      payment ? { ...config, discount: payment.discount } : config
+      payment
+        ? { ...config, discount: payment.discount, advancePaid }
+        : { ...config, advancePaid }
     ),
   };
 }
@@ -729,6 +849,70 @@ export async function removeRoomCharge(chargeId: string): Promise<ActionResult> 
   return null;
 }
 
+/**
+ * A further deposit taken during the stay.
+ *
+ * Gated on `check_in`, not on a permission of its own: a receptionist who can put a
+ * guest in the room is the person who takes their money at the desk, and a second
+ * permission would mean one unticked box silently breaks the front desk. The room
+ * assignment filter still applies, through `loadFolioInputs`.
+ */
+export async function addRoomAdvance(
+  _prevState: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!ROOM_ACCESS.canCheckIn(ru)) {
+    return { error: "You don't have permission to take an advance." };
+  }
+
+  const stayId = String(formData.get("stay_id") ?? "");
+  const amount = parseFloat(String(formData.get("advance_amount") ?? "0")) || 0;
+  const method = String(formData.get("advance_method") ?? "cash").toLowerCase();
+  const note = String(formData.get("advance_note") ?? "").trim();
+
+  if (!stayId) return { error: "No stay selected." };
+  if (amount <= 0) return { error: "Enter the advance amount." };
+  if (!["cash", "online", "card", "mixed"].includes(method)) {
+    return { error: "Choose how the advance was paid." };
+  }
+
+  const split = resolveAdvanceSplit(amount, method, formData, "advance_");
+  if ("error" in split) return { error: split.error };
+
+  // Also the tenancy + room-assignment check: a stay that isn't this user's returns null.
+  const input = await loadFolioInputs(stayId);
+  if (!input) return { error: "That stay no longer exists." };
+  if (input.stay.status !== "active") {
+    return { error: "This guest has already checked out." };
+  }
+
+  const { error } = await input.svc.rpc("record_room_advance", {
+    p_restaurant_id: ru.restaurant_id,
+    p_stay_id: stayId,
+    p_amount: amount,
+    p_cash: split.cash,
+    p_online: split.online,
+    p_card: split.card,
+    p_method: method,
+    p_note: note || null,
+    p_created_by: ru.id,
+  });
+
+  if (error) {
+    const msg = error.message ?? "";
+    if (msg.includes("STAY_CLOSED")) return { error: "This guest has already checked out." };
+    if (msg.includes("INVALID_ADVANCE")) {
+      return { error: "The advance amount and its split don't match." };
+    }
+    return { error: "Could not record the advance. Please try again." };
+  }
+
+  revalidatePath(`/employee/room/${stayId}`);
+  revalidatePath("/employee/dashboard");
+  return null;
+}
+
 // ─── Check out ───────────────────────────────────────────────────────────────
 
 export async function checkOutRoom(
@@ -790,7 +974,7 @@ export async function checkOutRoom(
   const input = await loadFolioInputs(stayId);
   if (!input) return { error: "That stay no longer exists." };
 
-  const { svc, stay, charges, food, config } = input;
+  const { svc, stay, charges, food, advances, config } = input;
   if (stay.status !== "active") return { error: "This guest has already checked out." };
 
   const folio = buildFolio(
@@ -807,8 +991,31 @@ export async function checkOutRoom(
   const total = folio.grandTotal;
   const paid = cash + online + card;
 
-  if (method === "mixed" && Math.abs(cash + online - total) > 0.01) {
-    return { error: "The combined Cash and Online amounts must equal the total payable amount." };
+  // What the guest still has to hand over. Read from the DATABASE, never from the form —
+  // the same reason the total itself is rebuilt here rather than trusted.
+  //
+  // `total` stays the SALE and is what gets recorded; `balance` is only what the cashier
+  // must collect today. Validating the tender against the total instead would demand the
+  // guest pay for their stay twice.
+  const held = advances.reduce((s, a) => s + a.amount, 0);
+  const applied = Math.min(Math.max(held, 0), total);
+  const balance = Math.round(Math.max(0, total - applied) * 100) / 100;
+  const refundDue = Math.round(Math.max(0, held - total) * 100) / 100;
+
+  const refundCash = parseFloat(String(formData.get("refund_cash") ?? "0")) || 0;
+  const refundOnline = parseFloat(String(formData.get("refund_online") ?? "0")) || 0;
+  if (refundCash < 0 || refundOnline < 0) return { error: "Amounts cannot be negative." };
+  if (Math.abs(refundCash + refundOnline - refundDue) > 0.01) {
+    return {
+      error:
+        refundDue > 0
+          ? `₹${refundDue.toFixed(2)} of unused advance must be refunded to the guest.`
+          : "There is no unused advance to refund.",
+    };
+  }
+
+  if (method === "mixed" && Math.abs(cash + online - balance) > 0.01) {
+    return { error: "The combined Cash and Online amounts must equal the balance payable." };
   }
 
   let customerId: string | null = null;
@@ -828,11 +1035,11 @@ export async function checkOutRoom(
     if (!customerId && !customerName) {
       return { error: "Choose an existing customer, or enter a name for a new credit account." };
     }
-    if (paid >= total) {
+    if (paid >= balance) {
       return { error: "Nothing would be left on credit. Settle it in full instead." };
     }
-  } else if (Math.abs(paid - total) > 0.01) {
-    return { error: `The amount tendered must equal the total of ₹${total.toFixed(2)}.` };
+  } else if (Math.abs(paid - balance) > 0.01) {
+    return { error: `The amount tendered must equal the balance of ₹${balance.toFixed(2)}.` };
   }
 
   const { error } = await svc.rpc("check_out_room", {
@@ -854,6 +1061,11 @@ export async function checkOutRoom(
     p_customer_phone: customerPhone ?? stay.guest_phone,
     p_notes: creditNotes,
     p_created_by: ru.id,
+    // How the unused part of a deposit goes back. The RPC re-derives the AMOUNT from the
+    // advances it holds and refuses a mismatch, so the client chooses only where the
+    // money goes, never how much.
+    p_refund_cash: refundCash,
+    p_refund_online: refundOnline,
   });
 
   if (error) {
@@ -862,6 +1074,9 @@ export async function checkOutRoom(
     if (msg.includes("STAY_NOT_FOUND")) return { error: "That stay no longer exists." };
     if (msg.includes("INVALID_DOWN_PAYMENT")) {
       return { error: "The amount paid now must be less than the bill total." };
+    }
+    if (msg.includes("REFUND_MISMATCH")) {
+      return { error: "The refund no longer matches the advance held. Reload and try again." };
     }
     return { error: "Could not check the guest out. Please try again." };
   }

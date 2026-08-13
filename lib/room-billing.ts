@@ -103,6 +103,12 @@ export type FolioConfig = {
   taxPercent?: number;
   servicePercent?: number;
   discount?: number;
+  /**
+   * Net advance already received against this stay — the sum of the stay's SIGNED
+   * `room_advances` rows, so a refund has already been netted off by the caller.
+   * It does not change what the stay COSTS, only what is left to hand over.
+   */
+  advancePaid?: number;
 };
 
 export type RoomFolio = {
@@ -130,6 +136,13 @@ export type RoomFolio = {
   servicePercent: number;
   service: number;
   grandTotal: number;
+
+  /** Money already received against this bill before checkout. Never negative. */
+  advancePaid: number;
+  /** What the guest hands over at checkout: grandTotal − advancePaid, floored at 0. */
+  balanceDue: number;
+  /** What the HOTEL hands back when the deposit overshot the bill. Floored at 0. */
+  refundDue: number;
 };
 
 const money = (n: number) => Math.round(n * 100) / 100;
@@ -201,6 +214,12 @@ export function buildFolio(
   const tax = money(taxable * (taxPercent / 100));
   const service = money(taxable * (servicePercent / 100));
 
+  // The advance is netted against the FINAL payable — after the discount, after tax and
+  // service — because that is the number the guest is being asked for. Clamped at zero:
+  // a negative net advance would otherwise read as a surcharge invented by arithmetic.
+  const advancePaid = money(Math.max(config.advancePaid ?? 0, 0));
+  const grandTotal = money(taxable + tax + service);
+
   return {
     checkIn: stay.check_in_at,
     checkOut,
@@ -220,6 +239,9 @@ export function buildFolio(
     tax,
     servicePercent,
     service,
-    grandTotal: money(taxable + tax + service),
+    grandTotal,
+    advancePaid,
+    balanceDue: money(Math.max(0, grandTotal - advancePaid)),
+    refundDue: money(Math.max(0, advancePaid - grandTotal)),
   };
 }

@@ -11,6 +11,7 @@ import { CountPill } from "@/components/ui/count-pill";
 import { Button } from "@/components/ui/button";
 import { formatShort } from "@/lib/format-time";
 import { TransferModal } from "@/app/(employee)/employee/_components/transfer-modal";
+import { AdvanceFields } from "@/app/(employee)/employee/_components/advance-fields";
 import { BedDouble, Clock, LogIn, MoveRight, Plus, Receipt, Sparkles, User, Users, UtensilsCrossed, X } from "lucide-react";
 
 const rupee = (n: number) => "₹" + Number(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
@@ -53,6 +54,9 @@ const STATUS = STATUS_STYLE;
 
 function CheckInModal({ room, onClose }: { room: RoomOverview; onClose: () => void }) {
   const [state, action, pending] = useActionState(checkInRoom, null);
+  // Only ever false while a Cash + Online deposit doesn't add up. The server validates
+  // the same thing; this just stops an obviously-incomplete submit.
+  const [advanceOk, setAdvanceOk] = useState(true);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -200,6 +204,20 @@ function CheckInModal({ room, onClose }: { room: RoomOverview; onClose: () => vo
             />
           </div>
 
+          {/* The deposit. Optional in the strictest sense: leave the amount blank and no
+              advance record is written at all, so a check-in without one behaves exactly
+              as it did before this existed. */}
+          <div
+            className="rounded-lg border px-3 py-3"
+            style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}
+          >
+            <p className="text-xs font-medium mb-2.5" style={{ color: "var(--color-ink)" }}>
+              Advance payment{" "}
+              <span style={{ color: "var(--color-ink-mute)" }}>(optional)</span>
+            </p>
+            <AdvanceFields mode="optional" onValidChange={setAdvanceOk} />
+          </div>
+
           <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
             The nightly rate is fixed at {rupee(room.base_price)} for this stay — a later price
             change won&rsquo;t re-bill this guest.
@@ -209,7 +227,7 @@ function CheckInModal({ room, onClose }: { room: RoomOverview; onClose: () => vo
             <p className="text-xs" style={{ color: "var(--color-ruby)" }}>{state.error}</p>
           )}
 
-          <Button type="submit" variant="primary" disabled={pending} className="w-full">
+          <Button type="submit" variant="primary" disabled={pending || !advanceOk} className="w-full">
             {pending ? "Checking in…" : "Check in"}
           </Button>
         </div>

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
-import { hasPermission, hasAnyPermission, NAV_ACCESS, PERMISSIONS } from "@/lib/permissions";
+import { hasPermission, hasAnyPermission, NAV_ACCESS, PERMISSIONS, ROOM_ACCESS } from "@/lib/permissions";
 import { getRoomFolio } from "@/app/actions/rooms";
 import { getSessionDetail } from "@/app/actions/pos";
 import { getWorkstations } from "@/app/actions/workstations";
@@ -103,6 +103,12 @@ export default async function RoomPage({
       canPrintBill={canPrintTickets}
       // Billing + Close Bills, same as a table bill. The action re-checks it.
       canUseCredit={NAV_ACCESS.canManageCredits(restaurantUser)}
+      // Taking a deposit rides on check_in: whoever can put a guest in the room is the
+      // person who takes their money at the desk.
+      canTakeAdvance={ROOM_ACCESS.canCheckIn(restaurantUser)}
+      // CORRECTING one is a different act — it rewrites money already counted into a
+      // day's cash. Owner-only, and the server also demands the Security PIN.
+      canEditAdvance={restaurantUser.role === "restaurant_admin"}
     />
     </>
   );

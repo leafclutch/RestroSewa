@@ -475,6 +475,8 @@ export function BillTicket({
   customer,
   discount = 0,
   grandTotalOverride,
+  advancePaid = 0,
+  balanceDue,
 }: {
   restaurant: RestaurantInfo;
   billNo: string;
@@ -505,6 +507,16 @@ export function BillTicket({
    * back-solve it out of prices and discounts.
    */
   grandTotalOverride?: number;
+  /**
+   * A deposit already received against this bill, and what is left to hand over.
+   *
+   * Printed ONLY when `advancePaid > 0` — which is never for a table bill, a walk-in or
+   * the mock screen, so their output stays byte-identical. The GRAND TOTAL line does not
+   * move either: the bill is still for the whole stay, and an advance is a payment
+   * against it, not a reduction of it.
+   */
+  advancePaid?: number;
+  balanceDue?: number;
 }) {
   const hasCustomer = !!(
     customer &&
@@ -656,6 +668,17 @@ export function BillTicket({
       {discount > 0 && <Line label="Discount" value={`- ${rupee(discount)}`} />}
       <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
       <Line label={discount > 0 ? "TOTAL PAYABLE" : "GRAND TOTAL"} value={rupee(grandTotal)} bold />
+      {advancePaid > 0 && (
+        <>
+          <Line label="Advance received" value={`- ${rupee(advancePaid)}`} />
+          <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
+          <Line
+            label="BALANCE PAYABLE"
+            value={rupee(balanceDue ?? Math.max(0, grandTotal - advancePaid))}
+            bold
+          />
+        </>
+      )}
       <Divider />
 
       {credit ? (

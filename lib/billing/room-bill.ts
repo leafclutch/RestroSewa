@@ -41,6 +41,10 @@ export type RoomBillView = {
   subtotal: number;
   discount: number;
   grandTotal: number;
+  /** Received before checkout. 0 on a stay with no deposit — and on every table bill. */
+  advancePaid: number;
+  /** What is handed over at checkout: grandTotal − advancePaid. */
+  balanceDue: number;
 };
 
 export type RoomBillInput = { folio: RoomFolio; roomType: string };
@@ -84,5 +88,7 @@ export function folioToBill({ folio, roomType }: RoomBillInput): RoomBillView {
     subtotal: folio.subtotal,
     discount: folio.discount,
     grandTotal: folio.grandTotal,
+    advancePaid: folio.advancePaid,
+    balanceDue: folio.balanceDue,
   };
 }

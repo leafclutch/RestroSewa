@@ -33,6 +33,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         showStock={STOCK_ACCESS.canViewStock(restaurantUser)}
         showPurchases={STOCK_ACCESS.canViewPurchases(restaurantUser)}
         showVendors={STOCK_ACCESS.canViewVendors(restaurantUser)}
+        showExpenses={STOCK_ACCESS.canViewExpenses(restaurantUser)}
         showFinance={STOCK_ACCESS.canViewFinance(restaurantUser)}
         // Rooms only exist for a hotel / restaurant+hotel client.
         showRooms={showRooms}

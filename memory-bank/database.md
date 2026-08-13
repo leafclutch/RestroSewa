@@ -56,12 +56,50 @@ almost everything is reached through the **service_role** client or **RPCs** (RL
 
 ## Billing & credit
 - **payments** — one row per bill. `cash_amount`, `online_amount`, `card_amount`, `total_amount`,
-  `discount_amount`, `payment_method` (cash | online | card | credit | **mixed**), `bill_number`.
-  Rule: net (after discount) IS the sale; mixed splits cash+online in lockstep. Bill number
-  stamped by a DB trigger; history-preserving.
+  `discount_amount`, `advance_amount`, `payment_method` (cash | online | card | credit | **mixed**),
+  `bill_number`. Rule: net (after discount) IS the sale; mixed splits cash+online in lockstep. Bill
+  number stamped by a DB trigger; history-preserving.
+  ⚠️ **`advance_amount` is NOT a fourth tender** — no money moved today for it; it records how much
+  of the bill a room deposit already covered. It changed a load-bearing invariant everywhere:
+  `left on credit = total_amount − (cash + online + card + advance_amount)`. Readers that must stay
+  in lockstep: `finance_transactions` (sale branch), `check_out_room`, `close_bill_with_credit`,
+  `edit_payment_tender` (clamps the editable tender to `total − advance`), `lib/credits.ts`.
+- **room_advances** — room deposits. `amount` is **SIGNED**: positive = taken, negative = refunded,
+  so held = `sum(amount)` and a refund needs no second table. CHECK enforces
+  `cash+online+card = amount` and `amount <> 0`; `method` in (cash|online|card|mixed). Written only
+  via `record_room_advance` / `edit_room_advance` / `delete_room_advance` (the last two log to
+  `security_audit_log` and refuse a settled stay). `credits.down_payment` **includes** the advance,
+  which is what keeps `finance_report`'s customer-credit leg (`bill_amount − down_payment`) correct
+  with no change.
 - **credits / credit_payments / credit_customers** — customer **receivables** (money owed TO
   us), accrual: the sale counts at billing; repayments move cash later. Gated on
   process_payments + close_bills.
+- **extra_expenses** — overheads (rent/electricity/water/gas/internet/maintenance/marketing/
+  licenses/transport/other). The shape of `purchases` **minus the credit leg**: CHECK enforces
+  `cash_amount + online_amount = amount` and `amount > 0`; `payment_method` in (cash|online|mixed)
+  — `credit` is excluded because "we didn't pay" is the absence of an expense, not a kind of one.
+  **No status column and no RPCs**: the row IS the payment, written by a plain insert through
+  `app/actions/expenses.ts` with `resolveSplit()` validating and the CHECK as backstop. Correct or
+  delete only via `updateExtraExpense`/`removeExtraExpense` (admin + Security PIN), which log
+  before/after to `security_audit_log` — there is no RPC to log success atomically, so those
+  actions log it themselves. **Category is a CHECK, not free text**, and the keys are single words
+  so `initcap(category)` in `finance_transactions` equals the label in `lib/expenses.ts`.
+  **No back-dating** — an expense lands on the day it is recorded, because back-dating would
+  rewrite a business day whose PDF is already in `report_deliveries`.
+  **`category = 'saving'` is a SAVING** — same table, same tender split, same effect on every
+  balance, plus a `saving_title_id`. Two constraints carry it: `(category='saving') =
+  (saving_title_id is not null)` (an equivalence, so neither a pot-less saving nor a rent row with
+  a pot is representable) and `on delete restrict` on the FK (a pot holding money cannot be
+  deleted, so entries are never stranded while Finance still counts them).
+  **`amount` is SIGNED for savings only**: a withdrawal is a negative row (the `room_advances`
+  trick), so `amount <> 0 and (category='saving' or amount > 0)`. Each leg must agree in sign with
+  the amount — `cash_amount * amount >= 0`, same for online — WITHOUT which `amount −5000,
+  cash +8000, online −13000` would pass the split check and credit the till 8,000 that never
+  existed. `extra_expenses_split_check` is unchanged; it already holds for negative rows.
+- **saving_titles** — savings pots. A table rather than free text so a pot can be RENAMED without
+  rewriting the history filed under it, and so its all-time total is exact. Unique per restaurant
+  on `lower(btrim(name))` (an expression index, like `vendors`). Pots appear ONLY on
+  `/admin/expenses`; Finance shows a single "Saving" category line and never the per-title detail.
 
 ## Purchasing & stock (payables + inventory)
 - **vendors / vendor_payments** — supplier **payables** (money owed BY us). `credit_balance` is

@@ -40,18 +40,68 @@ export async function renderDailySummaryPdf(
   pdf.row("Online / Bank", money(m.openingOnline));
   pdf.row("Credit to us (receivable)", money(m.openingCreditToUs));
   pdf.row("Credit by us (payable)", money(m.openingCreditByUs));
+  if (m.advancesHeldOpening > 0) {
+    pdf.row("Advance held (guests' money)", money(m.advancesHeldOpening));
+  }
 
   // A mixed (cash + online) bill is NOT its own line: its cash part is already in
   // "Cash sales" and its online part in "Online sales" (finance_report sums the
   // cash_amount / online_amount columns across every payment, mixed included). A
   // separate "Mixed" row would double-count it and break the section's total.
-  pdf.sectionTitle("Sales");
-  pdf.row("Cash sales", money(m.salesCash));
-  pdf.row("Online sales", money(m.salesOnline));
-  pdf.row("Card sales", money(m.salesCard));
-  pdf.row("Credit sales (billed, not collected)", money(m.salesCredit));
-  pdf.row("Total sales", money(m.salesTotal), { strong: true });
+  // Two businesses under one roof get two blocks, on the SAME `hasRooms` rule the
+  // Finance screen uses. Deliberately NOT "did any room earn anything today" — that
+  // would drop the Room block from a hotel's report on a quiet day, and the emailed
+  // PDF would then disagree with the screen for the same period.
+  const showRooms = m.showRooms;
+
+
+  pdf.sectionTitle(showRooms ? "Restaurant Sales (tables & walk-ins)" : "Sales");
+  pdf.row("Cash sales", money(m.salesTableCash));
+  pdf.row("Online sales", money(m.salesTableOnline));
+  pdf.row("Card sales", money(m.salesTableCard));
+  pdf.row("Credit sales (billed, not collected)", money(m.salesTableCredit));
+  pdf.row(
+    showRooms ? "Total restaurant sales" : "Total sales",
+    money(m.salesTableTotal),
+    { strong: true }
+  );
+
+  if (showRooms) {
+    pdf.sectionTitle("Room Sales");
+    pdf.row("Cash sales", money(m.salesRoomCash));
+    pdf.row("Online sales", money(m.salesRoomOnline));
+    pdf.row("Card sales", money(m.salesRoomCard));
+    // Settled by a deposit taken earlier, split by how that deposit was tendered, so the
+    // rows add up. Advances are room-only, so they appear here and nowhere else. The
+    // money itself was banked under Room Advances on the day it arrived.
+    pdf.row("Paid by advance - cash", money(m.salesAdvanceCash));
+    pdf.row("Paid by advance - online", money(m.salesAdvanceOnline));
+    pdf.row("Credit sales (billed, not collected)", money(m.salesRoomCredit));
+    pdf.row("Total room sales", money(m.salesRoomTotal), { strong: true });
+
+    pdf.sectionTitle("All Sales");
+    pdf.row("Restaurant", money(m.salesTableTotal));
+    pdf.row("Rooms", money(m.salesRoomTotal));
+    pdf.row("Total sales", money(m.salesTotal), { strong: true });
+  }
+
   pdf.row("Total discounts", money(m.discounts));
+
+  // Its OWN section, never a Sales line: a room deposit is money in with no sale behind
+  // it yet — the sale books in full at checkout. Folding it into Sales would count the
+  // same rupee twice. Omitted entirely for a restaurant that never takes one.
+  // Same two-part gate the Finance screen uses: the hotel side must exist, and there
+  // must be something to report.
+  if (showRooms && (m.advancesReceived > 0 || m.advancesRefunded > 0 || m.advancesHeld > 0)) {
+    pdf.sectionTitle("Room Advances");
+    pdf.row("Advances received", money(m.advancesReceived));
+    pdf.row("  - cash", money(m.advancesCash));
+    pdf.row("  - online", money(m.advancesOnline));
+    pdf.row("Advances refunded", money(m.advancesRefunded));
+    pdf.row("  - cash", money(m.refundsCash));
+    pdf.row("  - online", money(m.refundsOnline));
+    pdf.row("Advance held at close", money(m.advancesHeld), { strong: true });
+  }
 
   pdf.sectionTitle("Purchases & Expenses");
   pdf.row("Purchases - cash", money(m.purchasesCash));
@@ -62,6 +112,14 @@ export async function renderDailySummaryPdf(
   pdf.row("New vendor credit", money(m.vendorCreditCreated));
   pdf.row("Salaries paid", money(m.salaryPaid));
   pdf.row("Salary advances", money(m.salaryAdvance));
+  // Overheads. Printed with the same wording and the same breakdown as
+  // /admin/finance — a PDF that disagrees with the screen is a support call.
+  pdf.row("Extra expenses - cash", money(m.extraExpensesCash));
+  pdf.row("Extra expenses - online", money(m.extraExpensesOnline));
+  pdf.row("Total extra expenses", money(m.extraExpensesTotal), { strong: true });
+  for (const c of m.extraExpensesByCategory) {
+    pdf.row(`  - ${c.label}`, money(c.total));
+  }
 
   pdf.sectionTitle("Credit");
   pdf.row("Customer credit collected", money(m.customerCreditCollected));
@@ -74,10 +132,14 @@ export async function renderDailySummaryPdf(
   pdf.row("Online / Bank", money(m.closingOnline));
   pdf.row("Credit to us (receivable)", money(m.closingCreditToUs));
   pdf.row("Credit by us (payable)", money(m.closingCreditByUs));
+  // Part of the cash above is not yours yet. Saying so is the whole point of the figure.
+  if (m.advancesHeld > 0) {
+    pdf.row("Advance held (included in cash)", money(m.advancesHeld));
+  }
   pdf.row("Net balance (cash + bank)", money(m.closingNet), { strong: true });
 
   pdf.sectionTitle("Estimated Profit");
-  pdf.row("Sales - purchases - salaries", money(m.estimatedProfit), { strong: true });
+  pdf.row("Sales - purchases - salaries - expenses", money(m.estimatedProfit), { strong: true });
 
   pdf.sectionTitle("Operations");
   pdf.row("Total bills", String(m.totalBills));

@@ -3,6 +3,7 @@
 // identically — the exported file can never disagree with what's on screen.
 
 import { businessPeriodBounds } from "@/lib/business-day";
+import type { ExpenseCategoryTotal } from "@/lib/expenses";
 
 export type FinancePeriod =
   | "today"
@@ -62,16 +63,83 @@ export type FinanceReport = {
   salesCash: number;
   salesOnline: number;
   salesCard: number;
+  /**
+   * The part of the period's sales settled by a deposit taken EARLIER (a room advance).
+   * Not new cash — that was banked on the day the deposit was taken and is reported under
+   * advances. It is here so the Sales block adds up:
+   *   cash + online + card + advance + credit = total
+   * Without it a fully prepaid stay showed a total with no sale beneath it.
+   */
+  salesAdvance: number;
+  /**
+   * How that applied advance was originally tendered. Derived from the stay's NET
+   * advance rows (refunds already netted off, because they are negative), so it is the
+   * cash actually retained rather than the cash first taken. The two always sum to
+   * `salesAdvance`, which is what keeps the Sales block adding up.
+   */
+  salesAdvanceCash: number;
+  salesAdvanceOnline: number;
   /** Billed but not collected — the unpaid part of bills closed on credit. */
   salesCredit: number;
+
+  /**
+   * The same sales, cut by which side of the business earned them: rooms (a hotel
+   * stay) vs tables and walk-ins. Room + table always equals the corresponding total.
+   *
+   * Advances are ROOM-ONLY by construction (`room_advances.stay_id` references
+   * `room_stays`), so `salesAdvanceCash`/`salesAdvanceOnline` belong to the room block
+   * and are not repeated here. The two blocks each add up on their own:
+   *   room:  cash + online + card + advanceCash + advanceOnline + credit = roomTotal
+   *   table: cash + online + card + credit = tableTotal
+   */
+  salesRoomCash: number;
+  salesRoomOnline: number;
+  salesRoomCard: number;
+  salesRoomCredit: number;
+  salesRoomTotal: number;
+  salesTableCash: number;
+  salesTableOnline: number;
+  salesTableCard: number;
+  salesTableCredit: number;
+  salesTableTotal: number;
   /** Accrual: the full value of every bill raised, credit included. */
   salesTotal: number;
+
+  /**
+   * Money given away at the till, and how many bills carried it.
+   *
+   * NOT a balance movement. The net amount IS the sale everywhere in this app —
+   * there is no gross/net split — so a discount never touches cash, bank or
+   * credit and no closing figure moves. It is reported so an owner can see what
+   * was foregone; `salesTotal + discountsTotal` is what the bills would have
+   * come to. That also means it needs no leg in `finance_transactions`, which is
+   * why this is the one figure here with no matching ledger row.
+   */
+  discountsTotal: number;
+  discountedBills: number;
 
   purchasesCash: number;
   purchasesOnline: number;
   /** Bought on credit — a debt, not money spent. */
   purchasesCredit: number;
   purchasesTotal: number;
+
+  /**
+   * Overheads: rent, electricity, water, internet — everything that is neither
+   * bought stock nor wages. Always money that has ALREADY left, so there is no
+   * credit leg: an expense row IS the payment (see the table's own migration).
+   */
+  extraExpensesCash: number;
+  extraExpensesOnline: number;
+  extraExpensesTotal: number;
+  /**
+   * The same total cut by category, biggest first. Categories with no spend in
+   * the period are absent, so a quiet day stays short rather than printing ten
+   * zeroes. Built as jsonb inside `finance_report` rather than fetched
+   * separately — this app is latency-bound, so a round trip costs more than the
+   * payload.
+   */
+  extraExpensesByCategory: ExpenseCategoryTotal[];
 
   customerCreditCreated: number;
   customerCreditCollected: number;
@@ -104,6 +172,26 @@ export type FinanceReport = {
   closingCreditByUs: number;
   /** Cash + bank. Deliberately EXCLUDES credit — it is money, not a promise. */
   closingNet: number;
+
+  /**
+   * Room deposits taken in the period, and any handed back. Real cash movement, but
+   * NOT sales — the sale books in full when the guest checks out (accrual, the same
+   * rule credit follows, pointed the other way).
+   */
+  advancesReceived: number;
+  advancesRefunded: number;
+  /** The same two figures split by tender. Card rides with online — it is bank money. */
+  advancesCash: number;
+  advancesOnline: number;
+  refundsCash: number;
+  refundsOnline: number;
+  /**
+   * Guests' money sitting in the till: taken, but not yet applied to a bill. A
+   * LIABILITY, derived like the two credit balances, so one period's closing figure
+   * IS the next period's opening figure and it cannot drift.
+   */
+  openingAdvancesHeld: number;
+  closingAdvancesHeld: number;
 };
 
 /**
@@ -115,8 +203,10 @@ export type FinanceReport = {
  */
 export type FinanceTxKind =
   | "sale"
+  | "room_advance"
   | "credit_repayment"
   | "purchase"
+  | "extra_expense"
   | "vendor_payment"
   | "salary"
   | "salary_advance"
@@ -125,8 +215,14 @@ export type FinanceTxKind =
 
 export const TX_LABEL: Record<FinanceTxKind, string> = {
   sale: "Sale",
+  // Money in with no sale behind it yet — a room deposit. A negative amount on this
+  // kind is the unused part handed back at checkout.
+  room_advance: "Room Advance",
   credit_repayment: "Customer Credit Payment",
   purchase: "Purchase",
+  // An overhead. `party` carries the category ("Electricity") where a purchase
+  // carries the vendor's name.
+  extra_expense: "Extra Expense",
   vendor_payment: "Vendor Credit Repayment",
   salary: "Salary Payment",
   salary_advance: "Salary Advance",
@@ -136,24 +232,51 @@ export const TX_LABEL: Record<FinanceTxKind, string> = {
   customer_opening: "Customer Opening Balance",
 };
 
-/** Money in reads green, money out red — the same language as the rest of the sheet. */
-export const TX_TONE: Record<FinanceTxKind, string> = {
-  sale: "#1a7a4a",
-  credit_repayment: "#1a7a4a",
-  purchase: "#dc2626",
-  vendor_payment: "#dc2626",
-  salary: "#dc2626",
-  salary_advance: "#f97316",
-  // Amber: a balance appearing, not money changing hands.
-  vendor_opening: "#f97316",
-  customer_opening: "#f97316",
-};
+/**
+ * Money in reads green, money out red — the same language as the rest of the sheet.
+ *
+ * Direction is DERIVED from what the row actually did to cash and bank
+ * (`cashDelta + onlineDelta`), never from its kind. A fixed colour per kind was
+ * wrong for every row that can point both ways, and there are now three:
+ *   • a room-advance REFUND is a negative `room_advance` — money out, once green
+ *   • a saving WITHDRAWAL is a negative `extra_expense` — money in, once red
+ *   • a CREDIT sale moves no money at all, yet read as money in
+ * A kind cannot know which way its own row went; only the deltas can.
+ */
+export const MONEY_IN = "#1a7a4a";
+export const MONEY_OUT = "#dc2626";
+/** Amber: a real event that moved no money — a credit sale, a carried balance. */
+export const MONEY_NONE = "#f97316";
+
+/** What a ledger row did to cash + bank: > 0 in, < 0 out, 0 no movement. */
+export function txFlow(t: Pick<FinanceTransaction, "cashDelta" | "onlineDelta">): number {
+  return t.cashDelta + t.onlineDelta;
+}
+
+export function txTone(flow: number): string {
+  if (flow > 0.005) return MONEY_IN;
+  if (flow < -0.005) return MONEY_OUT;
+  return MONEY_NONE;
+}
 
 export type FinanceTransaction = {
   at: string;
   kind: FinanceTxKind;
   /** Customer, vendor or staff name — null for an ordinary walk-in bill. */
   party: string | null;
+  /**
+   * Which side of the business raised a SALE, and where it came from. Null on
+   * every other kind.
+   *
+   * `kind` stays `"sale"` for both: the ledger groups and reconciles by kind, so
+   * splitting it would ripple through `FinanceTxKind`, `TX_LABEL` and every
+   * reader to say something these two fields say on their own. The room test is
+   * the same one `finance_report`'s `paysrc` uses — the ledger and the Sales
+   * block must never classify the same bill differently.
+   */
+  source: "room" | "table" | "walkin" | null;
+  /** "Room 203", "Table 5", "Walk-in 1". Null on every non-sale row. */
+  sourceLabel: string | null;
   /** cash | online | card | credit | partial | mixed */
   method: string;
   /** The headline value of the transaction, always positive. */

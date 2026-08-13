@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useActionState, useEffect, useState, useTransition } from "react";
-import { addRoomCharge, checkOutRoom, removeRoomCharge } from "@/app/actions/rooms";
+import { addRoomAdvance, addRoomCharge, checkOutRoom, removeRoomCharge } from "@/app/actions/rooms";
 import type { RoomFolioView } from "@/app/actions/rooms";
+import { removeRoomAdvance } from "@/app/actions/security";
+import { AdvanceFields } from "@/app/(employee)/employee/_components/advance-fields";
 import { searchCreditCustomers } from "@/app/actions/credits";
 import type { CreditCustomer } from "@/app/actions/credits";
 import type { SessionDetail } from "@/app/actions/pos";
@@ -19,7 +21,7 @@ import { folioToBill } from "@/lib/billing/room-bill";
 import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
 import { billMethodLabel } from "@/lib/billing/payment-method";
 import {
-  ArrowLeft, BedDouble, Lock, Plus, Printer, Trash2, User, UtensilsCrossed, X,
+  ArrowLeft, BedDouble, Lock, Plus, Printer, Trash2, User, UtensilsCrossed, Wallet, X,
 } from "lucide-react";
 
 const rupee = (n: number) =>
@@ -144,6 +146,121 @@ function AddChargeForm({ stayId, onDone }: { stayId: string; onDone: () => void 
   );
 }
 
+// ─── Advance payments ────────────────────────────────────────────────────────
+
+function AddAdvanceForm({ stayId, onDone }: { stayId: string; onDone: () => void }) {
+  const [state, action, pending] = useActionState(addRoomAdvance, null);
+  const [valid, setValid] = useState(false);
+
+  return (
+    <form
+      action={async (fd) => {
+        await action(fd);
+        onDone();
+      }}
+      className="px-4 py-3 border-t flex flex-col gap-2.5"
+      style={{ borderColor: "var(--color-hairline)" }}
+    >
+      <input type="hidden" name="stay_id" value={stayId} />
+      {/* The SAME fields the check-in modal uses, so a deposit taken at the desk and one
+          taken three days later cannot validate differently. */}
+      <AdvanceFields mode="required" onValidChange={setValid} />
+      <div className="flex justify-end">
+        <Button type="submit" variant="secondary" disabled={pending || !valid} className="shrink-0">
+          {pending ? "Recording…" : "Record advance"}
+        </Button>
+      </div>
+      {state && "error" in state && (
+        <p className="text-xs" style={{ color: "var(--color-ruby)" }}>{state.error}</p>
+      )}
+    </form>
+  );
+}
+
+/**
+ * Removing an advance entered in error.
+ *
+ * Owner-only AND behind the Security PIN, because this rewrites money that has already
+ * been counted into a day's cash-in-hand — unlike a tender edit, there is no bill to
+ * reconcile the correction against. Every attempt, including a wrong PIN, is logged.
+ */
+function RemoveAdvanceButton({ advanceId }: { advanceId: string }) {
+  const [open, setOpen] = useState(false);
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, startRemove] = useTransition();
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Remove this advance"
+        style={{ color: "var(--color-ink-mute)" }}
+      >
+        <X size={13} />
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        type="password"
+        inputMode="numeric"
+        autoComplete="off"
+        maxLength={4}
+        placeholder="PIN"
+        value={pin}
+        onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+        className="h-8 w-16 rounded-sm border px-2 text-xs text-right tracking-[0.3em]"
+        style={{
+          borderColor: "var(--color-hairline-input)",
+          background: "var(--color-canvas)",
+          color: "var(--color-ink)",
+        }}
+      />
+      <button
+        type="button"
+        disabled={busy || pin.length !== 4}
+        onClick={() =>
+          startRemove(async () => {
+            const res = await removeRoomAdvance(pin, advanceId);
+            if (res && "error" in res) {
+              setError(res.error);
+              setPin("");
+            } else {
+              setOpen(false);
+              setPin("");
+              setError(null);
+            }
+          })
+        }
+        className="text-xs px-2 py-1 rounded-pill border"
+        style={{ borderColor: "var(--color-ruby)", color: "var(--color-ruby)" }}
+      >
+        {busy ? "…" : "Remove"}
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(false);
+          setPin("");
+          setError(null);
+        }}
+        style={{ color: "var(--color-ink-mute)" }}
+      >
+        <X size={13} />
+      </button>
+      {error && (
+        <span className="text-xs" style={{ color: "var(--color-ruby)" }}>
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ─── Check out ───────────────────────────────────────────────────────────────
 
 function CheckOutForm({
@@ -167,6 +284,11 @@ function CheckOutForm({
   const [downTender, setDownTender] = useState<"cash" | "online" | "card" | "mixed">("cash");
   const [downCash, setDownCash] = useState("");
   const [downOnline, setDownOnline] = useState("");
+  // Where an unused deposit goes back. Card is deliberately absent: a swipe cannot be
+  // reversed at the desk, so an over-deposit returns as cash, a transfer, or both.
+  const [refundTender, setRefundTender] = useState<"cash" | "online" | "mixed">("cash");
+  const [refundCash, setRefundCash] = useState("");
+  const [refundOnline, setRefundOnline] = useState("");
 
   // Credit account picker — the same live search the table bill uses, so a
   // returning guest never collects a second credit id.
@@ -199,6 +321,56 @@ function CheckOutForm({
   const total =
     Math.round((taxable * (1 + f.taxPercent / 100 + f.servicePercent / 100)) * 100) / 100;
 
+  // The deposit already held. `total` remains the SALE — it is what gets recorded and what
+  // the discount is measured against — while `balance` is the only figure the cashier
+  // collects today. The server re-derives all of this from the database.
+  const held = view.advances.reduce((s, a) => s + a.amount, 0);
+  const applied = Math.min(Math.max(held, 0), total);
+  const balance = Math.round(Math.max(0, total - applied) * 100) / 100;
+  const refundDue = Math.round(Math.max(0, held - total) * 100) / 100;
+
+  // How the deposit itself arrived, so the receptionist can see what is actually
+  // available to hand back before choosing how to return it.
+  const heldCash = view.advances.reduce((s, a) => s + a.cash, 0);
+  const heldOnline = view.advances.reduce((s, a) => s + a.online + a.card, 0);
+
+  // Typing one side of a split refund fills the other, exactly as the payment split and
+  // the advance fields do. One behaviour, three places — never a third implementation.
+  function handleRefundCash(v: string) {
+    setRefundCash(v);
+    const n = parseFloat(v);
+    setRefundOnline(
+      !isNaN(n) && n >= 0 ? Math.max(0, Math.round((refundDue - n) * 100) / 100).toFixed(2) : ""
+    );
+  }
+  function handleRefundOnline(v: string) {
+    setRefundOnline(v);
+    const n = parseFloat(v);
+    setRefundCash(
+      !isNaN(n) && n >= 0 ? Math.max(0, Math.round((refundDue - n) * 100) / 100).toFixed(2) : ""
+    );
+  }
+
+  const refundCashNum = parseFloat(refundCash) || 0;
+  const refundOnlineNum = parseFloat(refundOnline) || 0;
+  const refundSplitOk =
+    refundDue === 0 ||
+    refundTender !== "mixed" ||
+    (refundCash !== "" &&
+      refundOnline !== "" &&
+      Math.abs(refundCashNum + refundOnlineNum - refundDue) < 0.01);
+
+  // What actually goes to the server. The action re-validates this against the refund it
+  // derives from the database, so this only decides WHERE the money goes, never how much.
+  const refundSplit =
+    refundDue === 0
+      ? { cash: 0, online: 0 }
+      : refundTender === "cash"
+      ? { cash: refundDue, online: 0 }
+      : refundTender === "online"
+      ? { cash: 0, online: refundDue }
+      : { cash: refundCashNum, online: refundOnlineNum };
+
   // The server is the real gate; this just stops an obviously-incomplete submit.
   const discountPinValid = disc === 0 || /^\d{4}$/.test(discountPin);
 
@@ -208,13 +380,13 @@ function CheckOutForm({
   function handleCashChange(val: string) {
     setCash(val);
     const n = parseFloat(val);
-    setOnline(!isNaN(n) && n >= 0 ? Math.max(0, Math.round((total - n) * 100) / 100).toFixed(2) : "");
+    setOnline(!isNaN(n) && n >= 0 ? Math.max(0, Math.round((balance - n) * 100) / 100).toFixed(2) : "");
   }
 
   function handleOnlineChange(val: string) {
     setOnline(val);
     const n = parseFloat(val);
-    setCash(!isNaN(n) && n >= 0 ? Math.max(0, Math.round((total - n) * 100) / 100).toFixed(2) : "");
+    setCash(!isNaN(n) && n >= 0 ? Math.max(0, Math.round((balance - n) * 100) / 100).toFixed(2) : "");
   }
 
   // A new discount moves the payable, which strands any split already typed against the
@@ -240,26 +412,28 @@ function CheckOutForm({
     paidNum === 0 ||
     (downCash !== "" && downOnline !== "" && Math.abs(downCashNum + downOnlineNum - paidNum) < 0.01);
 
-  const mixedOk = method !== "mixed" || Math.abs(cashNum + onlineNum - total) < 0.01;
+  // Every tender figure below is measured against the BALANCE, not the total: the part of
+  // the bill a deposit already covers must not be collected a second time.
+  const mixedOk = method !== "mixed" || Math.abs(cashNum + onlineNum - balance) < 0.01;
   const creditOk =
     method !== "credit" ||
-    (paidNum >= 0 && paidNum < total && (!!picked || query.trim().length > 0) && downSplitValid);
-  const owed = Math.max(0, total - paidNum);
+    (paidNum >= 0 && paidNum < balance && (!!picked || query.trim().length > 0) && downSplitValid);
+  const owed = Math.max(0, balance - paidNum);
 
   const amounts = {
     cash:
-      method === "cash" ? total
+      method === "cash" ? balance
       : method === "mixed" ? cashNum
       : method === "credit" && downTender === "cash" ? paidNum
       : method === "credit" && downTender === "mixed" ? downCashNum
       : 0,
     online:
-      method === "online" ? total
+      method === "online" ? balance
       : method === "mixed" ? onlineNum
       : method === "credit" && downTender === "online" ? paidNum
       : method === "credit" && downTender === "mixed" ? downOnlineNum
       : 0,
-    card: method === "card" ? total : method === "credit" && downTender === "card" ? paidNum : 0,
+    card: method === "card" ? balance : method === "credit" && downTender === "card" ? paidNum : 0,
   };
 
   type Method = "cash" | "online" | "card" | "mixed" | "credit";
@@ -345,14 +519,126 @@ function CheckOutForm({
         )
       )}
 
+      {/* Always submitted, so the action reads a number in both branches. */}
+      <input type="hidden" name="refund_cash" value={refundSplit.cash.toFixed(2)} />
+      <input type="hidden" name="refund_online" value={refundSplit.online.toFixed(2)} />
+
+      {/* What the deposit already covers. Shown only when there is one, so a stay without
+          a deposit looks exactly as it did. */}
+      {applied > 0 && (
+        <div
+          className="flex flex-col gap-1 rounded-lg border px-4 py-3"
+          style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}
+        >
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Bill total</span>
+            <span className="text-sm tabular" style={{ color: "var(--color-ink)" }}>{rupee(total)}</span>
+          </div>
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Advance received</span>
+            <span className="text-sm tabular" style={{ color: "var(--color-ink)" }}>
+              - {rupee(applied)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {refundDue > 0 ? (
+        // The deposit overshot the bill. There is nothing to collect — the money goes back.
+        <>
+          <div
+            className="flex items-baseline justify-between rounded-lg border px-4 py-3"
+            style={{ borderColor: "var(--color-amber)", background: "rgba(245,158,11,0.06)" }}
+          >
+            <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Refund due</span>
+            <span className="text-xl tabular" style={{ color: "var(--color-ink)", fontWeight: 300 }}>
+              {rupee(refundDue)}
+            </span>
+          </div>
+          {/* How the deposit actually arrived. A receptionist about to hand ₹1,500 back
+              needs to know only ₹1,000 of it ever came in as cash. */}
+          <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+            Held as {rupee(heldCash)} cash
+            {heldOnline > 0 ? ` + ${rupee(heldOnline)} online` : ""}
+          </p>
+
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                ["cash", "Refund Cash"],
+                ["online", "Refund Online"],
+                ["mixed", "Cash + Online"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => {
+                  setRefundTender(key);
+                  setRefundCash("");
+                  setRefundOnline("");
+                }}
+                className="text-xs px-3 py-1.5 rounded-full border transition-colors"
+                style={{
+                  borderColor: refundTender === key ? "var(--color-primary)" : "var(--color-hairline)",
+                  background: refundTender === key ? "var(--color-primary)" : "var(--color-canvas)",
+                  color: refundTender === key ? "#fff" : "var(--color-ink)",
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {refundTender === "mixed" && (
+            <div className="grid grid-cols-2 gap-3">
+              {(
+                [
+                  ["Cash", refundCash, handleRefundCash],
+                  ["Online", refundOnline, handleRefundOnline],
+                ] as const
+              ).map(([label, val, set]) => (
+                <div key={label}>
+                  <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+                    {label}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max={refundDue}
+                    step="0.01"
+                    inputMode="decimal"
+                    value={val}
+                    onChange={(e) => set(e.target.value)}
+                    className="w-full h-10 rounded-sm border px-3 text-sm tabular"
+                    style={{
+                      borderColor: "var(--color-hairline-input)",
+                      background: "var(--color-canvas)",
+                      color: "var(--color-ink)",
+                    }}
+                  />
+                </div>
+              ))}
+              {!refundSplitOk && (
+                <p className="col-span-2 text-xs" style={{ color: "var(--color-ruby)" }}>
+                  Cash and Online must add up to {rupee(refundDue)}.
+                </p>
+              )}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
       {/* Payable */}
       <div
         className="flex items-baseline justify-between rounded-lg border px-4 py-3"
         style={{ borderColor: "var(--color-primary)", background: "rgba(99,102,241,0.06)" }}
       >
-        <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Payable now</span>
+        <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
+          {applied > 0 ? "Balance payable" : "Payable now"}
+        </span>
         <span className="text-xl tabular" style={{ color: "var(--color-primary)", fontWeight: 300 }}>
-          {rupee(total)}
+          {rupee(balance)}
         </span>
       </div>
 
@@ -381,7 +667,7 @@ function CheckOutForm({
             <div key={label}>
               <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>{label}</label>
               <input
-                type="number" min="0" max={total} step="0.01" inputMode="decimal"
+                type="number" min="0" max={balance} step="0.01" inputMode="decimal"
                 value={val}
                 onChange={(e) => set(e.target.value)}
                 className="w-full h-10 rounded-sm border px-3 text-sm tabular"
@@ -391,7 +677,7 @@ function CheckOutForm({
           ))}
           {!mixedOk && (
             <p className="col-span-2 text-xs" style={{ color: "var(--color-ruby)" }}>
-              Cash and Online must add up to {rupee(total)}.
+              Cash and Online must add up to {rupee(balance)}.
             </p>
           )}
         </div>
@@ -453,7 +739,7 @@ function CheckOutForm({
             <div>
               <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>Paid now</label>
               <input
-                type="number" min="0" max={total} step="0.01" inputMode="decimal"
+                type="number" min="0" max={balance} step="0.01" inputMode="decimal"
                 value={paidNow}
                 onChange={(e) => setPaidNow(e.target.value)}
                 placeholder="0.00"
@@ -539,6 +825,8 @@ function CheckOutForm({
           </div>
         </div>
       )}
+        </>
+      )}
 
       {state && "error" in state && (
         <p className="text-xs" style={{ color: "var(--color-ruby)" }}>{state.error}</p>
@@ -547,10 +835,14 @@ function CheckOutForm({
       <Button
         type="submit"
         variant="primary"
-        disabled={pending || !mixedOk || !creditOk || !discountPinValid}
+        disabled={pending || !mixedOk || !creditOk || !discountPinValid || !refundSplitOk}
         className="w-full"
       >
-        {pending ? "Checking out…" : `Check out · ${rupee(total)}`}
+        {pending
+          ? "Checking out…"
+          : refundDue > 0
+          ? `Check out · refund ${rupee(refundDue)}`
+          : `Check out · ${rupee(balance)}`}
       </Button>
     </form>
   );
@@ -563,6 +855,7 @@ export function FolioClient({
   canAddCharges, canCreateOrders, canManageOrders, canCancelOrders,
   canCheckOut, canDiscount, canUseCredit, discountEnabled = false,
   canPrintTickets = false, canPrintBill = false,
+  canTakeAdvance = false, canEditAdvance = false,
 }: {
   view: RoomFolioView;
   /** The stay's session, in the same shape a table's screen uses. */
@@ -583,8 +876,13 @@ export function FolioClient({
   canPrintTickets?: boolean;
   /** Room folio bill printing — billing staff only. */
   canPrintBill?: boolean;
+  /** Taking a deposit rides on `check_in`, not a permission of its own. */
+  canTakeAdvance?: boolean;
+  /** Correcting one is owner-only, and the server also demands the Security PIN. */
+  canEditAdvance?: boolean;
 }) {
   const [adding, setAdding] = useState(false);
+  const [addingAdvance, setAddingAdvance] = useState(false);
   const [billOpen, setBillOpen] = useState(false);
   const [removing, startRemove] = useTransition();
   // Stamped once per mount, exactly like the table bill: a Date rebuilt on every render
@@ -854,8 +1152,91 @@ export function FolioClient({
               {rupee(f.grandTotal)}
             </span>
           </div>
+
+          {/* A deposit is a PAYMENT against the bill, so it sits below the grand total
+              rather than reducing it — the sale recorded at checkout is the whole stay. */}
+          {f.advancePaid > 0 && (
+            <>
+              <Line label="Advance received" amount={-f.advancePaid} muted />
+              <div
+                className="flex items-baseline justify-between px-4 py-3 border-t"
+                style={{ borderColor: "var(--color-hairline)" }}
+              >
+                <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
+                  {f.refundDue > 0 ? "Refund due" : "Balance payable"}
+                </span>
+                <span
+                  className="text-lg tabular"
+                  style={{ color: "var(--color-primary)", fontWeight: 400 }}
+                >
+                  {rupee(f.refundDue > 0 ? f.refundDue : f.balanceDue)}
+                </span>
+              </div>
+            </>
+          )}
         </div>
       </div>
+
+      {/* Advance payments — the deposits taken against this stay. Money in, before there
+          is a sale, so it belongs beside the folio rather than inside it. */}
+      {(view.advances.length > 0 || (open && canTakeAdvance)) && (
+        <div
+          className="rounded-2xl border overflow-hidden"
+          style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+        >
+          <GroupHeader
+            icon={<Wallet size={13} />}
+            title="Advance payments"
+            total={rupee(f.advancePaid)}
+          />
+          {view.advances.length === 0 ? (
+            <p className="px-4 py-2.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>
+              No advance taken for this stay.
+            </p>
+          ) : (
+            view.advances.map((a) => (
+              <div
+                key={a.id}
+                className="flex items-center gap-2 px-4 py-2.5 border-t"
+                style={{ borderColor: "var(--color-hairline)" }}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm" style={{ color: "var(--color-ink)" }}>
+                    {/* A negative row is a refund handed back, not a deposit taken. */}
+                    {a.amount < 0 ? "Refund returned" : "Advance"}
+                    <span className="text-xs ml-1.5" style={{ color: "var(--color-ink-mute)" }}>
+                      {billMethodLabel(a.method)}
+                    </span>
+                  </p>
+                  <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                    {when(a.created_at)}
+                    {a.note ? ` · ${a.note}` : ""}
+                  </p>
+                </div>
+                <span className="text-sm tabular" style={{ color: "var(--color-ink)" }}>
+                  {rupee(a.amount)}
+                </span>
+                {open && canEditAdvance && <RemoveAdvanceButton advanceId={a.id} />}
+              </div>
+            ))
+          )}
+
+          {open && canTakeAdvance && (
+            addingAdvance ? (
+              <AddAdvanceForm stayId={view.stay_id} onDone={() => setAddingAdvance(false)} />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setAddingAdvance(true)}
+                className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs border-t"
+                style={{ borderColor: "var(--color-hairline)", color: "var(--color-primary)" }}
+              >
+                <Plus size={13} /> Take an advance
+              </button>
+            )
+          )}
+        </div>
+      )}
 
       {open && f.open && (
         <p className="text-xs text-center" style={{ color: "var(--color-ink-mute)" }}>
@@ -919,6 +1300,10 @@ export function FolioClient({
           sections={bill.sections}
           stay={bill.stay}
           discount={bill.discount}
+          // Undefined-equivalent (0) for every stay with no deposit, so those bills print
+          // exactly as they did before — and a table bill never passes these at all.
+          advancePaid={bill.advancePaid}
+          balanceDue={bill.balanceDue}
           payment={
             paid
               ? {

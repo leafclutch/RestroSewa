@@ -23,6 +23,14 @@ Mirrors tables (sessions) but adds a stay/folio and a three-tier permission. See
 - **Room billing / folio** — the stay's running charges + bill. The folio PANEL is the working
   screen; the printed bill is the shared `BillTicket`, the same component a table bill uses,
   fed by the one mapper `lib/billing/room-bill.ts` `folioToBill()`.
+- **Advance payments** — a deposit taken at check-in (optional section on the check-in form) and
+  again mid-stay from the folio. Cash / Online / Card / Mixed — **no credit**: an advance IS money
+  received, so a guest who hands over nothing simply hasn't paid one. Deducted from the bill at
+  checkout; an overshoot is refunded in the same transaction as **cash, online, or both**
+  (`check_out_room` has always taken `p_refund_cash` + `p_refund_online` — the UI gained the mixed
+  option 2026-08-12). No card refund: a swipe cannot be reversed at the desk, so the refund row
+  hardcodes `card = 0`. The refund panel shows how the deposit was originally held, so the
+  receptionist can see what is actually available to hand back.
 - **Room service** — add/remove charges to the folio (an order-style charge).
 - **Assignments** — staff assigned to rooms (`restaurant_user_rooms`) see only their rooms.
 - **Cleaning** — room parks in Cleaning on checkout; `markRoomClean` turns it over.
@@ -45,6 +53,19 @@ Mirrors tables (sessions) but adds a stay/folio and a three-tier permission. See
   calculator and one renderer. Never write a second one, and never store the lines.
 - **`payments.discount_amount` is the discount of record.** The paid bill re-derives the folio
   with that number, so its printed lines reconcile to `payments.total_amount`.
+- **An advance is a PAYMENT against the bill, never a reduction of it.** `total_amount` stays the
+  whole sale; `payments.advance_amount` says how much of it arrived earlier. The tender is
+  validated against `folio.balanceDue`, but `p_total` still receives `grandTotal`.
+  ⚠️ **The invariant this changes:** what is left on credit is now
+  `total − (cash + online + card + advance_amount)`. Every reader moves together or a prepaid bill
+  raises phantom debt — see `database.md`.
+- **`room_advances.amount` is SIGNED**: positive = deposit taken, negative = refund returned. So
+  "held on this stay" is `sum(amount)`, a refund needs no second table, and the finance cash legs
+  need no refund branch. Refunds are written by `check_out_room` BEFORE it closes the stay, because
+  `record_room_advance` refuses to write against a settled one.
+- **Taking an advance rides on `check_in`** (no new permission — a second box would silently break
+  the front desk). **Correcting or deleting one is owner-only + the Security PIN**
+  (`edit_room_advance`), and only while the stay is active.
 
 # Important Components
 - `app/actions/rooms.ts` (getRoomsOverview, checkInRoom, markRoomClean, checkOutRoom, add/remove
@@ -52,8 +73,8 @@ Mirrors tables (sessions) but adds a stay/folio and a three-tier permission. See
 - Employee dashboard `rooms-section.tsx` (computes `canCheckIn` itself); `/admin/rooms`.
 
 # Database Relations
-`rooms`, `room_types`, `restaurant_user_rooms`, `sessions` (room stays), `payments` — see
-`database.md`.
+`rooms`, `room_types`, `restaurant_user_rooms`, `sessions` (room stays), `payments`,
+`room_advances` — see `database.md`.
 
 # Realtime Behaviour
 Room cards refresh on session/order channels; new room-service orders ring assigned staff.

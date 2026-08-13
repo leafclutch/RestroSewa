@@ -352,6 +352,115 @@ export type Database = {
         };
       };
 
+      // Deposits taken against a stay. `amount` is SIGNED: positive is money taken
+      // from the guest, negative is a refund handed back — so what a stay holds is
+      // simply sum(amount), and a refund needs no second table and no flag.
+      room_advances: {
+        Row: {
+          id: string;
+          restaurant_id: string;
+          stay_id: string;
+          amount: number;
+          cash_amount: number;
+          online_amount: number;
+          card_amount: number;
+          method: string;
+          note: string | null;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          restaurant_id: string;
+          stay_id: string;
+          amount: number;
+          cash_amount?: number;
+          online_amount?: number;
+          card_amount?: number;
+          method: string;
+          note?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          amount?: number;
+          cash_amount?: number;
+          online_amount?: number;
+          card_amount?: number;
+          method?: string;
+          note?: string | null;
+        };
+      };
+
+      // Overheads: rent, electricity, water, internet. Money that has ALREADY
+      // left — there is no credit leg and no unpaid state, so the row IS the
+      // payment. `cash_amount + online_amount = amount` is enforced by a CHECK.
+      extra_expenses: {
+        Row: {
+          id: string;
+          restaurant_id: string;
+          category: string;
+          note: string | null;
+          amount: number;
+          payment_method: string;
+          cash_amount: number;
+          online_amount: number;
+          // Set on savings only, and on savings always — a CHECK enforces the
+          // equivalence, so neither a pot-less saving nor a rent row with a pot
+          // is representable.
+          saving_title_id: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          restaurant_id: string;
+          category: string;
+          note?: string | null;
+          amount: number;
+          payment_method: string;
+          cash_amount?: number;
+          online_amount?: number;
+          saving_title_id?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          category?: string;
+          note?: string | null;
+          amount?: number;
+          payment_method?: string;
+          cash_amount?: number;
+          online_amount?: number;
+          saving_title_id?: string | null;
+          updated_at?: string | null;
+        };
+      };
+
+      // Savings pots. A record rather than free text so a pot can be renamed
+      // without rewriting the history filed under it, and so its all-time total
+      // is exact. Unique per restaurant, case-insensitively.
+      saving_titles: {
+        Row: {
+          id: string;
+          restaurant_id: string;
+          name: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          restaurant_id: string;
+          name: string;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          name?: string;
+        };
+      };
+
       credit_customers: {
         Row: {
           id: string;
@@ -643,6 +752,11 @@ export type Database = {
           cash_amount: number;
           online_amount: number;
           card_amount: number;
+          // How much of this bill was settled by money received EARLIER — a room
+          // advance. It is not a fourth tender: no money moved today for it. The
+          // gap that counts as credit is
+          // total_amount − (cash + online + card + advance_amount).
+          advance_amount: number;
           total_amount: number | null;
           payment_method: Database["public"]["Enums"]["payment_method"];
           notes: string | null;
@@ -658,6 +772,7 @@ export type Database = {
           cash_amount?: number;
           online_amount?: number;
           card_amount?: number;
+          advance_amount?: number;
           total_amount?: number | null;
           payment_method?: Database["public"]["Enums"]["payment_method"];
           notes?: string | null;
@@ -673,6 +788,7 @@ export type Database = {
           cash_amount?: number;
           online_amount?: number;
           card_amount?: number;
+          advance_amount?: number;
           total_amount?: number | null;
           payment_method?: Database["public"]["Enums"]["payment_method"];
           notes?: string | null;

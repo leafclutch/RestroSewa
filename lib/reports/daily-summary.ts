@@ -2,6 +2,9 @@ import "server-only";
 import { createServiceClient } from "@/lib/supabase/service";
 import { businessDayBounds } from "@/lib/business-day";
 import { stockStatus } from "@/lib/stock";
+import { hasRooms, normalizeBusinessType } from "@/lib/business-type";
+import { expenseCategoryLabel } from "@/lib/expenses";
+import type { ExpenseCategoryTotal } from "@/lib/expenses";
 
 // ─── Config (stored on restaurants.settings.daily_summary) ─────────────────────
 // A restaurant opts in and lists up to three recipients. This module owns the
@@ -43,14 +46,44 @@ export type DailySummaryModel = {
   salesCash: number;
   salesOnline: number;
   salesCard: number;
+  /** Settled by a deposit taken earlier. Makes the sales rows add up to the total. */
+  salesAdvance: number;
+  /** …split by how that deposit was tendered. The two sum to `salesAdvance`. */
+  salesAdvanceCash: number;
+  salesAdvanceOnline: number;
   salesCredit: number;
   salesTotal: number;
+  /**
+   * Whether this client has the hotel side at all. Decides if the PDF splits Sales into
+   * Restaurant and Room blocks — the SAME `hasRooms` rule the Finance screen uses, not
+   * "did any room earn anything today", which would drop the block on a quiet day and
+   * make the emailed report disagree with the screen.
+   */
+  showRooms: boolean;
+  /** Sales cut by which side of the business earned them. Room + table = total. */
+  salesRoomCash: number;
+  salesRoomOnline: number;
+  salesRoomCard: number;
+  salesRoomCredit: number;
+  salesRoomTotal: number;
+  salesTableCash: number;
+  salesTableOnline: number;
+  salesTableCard: number;
+  salesTableCredit: number;
+  salesTableTotal: number;
   discounts: number;
 
   purchasesCash: number;
   purchasesOnline: number;
   purchasesCredit: number;
   purchasesTotal: number;
+
+  // Overheads: rent, electricity, water. No credit leg — an expense row IS the
+  // payment, so everything here has already left the till.
+  extraExpensesCash: number;
+  extraExpensesOnline: number;
+  extraExpensesTotal: number;
+  extraExpensesByCategory: ExpenseCategoryTotal[];
 
   vendorPayments: number;          // paid against vendor credit
   customerCreditCollected: number; // repayments received
@@ -68,7 +101,21 @@ export type DailySummaryModel = {
   closingCreditByUs: number;
   closingNet: number;    // cash + online
 
-  estimatedProfit: number; // sales − purchase cost − salaries paid
+  // Room deposits. Cash movement with no sale behind it — the sale books at checkout.
+  advancesReceived: number;
+  advancesRefunded: number;
+  /** Both split by tender, so a mixed deposit doesn't collapse into one figure. */
+  advancesCash: number;
+  advancesOnline: number;
+  refundsCash: number;
+  refundsOnline: number;
+  // Guests' money included in the cash balance but not yet earned. A liability, and NOT
+  // derivable from the two figures above: a deposit also leaves the held total when it is
+  // applied to a bill, which neither of them records.
+  advancesHeldOpening: number;
+  advancesHeld: number;
+
+  estimatedProfit: number; // sales − purchase cost − salaries paid − extra expenses
 
   totalBills: number;   // payments finalised in the day
   totalOrders: number;  // kitchen order batches placed in the day
@@ -95,7 +142,7 @@ export async function buildDailySummary(
   const toIso = to.toISOString();
   const service = createServiceClient();
 
-  const [financeRes, paymentsRes, ordersRes, stockRes, productsRes] = await Promise.all([
+  const [financeRes, paymentsRes, ordersRes, stockRes, productsRes, restRes] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any).rpc("finance_report", {
       p_restaurant_id: restaurantId,
@@ -131,6 +178,12 @@ export async function buildDailySummary(
       .from("products")
       .select("id, low_stock_threshold, last_unit_cost, is_active")
       .eq("restaurant_id", restaurantId),
+    // Business type, so the PDF splits Restaurant vs Room sales on the SAME rule the
+    // Finance screen uses. Gating on room activity instead would drop the Room block
+    // from a hotel's report on a quiet day, and the emailed PDF would then disagree
+    // with the screen — which is a support call.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any).from("restaurants").select("type").eq("id", restaurantId).maybeSingle(),
   ]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -139,7 +192,10 @@ export async function buildDailySummary(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const payments = (paymentsRes.data ?? []) as any[];
   const totalBills = payments.length;
-  const discounts = payments.reduce((s, p) => s + num(p.discount_amount), 0);
+  // Read from `finance_report` rather than summed here, so the PDF, the screen
+  // and the CSV all state one number from one place. The rows query stays — it
+  // is still what counts the day's bills, which the report does not carry.
+  const discounts = num(f?.discounts_total);
 
   const totalOrders = ordersRes.count ?? 0;
 
@@ -167,6 +223,7 @@ export async function buildDailySummary(
   const salesTotal = num(f?.sales_total);
   const purchasesTotal = num(f?.purchases_total);
   const salaryPaid = num(f?.salary_total);
+  const extraExpensesTotal = num(f?.extra_expenses_total);
   const closingCash = num(f?.closing_cash);
   const closingOnline = num(f?.closing_online);
 
@@ -182,14 +239,42 @@ export async function buildDailySummary(
     salesCash: num(f?.sales_cash),
     salesOnline: num(f?.sales_online),
     salesCard: num(f?.sales_card),
+    salesAdvance: num(f?.sales_advance),
+    salesAdvanceCash: num(f?.sales_advance_cash),
+    salesAdvanceOnline: num(f?.sales_advance_online),
     salesCredit: num(f?.sales_credit),
     salesTotal,
+    showRooms: hasRooms(normalizeBusinessType(restRes.data?.type)),
+    salesRoomCash: num(f?.sales_room_cash),
+    salesRoomOnline: num(f?.sales_room_online),
+    salesRoomCard: num(f?.sales_room_card),
+    salesRoomCredit: num(f?.sales_room_credit),
+    salesRoomTotal: num(f?.sales_room_total),
+    salesTableCash: num(f?.sales_table_cash),
+    salesTableOnline: num(f?.sales_table_online),
+    salesTableCard: num(f?.sales_table_card),
+    salesTableCredit: num(f?.sales_table_credit),
+    salesTableTotal: num(f?.sales_table_total),
     discounts,
 
     purchasesCash: num(f?.purchases_cash),
     purchasesOnline: num(f?.purchases_online),
     purchasesCredit: num(f?.purchases_credit),
     purchasesTotal,
+
+    extraExpensesCash: num(f?.extra_expenses_cash),
+    extraExpensesOnline: num(f?.extra_expenses_online),
+    extraExpensesTotal,
+    // The label resolves through lib/expenses.ts, the same map the screen uses, so
+    // the PDF can never name a category differently from the report it mirrors.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    extraExpensesByCategory: ((f?.extra_expenses_by_category ?? []) as any[]).map((c) => ({
+      category: String(c.category),
+      label: expenseCategoryLabel(String(c.category)),
+      cash: num(c.cash),
+      online: num(c.online),
+      total: num(c.total),
+    })),
 
     vendorPayments: num(f?.vendor_credit_paid),
     customerCreditCollected: num(f?.customer_credit_collected),
@@ -207,10 +292,19 @@ export async function buildDailySummary(
     closingCreditByUs: num(f?.closing_credit_by_us),
     closingNet: closingCash + closingOnline,
 
+    advancesReceived: num(f?.advances_received),
+    advancesRefunded: num(f?.advances_refunded),
+    advancesCash: num(f?.advances_cash),
+    advancesOnline: num(f?.advances_online),
+    refundsCash: num(f?.refunds_cash),
+    refundsOnline: num(f?.refunds_online),
+    advancesHeldOpening: num(f?.opening_advances_held),
+    advancesHeld: num(f?.closing_advances_held),
+
     // Estimated, not booked: bought-stock cost is used, not stock consumed, so a
     // heavy-stocking day reads low and a run-down day reads high. Labelled as an
     // estimate in the email for exactly that reason.
-    estimatedProfit: salesTotal - purchasesTotal - salaryPaid,
+    estimatedProfit: salesTotal - purchasesTotal - salaryPaid - extraExpensesTotal,
 
     totalBills,
     totalOrders,
