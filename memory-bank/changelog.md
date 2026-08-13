@@ -19,6 +19,19 @@ Versioning is informal (the app ships continuously); dates anchor the entries.
 > moves when the app deploys.
 
 ### Added
+- **You can now cancel a checked-in guest.** Under Admin → Rooms there is a **Checked-in guests**
+  list with a Cancel button on each stay, and permitted staff get the same control on the guest's
+  folio. Cancelling ends the stay without billing it: whatever the guest has run up is written off
+  (shown to you before you confirm), the room goes to Cleaning, and it frees up for the next guest.
+  - **The deposit is handled in the same step.** Refund all of it, or keep part as a cancellation
+    charge — the refund figure follows automatically, and can go back as cash, online, or both.
+    What you keep is recorded as a sale; nothing new leaves the till, because that money was
+    already banked when the deposit was taken.
+  - **New permission, "Cancel a Checked-in Stay".** Owners have it by default. It is separate from
+    Check-in and Manage Rooms — granting those does not grant this — so you can give it to exactly
+    the people who should have it.
+  - Every cancellation needs the **Security PIN**, owners included, and is recorded in
+    Settings → Security activity along with how much was kept and refunded.
 - **Extra Expenses and Payroll now appear on the staff dashboard**, after Vendors, each as a
   summary card that opens a full page. Extra Expenses shows what went out today and how it was
   paid; Payroll shows this month's sheet — who's on payroll, what's been paid, what's still owed.
@@ -65,6 +78,13 @@ Versioning is informal (the app ships continuously); dates anchor the entries.
   block explains what was foregone rather than adding another deduction.
 
 ### Fixed
+- **Transaction history now names a refund as a refund.** Money handed back from a room deposit
+  read **"Room Advance"** — exactly the same as the deposit that created it, with only the minus
+  sign to tell them apart. It now reads **"Room Advance Refund"**. The same fault was hiding on
+  savings: taking money out of a pot read "Extra Expense", and now reads **"Saving Withdrawal"**.
+  The CSV export uses the same wording, so an exported row and the row it came from can no longer
+  be named differently.
+
 - **Transaction history now shows money the way it actually moved.** Each row was coloured by what
   it was *called* rather than which way the money went, so several read backwards: a refunded room
   deposit showed green as if money came in, a saving withdrawal showed red as if money went out,

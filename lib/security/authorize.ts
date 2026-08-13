@@ -30,7 +30,12 @@ export type SecurityOperation =
   // so a wrong figure left standing — or a right one quietly deleted — breaks a
   // till reconciliation with nothing left to explain it.
   | "edit_extra_expense"
-  | "delete_extra_expense";
+  | "delete_extra_expense"
+  // Ending a stay without billing it, and keeping part (or none) of the deposit.
+  // The only PIN operation that is NOT admin-only — a permitted staff member may
+  // do it too — which is precisely why the PIN matters here: the permission says
+  // who may try, the PIN says it is really them, and the log says what they kept.
+  | "cancel_room_stay";
 
 export type SecurityAuditRow = {
   id: string;

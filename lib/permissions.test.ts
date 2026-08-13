@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PERMISSIONS, PERMISSION_GROUPS, STOCK_ACCESS, PAYROLL_ACCESS } from "./permissions.ts";
+import { PERMISSIONS, PERMISSION_GROUPS, STOCK_ACCESS, PAYROLL_ACCESS, ROOM_ACCESS } from "./permissions.ts";
 
 // The Extra Expenses gates, tested directly.
 //
@@ -93,4 +93,39 @@ test("payroll on the staff dashboard needs the WRITE right", () => {
   assert.equal(PAYROLL_ACCESS.canManagePayroll(staff(PERMISSIONS.MANAGE_PAYROLL)), true);
   // Write implies read.
   assert.equal(PAYROLL_ACCESS.canViewPayroll(staff(PERMISSIONS.MANAGE_PAYROLL)), true);
+});
+
+// Cancelling a checked-in stay. Its own lane, deliberately outside the
+// view/check_in/manage ladder: writing off a guest's bill is not a bigger
+// version of configuring rooms.
+
+test("cancelling a stay is NOT implied by any other room right", () => {
+  const CANCEL = PERMISSIONS.CANCEL_ROOM_STAY;
+  for (const p of [PERMISSIONS.VIEW_ROOMS, PERMISSIONS.CHECK_IN, PERMISSIONS.MANAGE_ROOMS]) {
+    assert.equal(
+      ROOM_ACCESS.canCancelStay(staff(p)),
+      false,
+      `${p} must not grant cancellation`
+    );
+  }
+  assert.equal(ROOM_ACCESS.canCancelStay(staff(CANCEL)), true);
+});
+
+test("the owner is the default canceller", () => {
+  // No extra wiring: hasPermission is true for restaurant_admin.
+  assert.equal(ROOM_ACCESS.canCancelStay(owner), true);
+});
+
+test("cancelling does not leak the other room rights", () => {
+  // A cancel-only staffer must not thereby be able to check guests in or edit
+  // rooms — the ladder runs one way.
+  const u = staff(PERMISSIONS.CANCEL_ROOM_STAY);
+  assert.equal(ROOM_ACCESS.canCheckIn(u), false);
+  assert.equal(ROOM_ACCESS.canManageRooms(u), false);
+  assert.equal(ROOM_ACCESS.canViewRooms(u), false);
+});
+
+test("cancel_room_stay is grantable in the UI", () => {
+  const keys = PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => i.key));
+  assert.ok(keys.includes(PERMISSIONS.CANCEL_ROOM_STAY));
 });

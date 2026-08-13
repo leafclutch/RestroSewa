@@ -128,6 +128,24 @@ module covers the on-screen Finance report and the emailed daily report.
   ⚠️ The sale branch now LEFT JOINs sessions → room_stays → rooms and restaurant_tables. All are
   to primary keys, so no fan-out; row count was 121 before and after, which is the check to
   repeat if that branch is ever touched again.
+- **The ledger NAMES by direction too, for the two signed kinds.** `txLabel(t, showRooms)` in
+  `lib/finance.ts` is the single labeller — `TX_LABEL[kind]` alone was not enough, because
+  `room_advance` and `extra_expense` both carry a SIGNED amount and mean opposite things each way:
+  a negative advance is a **Room Advance Refund**, a negative extra expense is a **Saving
+  Withdrawal** (the CHECK constraint permits a negative amount for the `saving` category and no
+  other, so that inference is safe). Before this, a ₹1,500 refund read "Room Advance" — identical
+  to the deposit it reverses, with only the minus sign to tell them apart. Measured on DEV: **4 of
+  4** negative rows were mislabelled.
+  ⚠️ **The label reads the row's SIGN; the colour reads the DELTAS.** Different inputs on purpose —
+  "what is this row" vs "which way did the money go" — and they must not contradict: a refund is
+  red − (money out), a withdrawal is green + (money in). Covered by `lib/finance.test.ts`.
+  The screen and the CSV both call `txLabel`; they had already drifted to "Room sale" vs
+  "Room Sale", which is exactly why there is now one function. The CSV passes `showRooms: true`
+  because that file has no business-type gate and its exports have always qualified sales.
+  *(Not distinguished: a cancellation refund vs a checkout refund. The note that separates them
+  isn't in the ledger payload, so it would need a migration.)*
+  ⚠️ `lib/finance.ts` now imports `./business-day.ts` **relatively** so it is reachable under
+  `node --test` — the same deliberate choice `lib/room-billing.ts` makes. Do not "tidy" it to `@/`.
 - **The ledger colours by DIRECTION, never by kind.** `txFlow(t) = cashDelta + onlineDelta` decides:
   `> 0` green `+`, `< 0` red `−`, `0` amber "no money moved". The old `TX_TONE` map (one fixed
   colour per kind) was wrong for every row that can point both ways, and measured on DEV it

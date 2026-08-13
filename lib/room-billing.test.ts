@@ -65,3 +65,74 @@ test("balances land on the paisa", () => {
   assert.equal(f.grandTotal, 3333.34);
   assert.equal(f.balanceDue, 2333.33);
 });
+
+// ── A cancelled stay ─────────────────────────────────────────────────────────
+// The bill is the cancellation charge and nothing else. These assertions matter
+// because `getPaidBill` rebuilds a paid room bill from the frozen stay: if this
+// branch ever regresses, the Sales reprint of a cancelled stay shows the nights
+// it would have cost against a payment that never matched them.
+
+const cancelledStay = {
+  check_in_at: "2026-08-01T06:00:00.000Z",
+  check_out_at: "2026-08-03T06:00:00.000Z",
+  room_rate: 2500,
+  cancelled: true,
+  cancellation_charge: 2000,
+};
+
+const someExtras = [{ id: "e1", type: "laundry" as const, description: "Laundry", amount: 300 }];
+const someFood = [{ id: "f1", item_name: "Momo", item_price: 150, quantity: 2 }];
+
+test("a cancelled stay bills the charge, not the nights", () => {
+  const f = buildFolio(cancelledStay, someExtras, someFood, {});
+  assert.equal(f.nights, 0);
+  assert.equal(f.roomTotal, 2000);
+  assert.equal(f.room.label, "Cancellation charge");
+  assert.equal(f.grandTotal, 2000);
+});
+
+test("a cancellation writes off the food and the extras", () => {
+  const f = buildFolio(cancelledStay, someExtras, someFood, {});
+  assert.deepEqual(f.extras, []);
+  assert.deepEqual(f.food, []);
+  assert.equal(f.extrasTotal, 0);
+  assert.equal(f.foodTotal, 0);
+  // The same stay NOT cancelled would have billed all of it — proving the
+  // branch is what changed the answer, not the inputs.
+  const normal = buildFolio({ ...cancelledStay, cancelled: false }, someExtras, someFood, {});
+  assert.equal(normal.grandTotal, 5000 + 300 + 300);
+});
+
+test("a cancellation charge carries no tax and no service charge", () => {
+  // It is a retention out of a deposit, not a service rendered — and
+  // cancel_room_stay records a payment of EXACTLY the charge, so tax on top
+  // would print a bill that cannot reconcile to its own sale.
+  const f = buildFolio(cancelledStay, [], [], { taxPercent: 13, servicePercent: 10 });
+  assert.equal(f.tax, 0);
+  assert.equal(f.service, 0);
+  assert.equal(f.grandTotal, 2000);
+});
+
+test("the retained deposit settles the cancellation charge exactly", () => {
+  // The shape cancel_room_stay writes: held 5,000, kept 2,000, refunded 3,000.
+  // The advance covers the whole charge, so nothing is left to collect and
+  // nothing is owed — which is what keeps a cancellation out of receivables.
+  const f = buildFolio(cancelledStay, [], [], { advancePaid: 2000 });
+  assert.equal(f.grandTotal, 2000);
+  assert.equal(f.advancePaid, 2000);
+  assert.equal(f.balanceDue, 0);
+  assert.equal(f.refundDue, 0);
+});
+
+test("a full refund leaves a zero bill", () => {
+  const f = buildFolio({ ...cancelledStay, cancellation_charge: 0 }, someExtras, someFood, {});
+  assert.equal(f.grandTotal, 0);
+  assert.equal(f.balanceDue, 0);
+});
+
+test("a missing or negative charge is treated as zero, never as nights", () => {
+  const noCharge = buildFolio({ ...cancelledStay, cancellation_charge: undefined }, [], [], {});
+  assert.equal(noCharge.grandTotal, 0);
+  const negative = buildFolio({ ...cancelledStay, cancellation_charge: -500 }, [], [], {});
+  assert.equal(negative.grandTotal, 0);
+});

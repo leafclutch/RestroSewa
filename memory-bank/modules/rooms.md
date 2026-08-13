@@ -80,6 +80,35 @@ Mirrors tables (sessions) but adds a stay/folio and a three-tier permission. See
   the server-supplied `folio.nextBoundary`. Miss any one and two screens disagree about the same
   guest. `nightsFor` still keeps the legacy 24-hour behaviour when no rule is passed, and that
   fallback means "unchanged", never "midnight".
+- **A stay can END two ways: checked out, or CANCELLED.** `room_stay_status` gained `'cancelled'`
+  and `cancel_room_stay` ends a stay without billing it, settling the deposit instead.
+  ⚠️ **The whole design is where the KEPT money goes.** A deposit already raised cash AND
+  `advances_held` (the fifth balance — guests' money in the till) the day it was taken. If the
+  hotel keeps ₹2,000 and that is not recognised as income, it stays booked as a deposit against a
+  stay that no longer exists and **`advances_held` never returns to zero** — the balances still
+  reconcile, they just reconcile to a lie. So a retained deposit is a **SALE**: one `payments` row
+  with `total_amount = amount = advance_amount = the retained figure` and `cash = online = card =
+  0`. No new money moves (it is already in the till), the sale is recognised, and held clears.
+  That also keeps `left on credit = total − (cash+online+card+advance_amount) = 0` — drop the
+  advance term and every cancellation opens a credit account for a guest who owes nothing.
+  A full refund (kept = 0) writes **no payment row at all**, not a zero-value sale.
+  **No finance-function changes were needed**: a cancellation writes only `payments` and
+  `room_advances`, which both functions already read.
+- **A cancelled stay's BILL is the cancellation charge, not the nights.** `buildFolio` takes
+  `cancelled` + `cancellation_charge` and returns a single "Cancellation charge" line with
+  `nights: 0`, no food, no extras, **and no tax or service** — `cancel_room_stay` records a payment
+  of exactly the charge, so tax on top would print a bill that cannot reconcile to its own sale.
+  This lives in the calculator and not the printer because `getPaidBill` rebuilds paid room bills
+  from the frozen stay; without it a Sales reprint would show "1 night × ₹5,000" over a ₹2,000
+  payment. Written-off charges are shown on the cancel FORM so the decision is made in view of
+  them, then never billed.
+- **Cancelling needs `cancel_room_stay` AND the Security PIN**, for everyone including the owner —
+  the only PIN operation that is not admin-only. The permission says who may try, the PIN says it
+  is really them, and the audit detail records held/kept/refunded (who cancelled without how much
+  they kept is not an audit trail). The permission is deliberately **outside** the
+  view/check_in/manage ladder: writing off a guest's bill is not a bigger version of configuring
+  rooms, and a receptionist who checks guests in all day should not acquire it by default.
+  The room parks in **Cleaning**, exactly as a checkout.
 - **A room bill is DERIVED from the frozen stay, never snapshotted.** `check_out_at` stops the
   inputs moving and `room_rate` was captured at check-in, so `buildFolio` returns the same
   document before and after payment — the unpaid preview and the Sales reprint are literally one
@@ -114,8 +143,9 @@ Room cards refresh on session/order channels; new room-service orders ring assig
 See `modules/realtime.md`.
 
 # Permissions
-`view_rooms` / `check_in` / `manage_rooms` (three tiers via `ROOM_ACCESS`). See
-`modules/permissions.md`.
+`view_rooms` / `check_in` / `manage_rooms` (three tiers via `ROOM_ACCESS`), plus
+`cancel_room_stay` — a FOURTH, standalone lane, not part of the ladder and implied by none of the
+other three. `ROOM_ACCESS.canCancelStay`. See `modules/permissions.md`, `modules/security-pin.md`.
 
 # Known Limitations
 - No multi-night rate calendar / reservations engine — it's a live-stay folio model.

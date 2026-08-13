@@ -16,7 +16,7 @@ import {
   PERIOD_LABEL,
   PURCHASE_STATUS_COLOR,
   PURCHASE_STATUS_LABEL,
-  TX_LABEL,
+  txLabel,
   txFlow,
   txTone,
 } from "@/lib/finance";
@@ -202,16 +202,10 @@ function PurchaseLine({ p }: { p: FinancePurchase }) {
  * report could not show.
  */
 function LedgerRow({ t, showRooms }: { t: FinanceTransaction; showRooms: boolean }) {
-  // A sale says which side of the business raised it — but only for a client that
-  // HAS both sides. For a restaurant-only client every sale is a restaurant sale,
-  // so "Restaurant sale" would be noise on every row; it stays plain "Sale",
-  // matching the Sales block above, which collapses to one heading the same way.
-  const label =
-    t.kind === "sale" && t.source && showRooms
-      ? t.source === "room"
-        ? "Room sale"
-        : "Restaurant sale"
-      : TX_LABEL[t.kind] ?? t.kind;
+  // Shared with the CSV export, so the two cannot name the same row differently.
+  // It also distinguishes a refund from the deposit it reverses, and a saving
+  // withdrawal from the saving it takes back — see `txLabel`.
+  const label = txLabel(t, showRooms);
   // "Room 203 · Ram Bahadur" — the place first, then whoever the bill belongs to.
   // `party` is untouched by the migration, so a credit sale keeps its customer.
   const who = [t.sourceLabel, t.party].filter(Boolean).join(" · ");

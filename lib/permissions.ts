@@ -33,6 +33,7 @@ export const PERMISSIONS = {
   VIEW_ROOMS:       "view_rooms",
   CHECK_IN:         "check_in",
   MANAGE_ROOMS:     "manage_rooms",
+  CANCEL_ROOM_STAY: "cancel_room_stay",
   // Billing
   PROCESS_PAYMENTS: "process_payments",
   APPLY_DISCOUNTS:  "apply_discounts",
@@ -140,6 +141,13 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
       { key: "view_rooms",   label: "View Rooms" },
       { key: "check_in",     label: "Check-in" },
       { key: "manage_rooms", label: "Manage Rooms" },
+      // Ending a stay WITHOUT billing it, and deciding how much of the deposit
+      // the hotel keeps. Its own permission and NOT implied by manage_rooms:
+      // configuring rooms and writing off a guest's bill are different acts.
+      // The owner passes automatically (hasPermission is true for admins), which
+      // is what makes them the default canceller with no extra wiring.
+      // Always ALSO gated on the Security PIN — see lib/security/authorize.ts.
+      { key: "cancel_room_stay", label: "Cancel a Checked-in Stay" },
     ],
   },
   {
@@ -380,6 +388,20 @@ export const ROOM_ACCESS = {
   /** Creates/edits/deletes rooms and room types, changes availability. */
   canManageRooms: (u: { role: string; permissions: string[] }) =>
     hasPermission(u, P_.MANAGE_ROOMS),
+  /**
+   * Ends a stay WITHOUT billing it, deciding how much of the deposit is kept.
+   *
+   * Deliberately NOT part of the view/check_in/manage ladder: writing off a
+   * guest's bill is not a bigger version of configuring rooms, and a front-desk
+   * receptionist who checks guests in all day should not acquire it by default.
+   * The owner passes because `hasPermission` is true for `restaurant_admin`.
+   *
+   * The permission decides who may TRY. The Security PIN — checked separately in
+   * `cancelRoomStay`, for everyone including the owner — decides whether it goes
+   * through, and records both outcomes.
+   */
+  canCancelStay: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.CANCEL_ROOM_STAY),
 };
 
 // Three independent write lanes now live under one module:

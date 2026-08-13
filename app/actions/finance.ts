@@ -9,7 +9,7 @@ import {
   PERIOD_LABEL,
   purchaseStatus,
   PURCHASE_STATUS_LABEL,
-  TX_LABEL,
+  txLabel,
 } from "@/lib/finance";
 import { expenseCategoryLabel } from "@/lib/expenses";
 import type {
@@ -587,12 +587,12 @@ export async function exportFinanceCsv(params?: {
           // the newest movement at the top.
           ...[...ledger].reverse().map((t) => [
             new Date(t.at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }),
-            // A sale names its side of the business; every other kind is itself.
-            t.kind === "sale" && t.source
-              ? t.source === "room"
-                ? "Room Sale"
-                : "Restaurant Sale"
-              : TX_LABEL[t.kind] ?? t.kind,
+            // The SAME labeller the screen uses, so an exported row and the row
+            // it came from cannot be named differently. `true` because this file
+            // has no business-type gate and the export has always qualified its
+            // sales — passing the real flag would silently reword every
+            // restaurant-only export, which is not what this change is for.
+            txLabel(t, true),
             t.sourceLabel ?? "",
             t.party ?? "",
             PURCHASE_METHOD_LABEL[t.method] ?? t.method,

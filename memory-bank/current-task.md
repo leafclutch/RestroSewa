@@ -6,6 +6,68 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
+**Cancel a checked-in stay (2026-08-13) — CODE COMPLETE on DEV, not yet exercised in a browser.**
+A stay could only ever end via `check_out_room`. Now it can be CANCELLED: ended without being
+billed, with the deposit settled in the same step.
+
+⚠️ **The whole design is where the KEPT money goes.** A deposit already raised cash AND
+`advances_held` on the day it was taken. Keep ₹2,000 of it and, if that is not recognised as
+income, it stays booked as a deposit against a stay that no longer exists — **`advances_held` never
+returns to zero**. The balances still reconcile; they reconcile to a lie. So a retained deposit is
+a **SALE**: one `payments` row, `total = amount = advance_amount = kept`, `cash/online/card = 0`.
+No new money moves, the sale is recognised, held clears, and
+`left on credit = total − (cash+online+card+advance) = 0` keeps a cancellation out of receivables.
+A full refund writes **no payment row at all**. **Neither finance function needed changing** — a
+cancellation writes only `payments` and `room_advances`, which both already read.
+
+**A cancelled stay's BILL is the charge, not the nights.** `buildFolio` gained `cancelled` +
+`cancellation_charge`: one "Cancellation charge" line, `nights: 0`, no food, no extras, **and no
+tax or service** (the RPC records a payment of exactly the charge, so tax on top would print a bill
+that cannot reconcile to its own sale). It lives in the calculator, not the printer, because
+`getPaidBill` rebuilds paid room bills from the frozen stay.
+
+**Permission + PIN.** `cancel_room_stay` is a FOURTH room lane, outside the
+view/check_in/manage ladder in both directions. Owner passes automatically. The Security PIN gates
+**everyone including the owner** — the only PIN op not on `requireRestaurantAdmin`, which is why it
+lives in `app/actions/rooms.ts` rather than `security.ts`. Checks run permission → tenancy → PIN so
+a wrong PIN cannot probe which stay ids exist; the audit detail carries held/kept/refunded.
+
+⚠️ **TWO migrations, and they MUST stay separate.** `20260818000000` adds the enum value;
+`20260818000100` uses it. The runner wraps each file in `begin…commit` and Postgres refuses a new
+enum value in the transaction that created it. **Proved, not assumed** — the merged shape raises
+`55P04 unsafe use of new value`. Merging them looks tidier and fails on first run.
+
+**Verified on DEV, 27/27 end-to-end** with real stays: deposit 5,000 (3,000 cash + 2,000 online),
+keep 2,000 → sales **+2,000** (a ROOM sale), cash net **+2,000**, bank net **0**, **advances held
+back to ZERO**, **no phantom debt**, payment settled entirely by the advance, stay `cancelled`,
+room in `cleaning`. Full refund → no payment row. No deposit → nothing moves. Guards:
+`STAY_NOT_ACTIVE`, `INVALID_CHARGE`, `REFUND_MISMATCH`. **Ledger reconciles 0.0000 on both legs.**
+All figures back to baseline afterwards; the user's own "sanjib Pandey" stay untouched throughout.
+`tsc` clean, build clean, `node --test` **77/77** (10 new).
+
+**Follow-up fix (same day, no migration): the ledger now NAMES a refund.** A refund read
+"Room Advance", identical to the deposit it reverses. `txLabel(t, showRooms)` in `lib/finance.ts`
+is now the single labeller for the screen AND the CSV (they had drifted to "Room sale" vs
+"Room Sale"). Negative `room_advance` → **Room Advance Refund**; negative `extra_expense` →
+**Saving Withdrawal** (only the `saving` category may go negative, so the inference is safe).
+⚠️ The label reads the row's SIGN, the colour reads the DELTAS — different inputs on purpose, and
+`lib/finance.test.ts` asserts they never contradict (refund red −, withdrawal green +).
+Measured on the real DEV ledger: **4 of 4** negative rows were mislabelled, all now correct.
+`lib/finance.ts` also switched to a relative `./business-day.ts` import so it is node-testable.
+
+**Remaining:**
+1. **In-app QA on DEV**: cancel from Admin → Rooms and from a staff folio; confirm a staffer
+   without the permission sees no Cancel control on either; wrong PIN refused and visible as a
+   **failure** in Settings → Security activity; the freed room accepts a new check-in once cleaned.
+2. **Reprint parity**: a cancelled stay's bill in Sales must show the cancellation charge, not the
+   nights it would have cost.
+3. **Production migrations `20260817000000`, `20260818000000`, `20260818000100` are PENDING** —
+   three, in that order. **DB before app.**
+4. Nothing committed — user drives git.
+
+---
+
+## Previous feature
 **Staff-dashboard expenses/payroll + add-only permission + pot opening balance (2026-08-13) —
 CODE COMPLETE on DEV, not yet exercised in a browser.** Three requests in one pass.
 
@@ -50,7 +112,7 @@ registered), `node --test` **67/67** (10 new permission tests). DB probe 7/7, al
 
 ---
 
-## Previous feature
+## Earlier feature
 **Room night boundary (2026-08-13) — CODE COMPLETE on DEV, not yet exercised in a browser.**
 Room charges used to step up on a rolling 24-hour clock from check-in. They now step up at the
 hotel's **checkout hour**, the same wall-clock time for every guest.

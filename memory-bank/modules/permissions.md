@@ -33,7 +33,7 @@ the reference for *what* and *how*.
 - Menu: `view_menu`, `manage_menu`
 - Tables: `view_tables`, `manage_tables`
 - Walk-ins: `view_walkins`, `manage_walkins`
-- Rooms: `view_rooms`, `check_in`, `manage_rooms`
+- Rooms: `view_rooms`, `check_in`, `manage_rooms`, `cancel_room_stay`
 - Billing: `process_payments`, `apply_discounts`, `refund_bills`
 - Stock: `view_stock`, `manage_stock`
 - Purchases: `manage_purchases` · Vendors: `manage_vendors` · Extra Expenses: `manage_expenses`,
@@ -46,6 +46,10 @@ the reference for *what* and *how*.
 Helpers encode tiers so a manager needn't tick a read box under a write box:
 - **ROOM_ACCESS**: `canViewRooms` (view|check_in|manage) · `canCheckIn` (check_in|manage) ·
   `canManageRooms` (manage). Three tiers — view is read-only, check_in starts stays, manage is CRUD.
+  ⚠️ **`canCancelStay` is a FOURTH lane, deliberately outside that ladder** — implied by none of
+  the three, and granting it implies none of them either. Writing off a guest's bill is not a
+  bigger version of configuring rooms, and a receptionist checking guests in all day should not
+  acquire it by default. Always ALSO gated on the Security PIN, for the owner too.
 - **STOCK_ACCESS**: `canViewStock` (view|manage_stock) · `canManageStock` · `canViewPurchases`
   (view_stock|manage_stock|manage_purchases) · `canManagePurchases` · `canViewVendors`
   (…|manage_vendors) · `canManageVendors` · `canViewExpenses` (manage_expenses|view_finance) ·

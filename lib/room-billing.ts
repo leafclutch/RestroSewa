@@ -106,6 +106,13 @@ export type StayInput = {
   check_out_at: string | null;
   /** The nightly rate SNAPSHOT taken at check-in — not the room type's price today. */
   room_rate: number;
+  /**
+   * Set when the stay was CANCELLED rather than checked out. The bill is then a
+   * single cancellation charge — see `buildFolio`.
+   */
+  cancelled?: boolean;
+  /** What the hotel kept out of the deposit. The whole bill for a cancelled stay. */
+  cancellation_charge?: number;
 };
 
 export type ExtraInput = {
@@ -195,6 +202,9 @@ const rupees = (n: number) => "₹" + Number(n).toLocaleString("en-IN", { maximu
  *
  * `room_rate` is the rate captured AT CHECK-IN. An admin raising the room type's
  * price mid-stay must not retroactively re-bill a guest who is already in the bed.
+ *
+ * A CANCELLED stay is the one case where the bill is not derived from the nights:
+ * it is the single cancellation charge, and nothing else. See below.
  */
 export function buildFolio(
   stay: StayInput,
@@ -206,25 +216,40 @@ export function buildFolio(
   const open = !stay.check_out_at;
   const checkOut = stay.check_out_at ?? now.toISOString();
 
-  const nights = nightsFor(stay.check_in_at, checkOut, config.roomDay);
+  // ── A cancelled stay bills the CHARGE, not the nights ──────────────────────
+  // The guest was never billed for the room, so the nights, the food and the
+  // extras were written off with the cancellation. What is owed is exactly what
+  // the hotel decided to keep out of the deposit.
+  //
+  // This branch is why the rule lives HERE and not in the printer: `getPaidBill`
+  // rebuilds a paid room bill from the frozen stay, so without it the Sales
+  // reprint of a cancelled stay would show "1 night × ₹5,000" against a payment
+  // of ₹2,000 — a document that contradicts its own total.
+  const cancelled = stay.cancelled === true;
+  const nights = cancelled ? 0 : nightsFor(stay.check_in_at, checkOut, config.roomDay);
   const rate = Number(stay.room_rate) || 0;
-  const roomTotal = money(nights * rate);
+  const roomTotal = cancelled
+    ? money(Math.max(Number(stay.cancellation_charge) || 0, 0))
+    : money(nights * rate);
 
   const room: FolioLine = {
     key: "room",
-    label: "Room charge",
-    detail: `${nights} × ${rupees(rate)} per night`,
+    label: cancelled ? "Cancellation charge" : "Room charge",
+    detail: cancelled ? "Booking cancelled" : `${nights} × ${rupees(rate)} per night`,
     amount: roomTotal,
   };
 
-  const extraLines: FolioLine[] = extras.map((e) => ({
+  // Written off by the cancellation — they are shown on the cancel FORM, so the
+  // decision is made with them in view, but they are not billed afterwards.
+  const extraLines: FolioLine[] = (cancelled ? [] : extras).map((e) => ({
     key: e.id,
     label: e.description || CHARGE_LABEL[e.type],
     detail: e.description ? CHARGE_LABEL[e.type] : undefined,
     amount: money(Number(e.amount) || 0),
   }));
 
-  const foodLines: FolioLine[] = food.map((f) => ({
+  // Written off with the cancellation, exactly like the extras above.
+  const foodLines: FolioLine[] = (cancelled ? [] : food).map((f) => ({
     key: f.id,
     label: f.item_name,
     detail: `${f.quantity} × ${rupees(Number(f.item_price))}`,
@@ -245,8 +270,13 @@ export function buildFolio(
   // did not. `BillTicket` took the discount off AFTER tax until the billing unification,
   // so the same stay totalled differently depending on which renderer you looked at.
   // BillTicket is the one that moved — this file was always right.
-  const taxPercent = config.taxPercent ?? 0;
-  const servicePercent = config.servicePercent ?? 0;
+  //
+  // A cancellation charge carries NEITHER. It is a retention out of a deposit,
+  // not a service rendered — and, decisively, `cancel_room_stay` writes a
+  // payment of exactly the charge, so adding tax on top here would produce a
+  // printed bill that does not reconcile to the sale it belongs to.
+  const taxPercent = cancelled ? 0 : config.taxPercent ?? 0;
+  const servicePercent = cancelled ? 0 : config.servicePercent ?? 0;
   const tax = money(taxable * (taxPercent / 100));
   const service = money(taxable * (servicePercent / 100));
 
