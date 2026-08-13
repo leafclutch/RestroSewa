@@ -4,6 +4,32 @@ Human-readable release notes. Newest first. Group entries by Added / Changed / F
 Versioning is informal (the app ships continuously); dates anchor the entries.
 
 ## [Unreleased] — 2026-08
+
+> **Database migrated to production 2026-08-13.** All thirteen migrations behind room advances,
+> the sales split, Extra Expenses, Savings, withdrawals, discounts and the ledger sale detail are
+> now live on the production database — 13/13 applied, no failures. **The app itself is not
+> deployed yet**; the database being ahead is deliberate and safe, because every change is additive
+> (new tables and appended report columns), so the currently running build is unaffected.
+> Verified on production: all six touched functions byte-identical to dev, every pre-existing
+> figure unchanged across 8 restaurants, and the ledger reconciling to the penny over 1,316 rows.
+
+### Changed
+- **Room nights now end at checkout time, not 24 hours after check-in.** Until now a room charge
+  stepped up exactly 24 hours after each guest happened to arrive, so two guests in identical
+  rooms crossed into their second night at different times of day. Now there is one checkout hour
+  for the whole hotel, set under **Rooms → Room night boundary**:
+  - **Room new day starts at** (default 6 AM) — which day an arrival counts as. A guest arriving
+    at 3 AM counts as the previous night's guest, so their charge steps up that same day at noon.
+    A guest arriving at 8 PM steps up the following day at noon.
+  - **Price doubles at** (default 12 PM) — when each following night begins.
+  - On the folio, each stay now says plainly when the next night starts, and the room card on the
+    dashboard counts down to that moment rather than to a rolling 24-hour mark.
+- **Front desk can give a guest extra hours.** On the folio, anyone who can check guests in can
+  push that stay's boundary back by up to 12 hours — the usual "you can keep the room until 3".
+  The folio shows the extension and who granted it. Guests already checked in keep the hours that
+  applied when they arrived, and **past bills never change**, so adjusting the hotel's settings
+  can't re-price a bill that has already been paid.
+
 ### Added
 - **Transaction history now says where a sale came from.** Every sale used to read just "Sale".
   It now reads **"Room sale · Room 203"** or **"Restaurant sale · Table 5"** (walk-ins show their

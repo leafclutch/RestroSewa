@@ -4,8 +4,13 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
-import { getRestaurantConfig } from "@/lib/restaurant-info";
+import { getRestaurantConfig, revalidateRestaurantInfo } from "@/lib/restaurant-info";
 import { hasRooms } from "@/lib/business-type";
+import {
+  DEFAULT_ROOM_DOUBLE_HOUR,
+  DEFAULT_ROOM_NEW_DAY_HOUR,
+  normalizeRoomHour,
+} from "@/lib/business-day";
 
 export type ActionResult = { error: string } | null;
 
@@ -391,5 +396,88 @@ export async function setRoomWaiters(
   }
 
   revalidatePath("/admin/rooms");
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The room night boundary.
+//
+// Two hours that decide when a room charge steps up: which day an arrival
+// belongs to, and the hour each following night begins. Stored in the
+// `restaurants.settings` jsonb alongside `business_closing_hour`, so neither
+// needs a column of its own.
+//
+// Kept here rather than in actions/settings.ts because this is a Rooms setting
+// gated on `manage_rooms`, and it lives on the Rooms page — the business-day
+// hour is an owner-only, whole-app setting and the two should not share a gate.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type RoomDaySettings = { newDayHour: number; doubleHour: number };
+
+export async function getRoomDaySettings(restaurantId: string): Promise<RoomDaySettings> {
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("restaurants")
+    .select("settings")
+    .eq("id", restaurantId)
+    .maybeSingle();
+
+  return {
+    newDayHour: normalizeRoomHour(data?.settings?.room_new_day_hour, DEFAULT_ROOM_NEW_DAY_HOUR),
+    doubleHour: normalizeRoomHour(
+      data?.settings?.room_price_double_hour,
+      DEFAULT_ROOM_DOUBLE_HOUR
+    ),
+  };
+}
+
+export async function updateRoomDaySettings(
+  _prev: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!hasPermission(ru, PERMISSIONS.MANAGE_ROOMS)) return { error: "Permission denied." };
+  if (!(await roomsEnabled(ru.restaurant_id))) return { error: "Rooms are not enabled." };
+
+  const readHour = (field: string) => {
+    const raw = ((formData.get(field) as string) || "").trim();
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 0 && n <= 23 ? n : null;
+  };
+
+  const newDayHour = readHour("new_day_hour");
+  const doubleHour = readHour("double_hour");
+  if (newDayHour === null || doubleHour === null) return { error: "Choose valid times." };
+
+  const service = createServiceClient();
+  // Read-modify-write, not a jsonb patch: `settings` carries every other setting
+  // in the app and a bare update would drop them.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: rest } = await (service as any)
+    .from("restaurants")
+    .select("settings")
+    .eq("id", ru.restaurant_id)
+    .maybeSingle();
+
+  const settings = {
+    ...(rest?.settings ?? {}),
+    room_new_day_hour: newDayHour,
+    room_price_double_hour: doubleHour,
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("restaurants")
+    .update({ settings })
+    .eq("id", ru.restaurant_id);
+
+  if (error) return { error: error.message };
+
+  revalidateRestaurantInfo(ru.restaurant_id);
+  // Only stays with no snapshot follow this setting, and those are the ones
+  // currently in progress — so the folio and the room grid are what can move.
+  revalidatePath("/admin/rooms");
+  revalidatePath("/employee/dashboard");
   return null;
 }

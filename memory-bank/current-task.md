@@ -6,6 +6,69 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
+**Room night boundary (2026-08-13) — CODE COMPLETE on DEV, not yet exercised in a browser.**
+Room charges used to step up on a rolling 24-hour clock from check-in. They now step up at the
+hotel's **checkout hour**, the same wall-clock time for every guest.
+
+**The rule, which is one line and covers both cases the user asked for.** `room_new_day_hour`
+(default 6) decides which DAY an arrival belongs to; `room_price_double_hour` (default 12) is when
+each following night starts; night *n* ends at the double-hour on `arrival's room-day + n`.
+Arriving 8 PM → doubles tomorrow noon. Arriving 3 AM → belongs to *yesterday's* room-day, so it
+doubles **today** at noon. Both settings live in `restaurants.settings` jsonb, so they needed **no
+migration** — the card is on `/admin/rooms`, gated on `manage_rooms`.
+
+**It reuses `businessDate`'s shift-back trick** rather than a second Nepal-offset implementation:
+`roomNights` / `roomNightBoundary` are in `lib/business-day.ts`, which is where day maths lives.
+⚠️ `lib/room-billing.ts` therefore imports **relatively**, `from "./business-day.ts"` — the only
+production file in the repo that does, because `lib/room-billing.test.ts` runs under `node --test`
+which resolves neither `@/` nor an extensionless specifier. Verified it builds. Do not "tidy" it.
+
+**The hours are SNAPSHOTTED at check-in** (`room_stays.new_day_hour`/`double_hour`), the same
+guarantee `room_rate` already had — and needed more badly here, because a paid room bill is
+REBUILT from the frozen stay on reprint, so without it an admin changing the checkout hour would
+silently re-price every historical bill. Null = follow the live setting, which is what let stays
+already in progress adopt the rule on ship day (the user's explicit call).
+
+**A per-stay shift** (`price_shift_hours`, 0–12) pushes that stay's boundary later — the front
+desk's "keep the room until 3". Applies to every boundary of the stay, not just the next, because
+only the departure day is ever affected in practice and one number is honest to display. Gated on
+`check_in`, **no PIN** (a PIN at the desk means it stops being recorded), but `price_shift_by` +
+`price_shift_at` are stored and shown. Capped at 12 because 24 would step over a boundary and gift
+a free night.
+
+⚠️ **The plan said three call sites; there were FIVE.** `buildFolio` has four callers —
+`getRoomsOverview`, `loadFolioInputs` (folio *and* checkout), and `getPaidBill` — and
+`rooms-grid.tsx` had a **fifth** private implementation, `untilNextNight` doing `elapsed % 24h`,
+which would have promised guests hours they did not have. It now counts down to the
+server-supplied `folio.nextBoundary`. If nights are ever touched again, audit all five.
+
+**A real bug the tests caught:** `normalizeRoomHour(null)` returned **0**, because `Number(null)`
+is 0 and 0 is a valid hour — a null column would have silently moved every boundary to midnight.
+Both normalizers now reject empty-ish values before `Number()` sees them.
+
+**Verified on DEV (measured, not assumed):** `npx tsc --noEmit` clean; `npm run build` clean;
+`node --test` **57/57** (18 new, incl. both of the user's worked examples, 05:59-vs-06:01, arrival
+and departure exactly on a boundary, month/year rollover, and the shift cap). Migration applied,
+**one** `check_in_room` overload, and **both the 17-arg (deployed build) and 19-arg calls reach
+business logic** — `P0001 ROOM_NOT_FOUND`, not `42883`/`42725`. End-to-end against a real stay,
+**12/12**: check-in stamps the snapshot; changing the restaurant setting afterwards does NOT move
+the stay; the snapshot rule charges 1 night where the live rule charges 2; a +3h shift pulls it
+back to 1; a 24h shift is refused by the DB (`23514`). PostgREST embed for `price_shift_by` → 200.
+All test data removed and settings restored byte-for-byte (asserted).
+
+**Remaining:**
+1. **In-app QA on DEV**: set the two hours; check a guest in and confirm the folio names the next
+   boundary and the dashboard card counts down to the same instant; grant +3h and watch both move;
+   check out either side of the boundary; confirm a `view_rooms`-only user sees the boundary but no
+   "Give more time" control.
+2. **Reprint parity** (the regression that matters most): check a stay out, note nights and total,
+   change *both* admin settings, reprint from Sales — it must be identical.
+3. **Production migration `20260816000000` is PENDING.** DB before app. Nothing else is pending.
+4. Nothing committed — user drives git.
+
+---
+
+## Previous feature
 **Extra Expenses (2026-08-13) — CODE COMPLETE on DEV, not yet exercised in a browser.**
 Overheads that are neither stock nor people: rent, electricity, water, gas, internet, maintenance,
 marketing, licenses, transport, other. New page `/admin/expenses` in the Stock & Finance nav group.
@@ -88,21 +151,47 @@ carry-forward 0.0000 ✓, a pre-books-dated expense moved neither opening nor cl
 PostgREST embed (`restaurant_users!extra_expenses_created_by_fkey`) returns 200 ✓. All test rows
 deleted; `finance_report` returns the exact pre-work baseline (22,569.96 / −13,089.84).
 
+**✅ PRODUCTION MIGRATED 2026-08-13.** All **thirteen** pending migrations (`20260811000000` →
+`20260815100000`) applied to `qsccnzgrhrnjggyymefr` in one run, 13/13, no failures. The database is
+now AHEAD of the deployed app, which is the safe direction — every change is additive (new tables,
+appended return columns), so the running build keeps working until the app is deployed.
+
+**How it was verified (measured on production, not assumed):**
+- **All six touched functions are byte-identical to DEV** — `md5(pg_get_functiondef())` matches on
+  `finance_report`, `finance_transactions`, `check_in_room`, `check_out_room`,
+  `record_room_advance`, `close_bill_with_credit`. This is the strongest convergence proof available
+  and it also proves no DEV drift escaped the migration files.
+- **Nothing moved.** 8 restaurants × 11 figures (opening/closing cash+online, sales, purchases, both
+  credit balances, salary, has_opening) snapshotted before and after: **identical**, 0 differences.
+- **Ledger reconciles 0.0000** on cash AND bank for all 8 restaurants across **1,316** rows. This is
+  also the fan-out proof for `20260815100000`'s three new LEFT JOINs — a duplicated sale row would
+  double its deltas and break reconciliation.
+- **Every additive identity holds at 0.0000** on all 8: room+table=sales_total, both per-block sales
+  identities, advances split, refunds split, sales-advance split, extra-expenses split.
+- **1,008 sale rows** all classified and labelled (0 unclassified, 0 unlabelled, 0 `—` fallbacks,
+  0 non-sale rows tagged): 861 table / 128 walk-in / 19 room.
+- **Discounts now report on real data** — e.g. Shining Crown 94 bills / ₹5,003, Bhairahawa 84 / ₹6,985.
+- New tables present with RLS on and `service_role` granted; all 7 `extra_expenses` CHECKs present;
+  **PostgREST embeds return 200** (`extra_expenses!extra_expenses_created_by_fkey`, `saving_titles`),
+  so the schema cache picked the new relations up without a manual reload.
+
+Pre-flight before applying: confirmed all four `finance_report` rewrites `drop` before `create` (a
+return-type change under `create or replace` would have raised `42725`), and that production already
+had all 14 columns the new bodies read.
+
 **Remaining:**
-1. **In-app QA on DEV**: add cash / online / mixed expenses; confirm the Finance Expenses block and
-   its category lines; correct one and delete one behind the PIN; check both appear in
-   Settings → Security activity; confirm a non-admin sees no edit control and a `manage_expenses`
-   staffer sees the page but not the pencil.
+1. **Deploy the app** — the DB is ready and waiting.
+2. **In-app QA** (now doable on DEV *or* production): add cash / online / mixed expenses; confirm the
+   Finance Expenses block and its category lines; correct one and delete one behind the PIN; check
+   both appear in Settings → Security activity; confirm a non-admin sees no edit control and a
+   `manage_expenses` staffer sees the page but not the pencil.
    Savings: create a pot, file cash/online/mixed into it, rename it, confirm a pot with money
    refuses to delete, and confirm Finance shows one "Saving" line with no pot names.
-2. **Production migrations `20260813000000`, `20260813000100`, `20260814000000`,
-   `20260814100000`, `20260815000000` and `20260815100000` are PENDING**, on top of the seven
-   already outstanding — **thirteen total**. **DB before app.**
 3. Nothing committed — user drives git.
 
 ---
 
-## Previous feature
+## Earlier feature
 **Room advance payments (2026-08-11 → 12) — CODE COMPLETE on DEV, not yet exercised in a browser.**
 A deposit taken at check-in (optional section on the check-in form) and again mid-stay from the
 folio, deducted from the bill at checkout, refunded if it overshoots, and carried correctly through
@@ -213,9 +302,9 @@ they asserted on `payments` columns rather than on the report the owner actually
    58mm and 80mm; the folio Advances block on a phone and in the installed PWA.
 2. **Access control**: a non-admin sees no remove control; a wrong Security PIN is refused; both
    outcomes visible in Admin → Settings → Security activity.
-3. **Production migrations `20260811000000`–`20260811000300`, `20260812000000`,
-   `20260812100000` and `20260812200000` are PENDING** — user applies them.
-   **DB before app**: the app writes `advance_amount`, so the column must exist first.
+3. ~~Production migrations pending~~ — **APPLIED 2026-08-13** as part of the thirteen-migration run;
+   see the current feature above for the verification. **DB before app** held: the column exists
+   before the app that writes it ships.
 4. Nothing committed — user drives git.
 
 ---

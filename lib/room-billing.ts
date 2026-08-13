@@ -6,6 +6,19 @@
 // the sales report. Anything computed twice eventually disagrees; this is
 // computed once, here, and everything else reads the result.
 
+// Relative, with the extension, and NOT through the `@/` alias — deliberate.
+// lib/room-billing.test.ts runs under `node --test`, which resolves neither
+// tsconfig paths nor extensionless specifiers. Anything imported here must be
+// reachable the same way, which is why the night rule lives in business-day.ts
+// (zero imports of its own) rather than in a module that pulls in the app.
+import {
+  roomNights,
+  roomNightBoundary,
+  type RoomDayRule,
+} from "./business-day.ts";
+
+export type { RoomDayRule };
+
 export const MS_PER_NIGHT = 24 * 60 * 60 * 1000;
 
 export type RoomChargeType =
@@ -40,19 +53,29 @@ export const CHARGE_LABEL: Record<RoomChargeType, string> = {
 };
 
 /**
- * Chargeable 24-hour periods in a stay.
+ * Chargeable nights in a stay.
  *
- * A part-period costs a whole one — the room was unavailable to anyone else for
- * it — so this rounds UP, and a stay always costs at least one night even if the
- * guest leaves an hour later.
+ * With a `rule`, nights end at the restaurant's checkout hour — see
+ * `roomNights` in business-day.ts, which owns that arithmetic.
+ *
+ * WITHOUT a rule this keeps the original rolling 24-hour behaviour, and that
+ * fallback is load-bearing rather than tidiness: a caller that has not been
+ * taught to resolve the rule (the mock bill, say) must not silently start
+ * billing against hour 0. A missing rule means "unchanged", never "midnight".
  *
  *   10h → 1    24h → 1    30h → 2    48h → 2    72h → 3
  *
- * Note 24h is one night, not two: the boundary belongs to the period it closes.
- * Integer milliseconds divided by an exact power-of-two-friendly constant, so a
- * stay of exactly 48h can't land on 2.0000000001 and bill a third night.
+ * Note 24h is one night, not two: the boundary belongs to the period it closes,
+ * which is the same convention the boundary rule uses. Integer milliseconds
+ * divided by an exact power-of-two-friendly constant, so a stay of exactly 48h
+ * can't land on 2.0000000001 and bill a third night.
  */
-export function nightsFor(checkIn: Date | string, checkOut: Date | string): number {
+export function nightsFor(
+  checkIn: Date | string,
+  checkOut: Date | string,
+  rule?: RoomDayRule
+): number {
+  if (rule) return roomNights(checkIn, checkOut, rule);
   const from = new Date(checkIn).getTime();
   const to = new Date(checkOut).getTime();
   const ms = to - from;
@@ -104,6 +127,12 @@ export type FolioConfig = {
   servicePercent?: number;
   discount?: number;
   /**
+   * The night-boundary rule for this stay. Absent = the legacy rolling 24-hour
+   * clock; see `nightsFor`. Resolve it with `resolveRoomDayRule`, never by hand,
+   * so the check-in snapshot always beats the live setting.
+   */
+  roomDay?: RoomDayRule;
+  /**
    * Net advance already received against this stay — the sum of the stay's SIGNED
    * `room_advances` rows, so a refund has already been netted off by the caller.
    * It does not change what the stay COSTS, only what is left to hand over.
@@ -120,6 +149,13 @@ export type RoomFolio = {
   nights: number;
   duration: string;
   rate: number;
+  /**
+   * When the NEXT night starts, ISO — the moment this bill grows by one night.
+   * Null when the stay is closed (a frozen bill has no next night) or when no
+   * rule was supplied. The front desk's most-asked question, answered by the
+   * same calculator that charges it rather than by a second sum in the UI.
+   */
+  nextBoundary: string | null;
 
   room: FolioLine;
   extras: FolioLine[];
@@ -170,7 +206,7 @@ export function buildFolio(
   const open = !stay.check_out_at;
   const checkOut = stay.check_out_at ?? now.toISOString();
 
-  const nights = nightsFor(stay.check_in_at, checkOut);
+  const nights = nightsFor(stay.check_in_at, checkOut, config.roomDay);
   const rate = Number(stay.room_rate) || 0;
   const roomTotal = money(nights * rate);
 
@@ -227,6 +263,12 @@ export function buildFolio(
     nights,
     duration: stayDuration(stay.check_in_at, checkOut),
     rate,
+    // The boundary that ends the night currently being charged. A closed stay
+    // has none: its bill is frozen and will never grow again.
+    nextBoundary:
+      open && config.roomDay
+        ? roomNightBoundary(stay.check_in_at, nights, config.roomDay).toISOString()
+        : null,
     room,
     extras: extraLines,
     food: foodLines,

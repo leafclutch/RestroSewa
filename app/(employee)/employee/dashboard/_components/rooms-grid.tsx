@@ -18,10 +18,15 @@ const rupee = (n: number) => "₹" + Number(n ?? 0).toLocaleString("en-IN", { ma
 
 // How long until the next night ticks over — the number a receptionist wants when
 // a guest asks "if I leave now, what do I pay?".
-function untilNextNight(checkIn: string): string {
-  const ms = Date.now() - new Date(checkIn).getTime();
-  const intoNight = ms % (24 * 60 * 60 * 1000);
-  const left = 24 * 60 * 60 * 1000 - intoNight;
+//
+// It counts down to an instant the SERVER supplied, rather than working the
+// boundary out here. This used to be `elapsed % 24h`, which was its own third
+// implementation of the night rule and went wrong the moment nights stopped
+// running 24 hours from check-in: the card would promise a guest hours they did
+// not have. The folio already computes the boundary; the card just renders it.
+function untilNextNight(boundary: string): string {
+  const left = new Date(boundary).getTime() - Date.now();
+  if (!Number.isFinite(left) || left <= 0) return "moments";
   const h = Math.floor(left / (60 * 60 * 1000));
   const m = Math.floor((left % (60 * 60 * 1000)) / (60 * 1000));
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
@@ -339,10 +344,10 @@ const RoomCard = memo(function RoomCard({ room, canCheckIn, canShift, onCheckIn,
             {/* Empty on the server, filled on the client — see useNow. Reserves
                 its line either way, so the card doesn't jump on hydration. */}
             <p className="text-xs" style={{ color: "var(--color-ink-mute)", minHeight: "1rem" }}>
-              {now !== null && (
+              {now !== null && stay.next_boundary && (
                 <>
                   <Clock size={11} className="inline mr-1" style={{ verticalAlign: "-1px" }} />
-                  Next night in {untilNextNight(stay.check_in_at)}
+                  Next night in {untilNextNight(stay.next_boundary)}
                 </>
               )}
             </p>

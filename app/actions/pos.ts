@@ -11,7 +11,12 @@ import { computeCreditStats, settlementOf } from "@/lib/credits";
 import type { BillSettlement, CreditStats } from "@/lib/credits";
 import { resolveOrderItems } from "@/lib/order-items";
 import { resolveCustomItems, type CustomItemRequest } from "@/lib/custom-items";
-import { businessDate, businessPeriodBounds, businessToday } from "@/lib/business-day";
+import {
+  businessDate,
+  businessPeriodBounds,
+  businessToday,
+  resolveRoomDayRule,
+} from "@/lib/business-day";
 import { buildFolio } from "@/lib/room-billing";
 import { folioToBill } from "@/lib/billing/room-bill";
 import type { BillSection, BillStay } from "@/lib/billing/room-bill";
@@ -2417,7 +2422,7 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
       (service as any)
         .from("room_stays")
         .select(
-          "guest_name, guest_phone, guest_id_type, guest_id_number, guest_address, room_rate, check_in_at, check_out_at"
+          "guest_name, guest_phone, guest_id_type, guest_id_number, guest_address, room_rate, check_in_at, check_out_at, price_shift_hours, new_day_hour, double_hour"
         )
         .eq("id", stayId)
         .maybeSingle(),
@@ -2453,6 +2458,16 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
           servicePercent:
             settingsNumber(rest?.settings, "service_charge_percent", "service_charge") ?? 0,
           discount,
+          // The SAME rule the checkout charged under. The stay's snapshot is what
+          // makes that true: change the restaurant's boundary hours tomorrow and
+          // this reprint still shows the nights the guest actually paid for.
+          // Miss this and a reprinted bill silently contradicts the sale.
+          roomDay: resolveRoomDayRule({
+            settings: rest?.settings as Record<string, unknown> | null,
+            stayNewDayHour: stayRow.new_day_hour,
+            stayDoubleHour: stayRow.double_hour,
+            shiftHours: stayRow.price_shift_hours,
+          }),
         }
       );
       const view = folioToBill({ folio, roomType: (typeRes.data?.name as string) ?? "—" });

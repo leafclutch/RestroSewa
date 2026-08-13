@@ -12,6 +12,8 @@ const folio = {
   nights: 2,
   duration: "2d",
   rate: 2500,
+  // Checked out, so the bill is frozen and there is no next night to name.
+  nextBoundary: null,
   room: { key: "room", label: "Room charge", detail: "2 × ₹2,500 per night", amount: 5000 },
   extras: [{ key: "e1", label: "Laundry", amount: 300 }],
   food: [{ key: "f1", label: "Momo", detail: "2 × ₹150", amount: 300 }],
