@@ -12,6 +12,27 @@ Versioning is informal (the app ships continuously); dates anchor the entries.
 > (new tables and appended report columns), so the currently running build is unaffected.
 > Verified on production: all six touched functions byte-identical to dev, every pre-existing
 > figure unchanged across 8 restaurants, and the ledger reconciling to the penny over 1,316 rows.
+>
+> **The room night boundary migration went out the same day** (`20260816000000`, 1/1). Also
+> additive, also ahead of the app. All nine guests currently checked in were priced under both the
+> old and the new rule first: **every one bills the same number of nights**, so nobody's folio
+> moves when the app deploys.
+
+### Added
+- **Extra Expenses and Payroll now appear on the staff dashboard**, after Vendors, each as a
+  summary card that opens a full page. Extra Expenses shows what went out today and how it was
+  paid; Payroll shows this month's sheet — who's on payroll, what's been paid, what's still owed.
+  Both are permission-driven: Payroll appears only for staff who can record payments, so
+  colleagues' salaries don't land on every dashboard.
+- **New staff permission: "Add Expenses & Saving".** For whoever actually pays the bills. They can
+  record an expense or put money into a saving, and they see **only what was entered today** — no
+  month totals, and never a saving pot's running balance. They cannot withdraw from a pot, create
+  or rename one, or edit anything already filed. Granting the fuller "Manage Extra Expenses"
+  alongside it lifts the restriction.
+- **A new saving can start with what you've already collected.** When creating a pot you can enter
+  the amount it already held before you started tracking it here. It counts towards the pot's
+  balance and can be withdrawn like any other, but it is **not** recorded as money spent today —
+  your cash, bank, profit and daily report are all untouched by it.
 
 ### Changed
 - **Room nights now end at checkout time, not 24 hours after check-in.** Until now a room charge

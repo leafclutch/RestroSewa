@@ -51,6 +51,7 @@ export const PERMISSIONS = {
   // different trust levels, and an owner must be able to hand a manager the
   // second without the first. See STOCK_ACCESS.canManageExpenses.
   MANAGE_EXPENSES:  "manage_expenses",
+  ADD_EXPENSES:     "add_expenses",
   VIEW_FINANCE:     "view_finance",
   // Reports
   VIEW_REPORTS:     "view_reports",
@@ -180,6 +181,11 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
       // Recording rent, electricity and the rest. Write implies the read of the
       // Extra Expenses page. See STOCK_ACCESS.canManageExpenses.
       { key: "manage_expenses", label: "Manage Extra Expenses" },
+      // The narrow one: file an expense or a saving, see TODAY's entries only,
+      // and nothing else. Given to whoever actually pays the bills without
+      // showing them the running totals — in particular, never a saving pot's
+      // balance. Granting `manage_expenses` as well makes this one irrelevant.
+      { key: "add_expenses", label: "Add Expenses & Saving" },
     ],
   },
   {
@@ -415,16 +421,35 @@ export const STOCK_ACCESS = {
    * this page holds.
    */
   canViewExpenses: (u: { role: string; permissions: string[] }) =>
-    hasAnyPermission(u, [P_.MANAGE_EXPENSES, P_.VIEW_FINANCE]),
+    hasAnyPermission(u, [P_.MANAGE_EXPENSES, P_.VIEW_FINANCE, P_.ADD_EXPENSES]),
   /** Records, corrects and deletes extra expenses. */
   canManageExpenses: (u: { role: string; permissions: string[] }) =>
     hasPermission(u, P_.MANAGE_EXPENSES),
+  /** May FILE an expense or a saving. The write gate on every add action. */
+  canAddExpenses: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.MANAGE_EXPENSES, P_.ADD_EXPENSES]),
+  /**
+   * True for the ADD-ONLY holder: they may file entries but must never see a
+   * running total — only what they themselves put in today.
+   *
+   * Defined as a single predicate, in this file, because it decides three
+   * different things (which period the server will return, whether pot balances
+   * are computed at all, and whether the UI offers a period picker or an edit
+   * control). Re-deriving `has add && !has manage` at each of those sites is how
+   * one of them eventually forgets the `!`, and a pot balance leaks.
+   *
+   * `restaurant_admin` never lands here: hasPermission returns true for owners,
+   * so canManageExpenses already passed.
+   */
+  expensesTodayOnly: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.ADD_EXPENSES) &&
+    !hasAnyPermission(u, [P_.MANAGE_EXPENSES, P_.VIEW_FINANCE]),
   /** Sees the Daily Finance Report (takings, margins, all outstanding debt). */
   canViewFinance: (u: { role: string; permissions: string[] }) =>
     hasPermission(u, P_.VIEW_FINANCE),
   /** Shows the Stock & Finance group in the admin sidebar at all. */
   canSeeModule: (u: { role: string; permissions: string[] }) =>
-    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.MANAGE_PURCHASES, P_.MANAGE_VENDORS, P_.MANAGE_EXPENSES, P_.VIEW_FINANCE]),
+    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.MANAGE_PURCHASES, P_.MANAGE_VENDORS, P_.MANAGE_EXPENSES, P_.ADD_EXPENSES, P_.VIEW_FINANCE]),
 };
 
 // ─── Payroll (Staff → Payroll) ────────────────────────────────────────────────

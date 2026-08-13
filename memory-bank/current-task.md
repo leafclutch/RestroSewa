@@ -6,6 +6,51 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
+**Staff-dashboard expenses/payroll + add-only permission + pot opening balance (2026-08-13) —
+CODE COMPLETE on DEV, not yet exercised in a browser.** Three requests in one pass.
+
+**1. Extra Expenses and Payroll reach the staff dashboard**, after Vendors, as summary cards →
+thin `/employee/{expenses,payroll}` pages reusing the admin clients (the Vendors pattern).
+⚠️ **Payroll's card and page gate differently on purpose**: the card needs `manage_payroll`, the
+page opens on either payroll right. The dashboard is tighter because it puts salaries on a screen
+left open at the counter. The card reads `getPayrollSheet`, NOT `getPayrollSummary` — the latter
+is gated on `view_finance` and would return zeros for a payroll-only staffer.
+
+**2. `add_expenses` ("Add Expenses & Saving")** — file an expense or a saving, see **today only**,
+never a pot's running balance. Enforced SERVER-side in three places, not by hiding UI:
+`listExtraExpenses` forces `period="today"` and drops any from/to; `listSavingTitles` filters to
+today BEFORE summing and never reads `opening_amount`, so **no running total exists in the
+payload**; `withdrawSaving` + all pot CRUD stay on `manage_expenses`. One predicate,
+`STOCK_ACCESS.expensesTodayOnly` (`add && !manage && !view_finance`), drives all of it —
+never re-derive it at a call site. New `lib/permissions.test.ts` covers the matrix, including that
+a wider right CANCELS the restriction (granting both boxes must not strand a manager on today).
+
+**3. `saving_titles.opening_amount`** — what a pot held before the app tracked it.
+⚠️ **The obvious implementation (write it as a saving row) is wrong and expensive**: every finance
+figure sums those rows, so a ₹50,000 opening would take ₹50,000 out of today's cash, add a ledger
+outflow that never happened and cut the month's profit. It lives on the TITLE instead, like
+`finance_openings`. Verified on DEV: closing cash, closing online and `extra_expenses_total` all
+unchanged after inserting one; no ledger row; negative refused (`23514`).
+Consequence: pot balance = `opening + Σ rows`, while the cash/online split covers only the rows —
+they do NOT add up and must not, so the UI names the opening figure explicitly. Withdrawals can
+draw against it (the money exists), so `withdrawSaving` and the PIN-gated edit in `security.ts`
+both include it when measuring "held" — keep those two identical.
+
+**Verified:** `tsc` clean, `npm run build` clean (`/employee/expenses`, `/employee/payroll`
+registered), `node --test` **67/67** (10 new permission tests). DB probe 7/7, all test data removed.
+
+**Remaining:**
+1. **In-app QA on DEV**: grant only "Add Expenses & Saving" to a test staffer — confirm the
+   dashboard card appears, the page shows today only with no period picker, the Saving tab shows
+   pots with today's figures and no balances, and there is no Withdraw / New saving / edit control.
+   Then grant Manage as well and confirm the full view returns.
+2. Create a pot with an opening amount; confirm Finance is unmoved and the pot reads the sum.
+3. **Production migration `20260817000000` is PENDING.** DB before app.
+4. Nothing committed — user drives git.
+
+---
+
+## Previous feature
 **Room night boundary (2026-08-13) — CODE COMPLETE on DEV, not yet exercised in a browser.**
 Room charges used to step up on a rolling 24-hour clock from check-in. They now step up at the
 hotel's **checkout hour**, the same wall-clock time for every guest.
@@ -56,19 +101,32 @@ the stay; the snapshot rule charges 1 night where the live rule charges 2; a +3h
 back to 1; a 24h shift is refused by the DB (`23514`). PostgREST embed for `price_shift_by` → 200.
 All test data removed and settings restored byte-for-byte (asserted).
 
+**✅ PRODUCTION MIGRATED 2026-08-13** (`20260816000000`, 1/1). Production and DEV are both at 91/91.
+Pre-flight confirmed prod's `check_in_room` was the exact 17-arg signature the `drop` targets —
+had it differed, the drop would have silently no-opped and left two overloads for a `42725` at
+runtime. After: **one** overload, 19 params / 8 required / 11 defaulted, so the currently deployed
+build's 17-arg call still resolves; body **byte-identical to DEV** (`8d1288a2…`); all 5 columns,
+3 CHECKs and the `price_shift_by` FK present; all 31 existing stays untouched (shift 0, snapshots
+null, so they follow the live setting exactly as designed).
+
+**Deploy impact measured on the real data: ZERO.** All **9 stays currently open on production**
+were priced under both rules — every one bills the **same** number of nights, net change **+0**.
+Nothing to warn a front desk about. (Measured read-only; the migration itself changes no billing,
+since the whole rule is in TypeScript — the re-pricing moment is the APP deploy, not the DB.)
+
 **Remaining:**
-1. **In-app QA on DEV**: set the two hours; check a guest in and confirm the folio names the next
-   boundary and the dashboard card counts down to the same instant; grant +3h and watch both move;
-   check out either side of the boundary; confirm a `view_rooms`-only user sees the boundary but no
+1. **Deploy the app** — the DB is ready and waiting.
+2. **In-app QA**: set the two hours; check a guest in and confirm the folio names the next boundary
+   and the dashboard card counts down to the same instant; grant +3h and watch both move; check out
+   either side of the boundary; confirm a `view_rooms`-only user sees the boundary but no
    "Give more time" control.
-2. **Reprint parity** (the regression that matters most): check a stay out, note nights and total,
+3. **Reprint parity** (the regression that matters most): check a stay out, note nights and total,
    change *both* admin settings, reprint from Sales — it must be identical.
-3. **Production migration `20260816000000` is PENDING.** DB before app. Nothing else is pending.
 4. Nothing committed — user drives git.
 
 ---
 
-## Previous feature
+## Earlier feature
 **Extra Expenses (2026-08-13) — CODE COMPLETE on DEV, not yet exercised in a browser.**
 Overheads that are neither stock nor people: rent, electricity, water, gas, internet, maintenance,
 marketing, licenses, transport, other. New page `/admin/expenses` in the Stock & Finance nav group.

@@ -17,9 +17,11 @@ export default async function ExpensesPage() {
   }
 
   // Savings are fetched unfiltered: a pot's balance is all-time, not a period
-  // figure — see `listSavingTitles`.
+  // figure — see `listSavingTitles`. For an add-only holder those same two
+  // actions return today, and no pot balance at all.
+  const todayOnly = STOCK_ACCESS.expensesTodayOnly(restaurantUser);
   const [expenses, titles, savings, config] = await Promise.all([
-    listExtraExpenses({ period: "month" }),
+    listExtraExpenses({ period: todayOnly ? "today" : "month" }),
     listSavingTitles(),
     listSavings(),
     getRestaurantConfig(restaurantUser.restaurant_id),
@@ -31,6 +33,8 @@ export default async function ExpensesPage() {
       initialTitles={titles}
       initialSavings={savings}
       canManage={STOCK_ACCESS.canManageExpenses(restaurantUser)}
+      canAdd={STOCK_ACCESS.canAddExpenses(restaurantUser)}
+      todayOnly={todayOnly}
       canEdit={restaurantUser.role === "restaurant_admin"}
       securityEnabled={config.securityEnabled}
     />

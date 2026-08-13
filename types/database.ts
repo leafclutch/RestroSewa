@@ -468,6 +468,11 @@ export type Database = {
           name: string;
           created_by: string | null;
           created_at: string;
+          /**
+           * What the pot held before the app was tracking it. NOT a payment:
+           * it moves no cash, writes no ledger row and does not touch profit.
+           */
+          opening_amount: number;
         };
         Insert: {
           id?: string;
@@ -475,9 +480,11 @@ export type Database = {
           name: string;
           created_by?: string | null;
           created_at?: string;
+          opening_amount?: number;
         };
         Update: {
           name?: string;
+          opening_amount?: number;
         };
       };
 

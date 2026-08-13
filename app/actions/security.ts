@@ -427,7 +427,7 @@ export async function updateExtraExpense(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: title } = await (svc as any)
       .from("saving_titles")
-      .select("id")
+      .select("id, opening_amount")
       .eq("id", savingTitleId)
       .eq("restaurant_id", restaurantUser.restaurant_id)
       .maybeSingle();
@@ -443,9 +443,14 @@ export async function updateExtraExpense(
         .select("id, amount")
         .eq("restaurant_id", restaurantUser.restaurant_id)
         .eq("saving_title_id", savingTitleId);
-      const heldWithoutThis = ((rows ?? []) as { id: string; amount: number }[])
-        .filter((r) => r.id !== expenseId)
-        .reduce((s, r) => s + Number(r.amount ?? 0), 0);
+      // Includes the pot's opening balance, exactly as `withdrawSaving` does —
+      // if these two measured "held" differently, an amount accepted on create
+      // would be refused on edit.
+      const heldWithoutThis =
+        Number(title.opening_amount ?? 0) +
+        ((rows ?? []) as { id: string; amount: number }[])
+          .filter((r) => r.id !== expenseId)
+          .reduce((s, r) => s + Number(r.amount ?? 0), 0);
       if (Math.abs(amount) > heldWithoutThis + 0.005) {
         return { error: "That is more than this saving holds." };
       }

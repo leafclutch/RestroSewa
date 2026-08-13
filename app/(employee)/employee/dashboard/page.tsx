@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import type { RestaurantUserContext } from "@/lib/auth/guards";
-import { getStaffNav, hasPermission, PERMISSIONS, NAV_ACCESS, ROOM_ACCESS, STOCK_ACCESS, WALKIN_ACCESS } from "@/lib/permissions";
+import { getStaffNav, hasPermission, PERMISSIONS, NAV_ACCESS, PAYROLL_ACCESS, ROOM_ACCESS, STOCK_ACCESS, WALKIN_ACCESS } from "@/lib/permissions";
 import { getRestaurantConfig } from "@/lib/restaurant-info";
 import { hasRooms } from "@/lib/business-type";
 import { getMyOrderQueue, getSalesReport } from "@/app/actions/pos";
@@ -17,6 +17,8 @@ import { RoomsSection } from "./_components/rooms-section";
 import { StockSection } from "./_components/stock-section";
 import { PurchasesSection } from "./_components/purchases-section";
 import { VendorsSection } from "./_components/vendors-section";
+import { ExpensesSection } from "./_components/expenses-section";
+import { PayrollSection } from "./_components/payroll-section";
 import { OrdersSection } from "./_components/orders-section";
 import { StaffDashboard, SectionSkeleton } from "./_components/staff-dashboard";
 import type { DashboardSection, SectionKey } from "./_components/staff-dashboard";
@@ -262,6 +264,40 @@ export default async function EmployeeDashboardPage({
       body: (
         <Suspense fallback={<SectionSkeleton />}>
           <VendorsSection />
+        </Suspense>
+      ),
+    });
+  }
+
+  // 10. Extra Expenses — after Vendors. Rent, electricity and the rest, plus the
+  // saving pots. Opens on `manage_expenses`, `view_finance` OR the narrow
+  // `add_expenses`; that last one sees only TODAY's entries and never a pot
+  // balance, enforced server-side in the actions rather than by this gate.
+  if (STOCK_ACCESS.canViewExpenses(restaurantUser)) {
+    sections.push({
+      key: "expenses",
+      title: "Extra Expenses",
+      subtitle: "Rent, bills & savings",
+      body: (
+        <Suspense fallback={<SectionSkeleton />}>
+          <ExpensesSection />
+        </Suspense>
+      ),
+    });
+  }
+
+  // 11. Payroll — last. Gated on `manage_payroll` ALONE, deliberately tighter
+  // than the /employee/payroll page (which opens on either payroll right): this
+  // card puts colleagues' salaries on a dashboard that stays open at the
+  // counter, so a reporting-only right should not summon it there.
+  if (PAYROLL_ACCESS.canManagePayroll(restaurantUser)) {
+    sections.push({
+      key: "payroll",
+      title: "Payroll",
+      subtitle: "Salaries & payments",
+      body: (
+        <Suspense fallback={<SectionSkeleton />}>
+          <PayrollSection />
         </Suspense>
       ),
     });

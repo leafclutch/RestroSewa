@@ -112,11 +112,33 @@ export type ExtraExpense = {
 export type SavingTitle = {
   id: string;
   name: string;
+  /**
+   * What the pot holds: `openingAmount + Σ its saving rows` (withdrawals are
+   * negative rows, so they are already netted).
+   *
+   * ⚠️ This does NOT equal `cash + online`, and must not. The opening amount is
+   * money set aside before the app was tracking it — no tender, because nothing
+   * moved. The split below describes only what the app itself recorded.
+   */
   total: number;
+  /**
+   * The balance the pot started with, outside the app's accounting entirely.
+   * It moves no cash, writes no ledger row and does not touch profit — see
+   * migration 20260817000000.
+   */
+  openingAmount: number;
+  /** Cash the app has recorded into this pot. See the warning on `total`. */
   cash: number;
+  /** Online/bank the app has recorded into this pot. */
   online: number;
   entryCount: number;
   createdAt: string;
+  /**
+   * Set when the viewer may only see TODAY's activity (the add-only permission).
+   * `total` then carries today's net contribution and `openingAmount` is 0 —
+   * the running balance is never computed for them, let alone sent.
+   */
+  todayOnly?: boolean;
 };
 
 /**
