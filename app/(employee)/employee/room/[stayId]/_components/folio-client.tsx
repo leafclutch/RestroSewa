@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useActionState, useEffect, useState, useTransition } from "react";
-import { addRoomAdvance, addRoomCharge, checkOutRoom, removeRoomCharge } from "@/app/actions/rooms";
+import {
+  addRoomAdvance,
+  addRoomCharge,
+  checkOutRoom,
+  removeRoomCharge,
+  setRoomPriceShift,
+} from "@/app/actions/rooms";
 import type { RoomFolioView } from "@/app/actions/rooms";
 import { removeRoomAdvance } from "@/app/actions/security";
 import { AdvanceFields } from "@/app/(employee)/employee/_components/advance-fields";
@@ -21,7 +27,7 @@ import { folioToBill } from "@/lib/billing/room-bill";
 import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
 import { billMethodLabel } from "@/lib/billing/payment-method";
 import {
-  ArrowLeft, BedDouble, Lock, Plus, Printer, Trash2, User, UtensilsCrossed, Wallet, X,
+  ArrowLeft, BedDouble, Clock, Lock, Plus, Printer, Trash2, User, UtensilsCrossed, Wallet, X,
 } from "lucide-react";
 
 const rupee = (n: number) =>
@@ -174,6 +180,126 @@ function AddAdvanceForm({ stayId, onDone }: { stayId: string; onDone: () => void
         <p className="text-xs" style={{ color: "var(--color-ruby)" }}>{state.error}</p>
       )}
     </form>
+  );
+}
+
+/**
+ * When this bill next grows a night — and the desk's power to push that later.
+ *
+ * The single question a receptionist is asked at checkout ("until when can I
+ * stay?"), answered by the SAME calculator that charges it. `nextBoundary` comes
+ * off the folio, so this can never drift from the amount on the bill; computing
+ * it here from the check-in time would be a second implementation of the rule.
+ *
+ * The shift applies to the whole stay, not just today, which is why the label
+ * says "checkout time" rather than "tonight".
+ */
+function NightBoundary({
+  stayId,
+  at,
+  shiftHours,
+  shiftBy,
+  canShift,
+}: {
+  stayId: string;
+  at: string;
+  shiftHours: number;
+  shiftBy: string | null;
+  canShift: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  const when = new Date(at).toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  function save(hours: number) {
+    start(async () => {
+      const res = await setRoomPriceShift(stayId, hours);
+      if (res && "error" in res) setError(res.error);
+      else {
+        setError(null);
+        setEditing(false);
+      }
+    });
+  }
+
+  return (
+    <div className="px-4 py-2.5 border-t" style={{ borderColor: "var(--color-hairline)" }}>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+          <Clock size={11} className="inline mb-0.5 mr-1" />
+          Next night starts <strong style={{ color: "var(--color-ink)" }}>{when}</strong>
+          {shiftHours > 0 && (
+            <>
+              {" "}
+              (+{shiftHours}h{shiftBy ? `, by ${shiftBy}` : ""})
+            </>
+          )}
+        </p>
+        {canShift && !editing && (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="text-xs"
+            style={{ color: "var(--color-primary)" }}
+          >
+            {shiftHours > 0 ? "Change" : "Give more time"}
+          </button>
+        )}
+      </div>
+
+      {editing && (
+        <div className="flex items-center gap-2 mt-2 flex-wrap">
+          <select
+            defaultValue={String(shiftHours)}
+            onChange={(e) => save(Number(e.target.value))}
+            disabled={pending}
+            className="h-8 rounded-lg border px-2 text-xs"
+            style={{
+              borderColor: "var(--color-hairline-input)",
+              color: "var(--color-ink)",
+              background: "var(--color-canvas)",
+            }}
+          >
+            <option value="0">No extra time</option>
+            {[1, 2, 3, 4, 5, 6, 8, 10, 12].map((h) => (
+              <option key={h} value={h}>
+                +{h} hour{h > 1 ? "s" : ""}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => {
+              setEditing(false);
+              setError(null);
+            }}
+            className="text-xs"
+            style={{ color: "var(--color-ink-mute)" }}
+          >
+            Cancel
+          </button>
+          {pending && (
+            <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+              Saving…
+            </span>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <p className="text-xs mt-1.5" style={{ color: "var(--color-ruby)" }}>
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -855,7 +981,7 @@ export function FolioClient({
   canAddCharges, canCreateOrders, canManageOrders, canCancelOrders,
   canCheckOut, canDiscount, canUseCredit, discountEnabled = false,
   canPrintTickets = false, canPrintBill = false,
-  canTakeAdvance = false, canEditAdvance = false,
+  canTakeAdvance = false, canEditAdvance = false, canCheckIn = false,
 }: {
   view: RoomFolioView;
   /** The stay's session, in the same shape a table's screen uses. */
@@ -880,6 +1006,12 @@ export function FolioClient({
   canTakeAdvance?: boolean;
   /** Correcting one is owner-only, and the server also demands the Security PIN. */
   canEditAdvance?: boolean;
+  /**
+   * Pushing the night boundary later rides on `check_in` — the same right that
+   * takes a deposit. It is a routine desk courtesy, and gating it behind a PIN
+   * would mean it simply stopped being recorded.
+   */
+  canCheckIn?: boolean;
 }) {
   const [adding, setAdding] = useState(false);
   const [addingAdvance, setAddingAdvance] = useState(false);
@@ -1079,6 +1211,17 @@ export function FolioClient({
       >
         <GroupHeader icon={<BedDouble size={13} />} title="Room" total={rupee(f.roomTotal)} />
         <Line label={f.room.label} detail={f.room.detail} amount={f.room.amount} />
+        {/* When this bill next grows, and the courtesy that can push it later.
+            Directly under the room charge because that is the number it explains. */}
+        {open && f.nextBoundary && (
+          <NightBoundary
+            stayId={view.stay_id}
+            at={f.nextBoundary}
+            shiftHours={view.priceShiftHours}
+            shiftBy={view.priceShiftBy}
+            canShift={canCheckIn}
+          />
+        )}
 
         <GroupHeader
           icon={<Plus size={13} />}

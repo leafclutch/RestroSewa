@@ -7,6 +7,7 @@ import { hasPermission, NAV_ACCESS, PERMISSIONS, ROOM_ACCESS } from "@/lib/permi
 import { buildFolio, CHARGE_TYPES } from "@/lib/room-billing";
 import type { RoomChargeType, RoomFolio } from "@/lib/room-billing";
 import { resolveSplit } from "@/lib/payment-split";
+import { normalizeShiftHours, resolveRoomDayRule } from "@/lib/business-day";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -35,6 +36,12 @@ export type RoomStayInfo = {
   guest_count: number;
   room_rate: number;
   check_in_at: string;
+  /**
+   * When this stay's charge next steps up, ISO. Computed by the SAME buildFolio
+   * call that produced `nights_so_far`, so the card's countdown and its night
+   * count cannot disagree. Null on a stay whose rule could not be resolved.
+   */
+  next_boundary: string | null;
   nights_so_far: number;
   running_total: number;
   /** Food ordered against this stay — from the room QR or taken by hand. */
@@ -86,13 +93,15 @@ export async function getRoomsOverview(): Promise<RoomOverview[]> {
   }
   roomsQuery = roomsQuery.order("number");
 
-  const [roomsRes, typesRes, staysRes, sessionsRes, byRoomRes, byTypeRes, staffRes] =
+  const [roomsRes, typesRes, staysRes, sessionsRes, byRoomRes, byTypeRes, staffRes, restRes] =
     await Promise.all([
       roomsQuery,
       svc.from("room_types").select("id, name, base_price").eq("restaurant_id", rid),
       svc
         .from("room_stays")
-        .select("id, room_id, guest_name, guest_phone, guest_count, room_rate, check_in_at")
+        .select(
+          "id, room_id, guest_name, guest_phone, guest_count, room_rate, check_in_at, price_shift_hours, new_day_hour, double_hour"
+        )
         .eq("restaurant_id", rid)
         .eq("status", "active"),
       svc
@@ -122,9 +131,13 @@ export async function getRoomsOverview(): Promise<RoomOverview[]> {
         .eq("restaurant_id", rid)
         .eq("is_active", true)
         .is("deleted_at", null),
+      // The live boundary hours, for stays that predate the snapshot. In the same
+      // parallel batch, so the grid pays no extra latency for it.
+      svc.from("restaurants").select("settings").eq("id", rid).maybeSingle(),
     ]);
 
   const visibility = await buildVisibilityFilter(rid, ru);
+  const restSettings = (restRes.data?.settings ?? {}) as Record<string, unknown>;
 
   const types = new Map<string, { name: string; base_price: number }>(
     ((typesRes.data ?? []) as { id: string; name: string; base_price: number }[]).map((t) => [
@@ -138,6 +151,7 @@ export async function getRoomsOverview(): Promise<RoomOverview[]> {
   const stays = (staysRes.data ?? []) as {
     id: string; room_id: string; guest_name: string; guest_phone: string | null;
     guest_count: number; room_rate: number; check_in_at: string;
+    price_shift_hours: number; new_day_hour: number | null; double_hour: number | null;
   }[];
   const sessions = (sessionsRes.data ?? []) as {
     id: string; room_id: string; room_stay_id: string | null;
@@ -235,12 +249,22 @@ export async function getRoomsOverview(): Promise<RoomOverview[]> {
 
     let stayInfo: RoomStayInfo | null = null;
     if (stay) {
-      // The same folio maths the bill uses — no second implementation.
+      // The same folio maths the bill uses — no second implementation. That
+      // includes the night-boundary rule: without it this card would count
+      // nights on the old 24-hour clock and quietly disagree with the folio it
+      // links to, for the same guest, on the same screen.
       const folio = buildFolio(
         { check_in_at: stay.check_in_at, check_out_at: null, room_rate: Number(stay.room_rate) },
         [],
         [],
-        {}
+        {
+          roomDay: resolveRoomDayRule({
+            settings: restSettings,
+            stayNewDayHour: stay.new_day_hour,
+            stayDoubleHour: stay.double_hour,
+            shiftHours: stay.price_shift_hours,
+          }),
+        }
       );
       const counts = countByStay.get(stay.id) ?? { total: 0, pending: 0 };
       stayInfo = {
@@ -250,6 +274,7 @@ export async function getRoomsOverview(): Promise<RoomOverview[]> {
         guest_count: stay.guest_count,
         room_rate: Number(stay.room_rate),
         check_in_at: stay.check_in_at,
+        next_boundary: folio.nextBoundary,
         nights_so_far: folio.nights,
         running_total:
           folio.roomTotal + (foodByStay.get(stay.id) ?? 0) + (extrasByStay.get(stay.id) ?? 0),
@@ -368,15 +393,26 @@ export async function checkInRoom(
 
   // A room-service guest orders from the same QR flow, so the same PIN rule
   // applies: only "With PIN" restaurants get one.
+  // `settings` rides along in the SAME select — the boundary hours are needed a
+  // few lines below and this app is latency-bound, so a second round trip would
+  // cost more than the whole query does.
   const { data: rest } = await svc
     .from("restaurants")
-    .select("qr_mode")
+    .select("qr_mode, settings")
     .eq("id", ru.restaurant_id)
     .maybeSingle();
   const pin =
     (rest?.qr_mode ?? "ordering_enabled") === "ordering_enabled"
       ? String(Math.floor(1000 + Math.random() * 9000))
       : null;
+
+  // SNAPSHOT the night-boundary hours onto the stay, exactly as `room_rate` is
+  // snapshotted. Without this, an admin changing the checkout hour later would
+  // silently re-price this guest's bill — and every settled bill in the system,
+  // because a paid room bill is rebuilt from the frozen stay when it's reprinted.
+  const roomDay = resolveRoomDayRule({
+    settings: (rest?.settings ?? {}) as Record<string, unknown>,
+  });
 
   const { data, error } = await svc.rpc("check_in_room", {
     p_restaurant_id: ru.restaurant_id,
@@ -401,6 +437,8 @@ export async function checkInRoom(
     p_advance_card: advSplit.card,
     p_advance_method: advAmount > 0 ? advMethod : null,
     p_advance_note: advNote || null,
+    p_new_day_hour: roomDay.newDayHour,
+    p_double_hour: roomDay.doubleHour,
   });
 
   if (error) {
@@ -513,6 +551,11 @@ export type RoomFolioView = {
   charges: { id: string; type: RoomChargeType; description: string; amount: number }[];
   /** Deposits taken against this stay, oldest first. A refund is a NEGATIVE row. */
   advances: RoomAdvance[];
+  /** The per-stay courtesy pushing this guest's night boundary later, 0–12 hours. */
+  priceShiftHours: number;
+  /** Who granted it and when — a shift can be worth a whole night, so it is never anonymous. */
+  priceShiftBy: string | null;
+  priceShiftAt: string | null;
 };
 
 /** One deposit (or, when `amount` is negative, one refund) against a stay. */
@@ -562,7 +605,7 @@ async function loadFolioInputs(stayId: string) {
   const { data: stay } = await svc
     .from("room_stays")
     .select(
-      "id, room_id, guest_name, guest_phone, guest_count, guest_id_type, guest_id_number, guest_address, notes, room_rate, check_in_at, check_out_at, status, rooms ( number, room_type_id )"
+      "id, room_id, guest_name, guest_phone, guest_count, guest_id_type, guest_id_number, guest_address, notes, room_rate, check_in_at, check_out_at, status, price_shift_hours, price_shift_at, new_day_hour, double_hour, rooms ( number, room_type_id ), price_shift_user:restaurant_users!room_stays_price_shift_by_fkey ( display_name )"
     )
     .eq("id", stayId)
     .eq("restaurant_id", ru.restaurant_id)
@@ -611,6 +654,18 @@ async function loadFolioInputs(stayId: string) {
   }
 
   const settings = (restRes.data?.settings ?? {}) as Record<string, unknown>;
+
+  // The night-boundary rule for THIS stay. Resolved once, here, so the folio the
+  // receptionist reads and the amount the guest is charged cannot come from two
+  // different rules — the same reason this whole loader exists. The check-in
+  // snapshot wins over the live setting; see resolveRoomDayRule.
+  const roomDay = resolveRoomDayRule({
+    settings,
+    stayNewDayHour: stay.new_day_hour,
+    stayDoubleHour: stay.double_hour,
+    shiftHours: stay.price_shift_hours,
+  });
+
   const num = (...keys: string[]) => {
     for (const k of keys) {
       const v = Number(settings[k]);
@@ -647,6 +702,10 @@ async function loadFolioInputs(stayId: string) {
     config: {
       taxPercent: num("tax_percent", "tax_rate", "gst_percent"),
       servicePercent: num("service_charge_percent", "service_charge"),
+      // Every buildFolio call downstream spreads `config`, so the boundary rule
+      // reaches the folio view, the checkout and the printed bill by riding
+      // along with tax and service rather than being threaded separately.
+      roomDay,
     },
   };
 }
@@ -742,6 +801,9 @@ export async function getRoomFolio(stayId: string): Promise<RoomFolioView | null
     payment,
     charges,
     advances,
+    priceShiftHours: Number(stay.price_shift_hours ?? 0),
+    priceShiftBy: stay.price_shift_user?.display_name ?? null,
+    priceShiftAt: stay.price_shift_at ?? null,
     folio: buildFolio(
       {
         check_in_at: stay.check_in_at,
@@ -846,6 +908,67 @@ export async function removeRoomCharge(chargeId: string): Promise<ActionResult> 
 
   await svc.from("room_charges").delete().eq("id", chargeId);
   revalidatePath("/employee/dashboard");
+  return null;
+}
+
+/**
+ * Push this guest's night boundary later by a few hours.
+ *
+ * The front desk's usual courtesy — "you can keep the room until 3". It applies
+ * to EVERY boundary of the stay rather than just the next one, because in
+ * practice only the day the guest actually leaves is ever affected, and one
+ * number on the stay is honest to display where a one-shot grace with a
+ * used/unused state is not.
+ *
+ * Gated on `check_in`, not on a discount permission: this is a routine desk
+ * decision and putting a PIN in front of it would mean it stopped being
+ * recorded. It is never anonymous though — who granted it and when are stored,
+ * because it can be worth a whole night's charge.
+ */
+export async function setRoomPriceShift(stayId: string, hours: number): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!ROOM_ACCESS.canCheckIn(ru)) {
+    return { error: "You don't have permission to change checkout time." };
+  }
+
+  // Clamped, never trusted: the form offers 0–12 but a forged POST does not have
+  // to. 24 would step over a boundary entirely and gift a free night.
+  const shift = normalizeShiftHours(hours);
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = service as any;
+
+  const { data: stay } = await svc
+    .from("room_stays")
+    .select("id, status, room_id")
+    .eq("id", stayId)
+    .eq("restaurant_id", ru.restaurant_id)
+    .maybeSingle();
+
+  if (!stay) return { error: "That stay no longer exists." };
+  // A settled bill is frozen. Moving the boundary afterwards would change a
+  // total that has already been paid and recorded as a sale.
+  if (stay.status !== "active") return { error: "This guest has already checked out." };
+
+  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  if (!visibility.seesAll && !visibility.canSeeRoom(stay.room_id)) {
+    return { error: "That room isn't assigned to you." };
+  }
+
+  const { error } = await svc
+    .from("room_stays")
+    .update({
+      price_shift_hours: shift,
+      price_shift_by: ru.id,
+      price_shift_at: new Date().toISOString(),
+    })
+    .eq("id", stayId);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/employee/dashboard");
+  revalidatePath(`/employee/room/${stayId}`);
   return null;
 }
 

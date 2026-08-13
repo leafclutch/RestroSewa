@@ -106,6 +106,7 @@ export default async function RoomPage({
       // Taking a deposit rides on check_in: whoever can put a guest in the room is the
       // person who takes their money at the desk.
       canTakeAdvance={ROOM_ACCESS.canCheckIn(restaurantUser)}
+      canCheckIn={ROOM_ACCESS.canCheckIn(restaurantUser)}
       // CORRECTING one is a different act — it rewrites money already counted into a
       // day's cash. Owner-only, and the server also demands the Security PIN.
       canEditAdvance={restaurantUser.role === "restaurant_admin"}

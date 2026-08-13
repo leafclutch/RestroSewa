@@ -288,6 +288,16 @@ export type Database = {
           status: Database["public"]["Enums"]["room_stay_status"];
           notes: string | null;
           created_at: string;
+          /** Per-stay courtesy: night boundaries pushed this many hours later (0–12). */
+          price_shift_hours: number;
+          price_shift_by: string | null;
+          price_shift_at: string | null;
+          /**
+           * The night-boundary hours SNAPSHOT taken at check-in, like `room_rate`.
+           * Null on stays predating the feature — those follow the live setting.
+           */
+          new_day_hour: number | null;
+          double_hour: number | null;
         };
         Insert: {
           id?: string;
@@ -302,6 +312,11 @@ export type Database = {
           status?: Database["public"]["Enums"]["room_stay_status"];
           notes?: string | null;
           created_at?: string;
+          price_shift_hours?: number;
+          price_shift_by?: string | null;
+          price_shift_at?: string | null;
+          new_day_hour?: number | null;
+          double_hour?: number | null;
         };
         Update: {
           id?: string;
@@ -316,6 +331,11 @@ export type Database = {
           status?: Database["public"]["Enums"]["room_stay_status"];
           notes?: string | null;
           created_at?: string;
+          price_shift_hours?: number;
+          price_shift_by?: string | null;
+          price_shift_at?: string | null;
+          new_day_hour?: number | null;
+          double_hour?: number | null;
         };
       };
 

@@ -47,6 +47,39 @@ Mirrors tables (sessions) but adds a stay/folio and a three-tier permission. See
 - **A room discount needs the restaurant's discount PIN** — the SAME PIN a table bill uses, verified
   in `checkOutRoom` via `verify_discount_pin`. No PIN configured = no discounts anywhere. The
   `apply_discounts` permission alone was the only gate here until 2026-08-05.
+- **A room NIGHT ends at checkout time, not 24 hours after the guest walked in.** Two
+  per-restaurant hours in `restaurants.settings` (jsonb — no migration): `room_new_day_hour`
+  (default 6) decides which DAY an arrival belongs to, `room_price_double_hour` (default 12) is
+  when each following night begins. Night *n* ends at the double-hour on `arrival's room-day + n`.
+  That one line produces both of the cases the feature was asked for: arriving 8 PM doubles at
+  **tomorrow** noon, arriving 3 AM belongs to yesterday's room-day and doubles at **today** noon.
+  The arithmetic is `roomNights`/`roomNightBoundary` in `lib/business-day.ts` — day maths lives
+  there and nowhere else, and it reuses `businessDate`'s shift-back trick rather than writing a
+  second Nepal-offset implementation.
+  ⚠️ **`lib/room-billing.ts` imports it RELATIVELY, `from "./business-day.ts"`** — the only
+  production file in the repo that does. `lib/room-billing.test.ts` runs under `node --test`,
+  which resolves neither the `@/` alias nor an extensionless specifier. Do not "tidy" it to `@/`.
+- **The boundary hours are SNAPSHOTTED onto the stay at check-in** (`room_stays.new_day_hour` /
+  `double_hour`), exactly as `room_rate` is. Not optional decoration: a paid room bill is REBUILT
+  from the frozen stay when reprinted from Sales, so without the snapshot an admin changing the
+  checkout hour would silently re-price **every historical bill in the system**. Null = no
+  snapshot = follow the live setting, which is what let stays already in progress adopt the rule
+  the day it shipped. `resolveRoomDayRule` is the ONLY way to resolve it; never read the settings
+  by hand.
+- **A per-stay shift pushes that boundary later**, `room_stays.price_shift_hours` (0–12, CHECK-ed
+  in the DB and clamped again in `normalizeShiftHours`). Capped at 12 on purpose: 24 would step
+  clean over a boundary, turning "a few more hours" into a free night. It applies to **every**
+  boundary of the stay, not just the next one — in practice only the departure day is ever
+  affected, and one number is honest to display where a one-shot grace with a used/unused state is
+  not. Gated on `check_in` with **no PIN** (a PIN at the front desk means it stops being recorded)
+  but never anonymous: `price_shift_by` + `price_shift_at` are stored and shown on the folio.
+- ⚠️ **FIVE places counted nights, and all five must stay on one rule.** `buildFolio` is the
+  calculator; its four call sites are `getRoomsOverview` (the dashboard grid), `loadFolioInputs`
+  (folio view *and* checkout), and `getPaidBill` in `pos.ts` (the reprint). The fifth was
+  `rooms-grid.tsx`'s `untilNextNight`, which did its own `elapsed % 24h` — it now counts down to
+  the server-supplied `folio.nextBoundary`. Miss any one and two screens disagree about the same
+  guest. `nightsFor` still keeps the legacy 24-hour behaviour when no rule is passed, and that
+  fallback means "unchanged", never "midnight".
 - **A room bill is DERIVED from the frozen stay, never snapshotted.** `check_out_at` stops the
   inputs moving and `room_rate` was captured at check-in, so `buildFolio` returns the same
   document before and after payment — the unpaid preview and the Sales reprint are literally one

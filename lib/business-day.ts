@@ -128,6 +128,164 @@ export function businessDayBounds(
   return { from: nepalInstant(d, hour), to: nepalInstant(addDaysStr(d, 1), hour) };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// THE ROOM NIGHT BOUNDARY
+//
+// A hotel night does not run for 24 hours from whenever the guest walked in — it
+// ends at CHECKOUT TIME, the same wall-clock hour for everyone in the building.
+// Two guests in identical rooms who arrived three hours apart used to cross into
+// night two three hours apart, which is not how any front desk works.
+//
+// Two hours define the rule:
+//
+//   newDayHour  which DAY an arrival belongs to. Arriving 8 PM on the 14th is
+//               the 14th; arriving 3 AM on the 14th is still the 13th's guest —
+//               they came in "last night". Exactly the trick businessDate() uses
+//               for late trading, applied to arrivals instead of bills.
+//   doubleHour  the hour on each following day at which the next night starts.
+//
+//   night n of a stay ends at   doubleHour on (arrival's room-day + n)
+//
+// Worked, with newDay 6 AM and double 12 PM:
+//   check in 14th 8:00 PM → room-day 14th → night 1 ends 15th 12 PM (tomorrow)
+//   check in 14th 3:00 AM → room-day 13th → night 1 ends 14th 12 PM (today)
+//
+// Both of those are the same single line of arithmetic, which is the reason this
+// shape was chosen over special-casing "early morning arrivals".
+//
+// The whole rule lives HERE and not in room-billing.ts because it is day maths,
+// and day maths lives in one file (see the header). room-billing.ts owns money.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const DEFAULT_ROOM_NEW_DAY_HOUR = 6;
+export const DEFAULT_ROOM_DOUBLE_HOUR = 12;
+
+/** The most hours a stay's boundary may be pushed back. See `normalizeShiftHours`. */
+export const MAX_ROOM_SHIFT_HOURS = 12;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+export type RoomDayRule = {
+  /** Which day an arrival belongs to (0–23). */
+  newDayHour: number;
+  /** The hour each following night begins (0–23). */
+  doubleHour: number;
+  /** Per-stay courtesy: push every boundary this many hours later (0–12). */
+  shiftHours: number;
+};
+
+/**
+ * Coerce a settings/column value into a usable hour, falling back to `fallback`.
+ *
+ * The twin of `normalizeClosingHour`, and for the same reason: settings are
+ * free-form JSON and these two also arrive as nullable smallint columns, so a
+ * bad value must land on the documented default rather than on hour 0 — which
+ * for `doubleHour` would silently move every night boundary to midnight.
+ */
+export function normalizeRoomHour(v: unknown, fallback: number): number {
+  // Reject the empty-ish values BEFORE Number() sees them. `Number(null)`,
+  // `Number("")` and `Number(false)` are all 0 — a perfectly valid hour — so a
+  // null column or a blank form field would otherwise resolve to MIDNIGHT and
+  // move every boundary with nothing on screen to say so. This is the one
+  // degradation that must never happen quietly.
+  if (v === null || v === undefined || v === "" || typeof v === "boolean") return fallback;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0 || n > 23) return fallback;
+  return n;
+}
+
+/**
+ * Clamp a per-stay shift to 0–12 hours.
+ *
+ * Capped at 12 on purpose: a shift of 24 or more would step over a whole
+ * boundary, so "give them a few more hours" would silently become "give them a
+ * free night". The DB carries the same CHECK, this is the front line.
+ */
+export function normalizeShiftHours(v: unknown): number {
+  // Same empty-ish guard as normalizeRoomHour. Here the fallback happens to BE
+  // 0, so it changes no answer today — but the two must not drift apart, and a
+  // reader should not have to work out that the bug is harmless in this one.
+  if (v === null || v === undefined || v === "" || typeof v === "boolean") return 0;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0) return 0;
+  return Math.min(n, MAX_ROOM_SHIFT_HOURS);
+}
+
+/**
+ * Resolve the rule for one stay.
+ *
+ * `stayNewDayHour`/`stayDoubleHour` are the SNAPSHOT taken at check-in. They win
+ * when present, so an admin who changes the hours next March cannot re-price a
+ * bill that was settled today — the same guarantee `room_stays.room_rate` gives
+ * against a room-type price rise. Null (a stay that predates the feature) falls
+ * back to the restaurant's live setting, which is what lets stays already in
+ * progress adopt the new rule the moment it ships.
+ */
+export function resolveRoomDayRule(args: {
+  settings?: { room_new_day_hour?: unknown; room_price_double_hour?: unknown } | null;
+  stayNewDayHour?: unknown;
+  stayDoubleHour?: unknown;
+  shiftHours?: unknown;
+}): RoomDayRule {
+  const liveNewDay = normalizeRoomHour(
+    args.settings?.room_new_day_hour,
+    DEFAULT_ROOM_NEW_DAY_HOUR
+  );
+  const liveDouble = normalizeRoomHour(
+    args.settings?.room_price_double_hour,
+    DEFAULT_ROOM_DOUBLE_HOUR
+  );
+  return {
+    newDayHour:
+      args.stayNewDayHour === null || args.stayNewDayHour === undefined
+        ? liveNewDay
+        : normalizeRoomHour(args.stayNewDayHour, liveNewDay),
+    doubleHour:
+      args.stayDoubleHour === null || args.stayDoubleHour === undefined
+        ? liveDouble
+        : normalizeRoomHour(args.stayDoubleHour, liveDouble),
+    shiftHours: normalizeShiftHours(args.shiftHours),
+  };
+}
+
+/**
+ * The instant night `n` of a stay ends — i.e. when the charge steps up to n+1.
+ * `n = 1` is the first increment, so this is also "when does the price double".
+ */
+export function roomNightBoundary(checkIn: Date | string, n: number, rule: RoomDayRule): Date {
+  const arrival = new Date(checkIn);
+  // Which day did this guest arrive on? Shifting back by newDayHour is the same
+  // move businessDate makes: with 6, a 03:00 arrival reads as the previous date.
+  const roomDay = businessDate(arrival, rule.newDayHour);
+  const at = businessDayStart(addBusinessDays(roomDay, n), rule.doubleHour);
+  return new Date(at.getTime() + rule.shiftHours * 60 * 60 * 1000);
+}
+
+/**
+ * Chargeable nights under the boundary rule.
+ *
+ * Always at least 1 — a part-night costs a whole one, because the room was
+ * unavailable to anyone else for it. That is unchanged from the 24-hour rule.
+ *
+ * A checkout landing EXACTLY on a boundary is the earlier night, matching the
+ * old rule's "24h is one night, not two": the boundary belongs to the period it
+ * closes. Every night after the first is exactly 24h long (Nepal has a fixed
+ * offset and no DST), so this is one division rather than a loop — a stay left
+ * open for a year cannot turn the folio into a spin.
+ */
+export function roomNights(
+  checkIn: Date | string,
+  checkOut: Date | string,
+  rule: RoomDayRule
+): number {
+  const to = new Date(checkOut).getTime();
+  const first = roomNightBoundary(checkIn, 1, rule).getTime();
+  if (!Number.isFinite(to) || !Number.isFinite(first)) return 1;
+  const over = to - first;
+  if (over <= 0) return 1;
+  return 1 + Math.ceil(over / MS_PER_DAY);
+}
+
 export type BusinessPeriod =
   | "today"
   | "yesterday"
