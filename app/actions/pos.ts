@@ -2422,7 +2422,7 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
       (service as any)
         .from("room_stays")
         .select(
-          "guest_name, guest_phone, guest_id_type, guest_id_number, guest_address, room_rate, check_in_at, check_out_at, price_shift_hours, new_day_hour, double_hour"
+          "guest_name, guest_phone, guest_id_type, guest_id_number, guest_address, room_rate, check_in_at, check_out_at, price_shift_hours, new_day_hour, double_hour, status, cancellation_charge"
         )
         .eq("id", stayId)
         .maybeSingle(),
@@ -2449,6 +2449,11 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
           check_in_at: stayRow.check_in_at,
           check_out_at: stayRow.check_out_at,
           room_rate: Number(stayRow.room_rate),
+          // A cancelled stay's bill is its cancellation charge, not its nights.
+          // Miss this and the reprint shows "1 night × ₹5,000" over a payment of
+          // ₹2,000 — a document that contradicts its own total.
+          cancelled: stayRow.status === "cancelled",
+          cancellation_charge: Number(stayRow.cancellation_charge ?? 0),
         },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ((chargesRes.data ?? []) as any[]).map((c) => ({ ...c, amount: Number(c.amount) })),

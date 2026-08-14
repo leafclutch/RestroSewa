@@ -16,6 +16,9 @@ import { searchCreditCustomers } from "@/app/actions/credits";
 import type { CreditCustomer } from "@/app/actions/credits";
 import type { SessionDetail } from "@/app/actions/pos";
 import { CHARGE_TYPES } from "@/lib/room-billing";
+import { useRouter } from "next/navigation";
+import { Modal } from "@/app/(admin)/admin/_components/modal";
+import { CancelStayForm } from "@/app/(admin)/admin/rooms/_components/cancel-stay-form";
 import { formatDateTime } from "@/lib/format-time";
 import { Button } from "@/components/ui/button";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
@@ -27,7 +30,7 @@ import { folioToBill } from "@/lib/billing/room-bill";
 import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
 import { billMethodLabel } from "@/lib/billing/payment-method";
 import {
-  ArrowLeft, BedDouble, Clock, Lock, Plus, Printer, Trash2, User, UtensilsCrossed, Wallet, X,
+  ArrowLeft, BedDouble, Clock, Lock, Plus, Printer, Trash2, User, UtensilsCrossed, Wallet, X, XCircle,
 } from "lucide-react";
 
 const rupee = (n: number) =>
@@ -981,7 +984,7 @@ export function FolioClient({
   canAddCharges, canCreateOrders, canManageOrders, canCancelOrders,
   canCheckOut, canDiscount, canUseCredit, discountEnabled = false,
   canPrintTickets = false, canPrintBill = false,
-  canTakeAdvance = false, canEditAdvance = false, canCheckIn = false,
+  canTakeAdvance = false, canEditAdvance = false, canCheckIn = false, canCancelStay = false,
 }: {
   view: RoomFolioView;
   /** The stay's session, in the same shape a table's screen uses. */
@@ -1012,10 +1015,18 @@ export function FolioClient({
    * would mean it simply stopped being recorded.
    */
   canCheckIn?: boolean;
+  /**
+   * Ending the stay WITHOUT billing it. Its own permission — never implied by
+   * check-in or checkout, because writing off a guest's bill is a different act
+   * from settling one — and the server demands the Security PIN on top.
+   */
+  canCancelStay?: boolean;
 }) {
   const [adding, setAdding] = useState(false);
   const [addingAdvance, setAddingAdvance] = useState(false);
   const [billOpen, setBillOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const router = useRouter();
   const [removing, startRemove] = useTransition();
   // Stamped once per mount, exactly like the table bill: a Date rebuilt on every render
   // would make the printed time jump while the preview is open.
@@ -1404,6 +1415,55 @@ export function FolioClient({
           />
         </div>
       )}
+
+      {/* Cancel the stay — ends it WITHOUT billing it and settles the deposit.
+          Its own permission, never implied by check-in or checkout, and the
+          server demands the Security PIN on top. Placed under checkout, not
+          beside it: cancelling is the exception, and it should not sit where a
+          receptionist's hand goes for the everyday action. */}
+      {open && canCancelStay && (
+        <div
+          className="rounded-2xl border px-5 py-4"
+          style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+        >
+          <p className="text-sm font-medium mb-1" style={{ color: "var(--color-ink)" }}>
+            Cancel this stay
+          </p>
+          <p className="text-xs mb-3" style={{ color: "var(--color-ink-mute)" }}>
+            The guest is not staying. Writes off the bill so far and refunds the deposit — or keeps
+            part of it as a cancellation charge.
+          </p>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setCancelling(true)}>
+            <XCircle size={14} /> Cancel stay
+          </Button>
+        </div>
+      )}
+
+      <Modal
+        open={cancelling}
+        title="Cancel this stay"
+        subtitle="Ends the stay without billing it, and settles the deposit"
+        onClose={() => setCancelling(false)}
+      >
+        <CancelStayForm
+          target={{
+            stayId: view.stay_id,
+            roomNumber: view.room_number,
+            guestName: view.guest_name,
+            runningTotal: f.grandTotal,
+            nights: f.nights,
+            // The stay's SIGNED advance rows, netted — a refund is negative, so
+            // this is what is actually still held, not what was ever taken.
+            advanceHeld: view.advances.reduce((s, a) => s + a.amount, 0),
+            advanceCash: view.advances.reduce((s, a) => s + a.cash, 0),
+            advanceOnline: view.advances.reduce((s, a) => s + a.online + a.card, 0),
+          }}
+          onDone={() => {
+            setCancelling(false);
+            router.refresh();
+          }}
+        />
+      </Modal>
 
       {/* Room folio bill — billing staff only, and printed through the SAME shared
           PrintModal as every other ticket. It used to be a raw window.print() over a

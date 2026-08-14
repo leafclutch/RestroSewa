@@ -33,11 +33,11 @@ the reference for *what* and *how*.
 - Menu: `view_menu`, `manage_menu`
 - Tables: `view_tables`, `manage_tables`
 - Walk-ins: `view_walkins`, `manage_walkins`
-- Rooms: `view_rooms`, `check_in`, `manage_rooms`
+- Rooms: `view_rooms`, `check_in`, `manage_rooms`, `cancel_room_stay`
 - Billing: `process_payments`, `apply_discounts`, `refund_bills`
 - Stock: `view_stock`, `manage_stock`
-- Purchases: `manage_purchases` · Vendors: `manage_vendors` · Extra Expenses: `manage_expenses`
-  · Finance: `view_finance`
+- Purchases: `manage_purchases` · Vendors: `manage_vendors` · Extra Expenses: `manage_expenses`,
+  `add_expenses` · Finance: `view_finance`
 - Reports: `view_reports`
 - Staff: `view_staff`, `create_staff`, `edit_staff`, `delete_staff`
 - Payroll: `view_payroll`, `manage_payroll`
@@ -46,6 +46,10 @@ the reference for *what* and *how*.
 Helpers encode tiers so a manager needn't tick a read box under a write box:
 - **ROOM_ACCESS**: `canViewRooms` (view|check_in|manage) · `canCheckIn` (check_in|manage) ·
   `canManageRooms` (manage). Three tiers — view is read-only, check_in starts stays, manage is CRUD.
+  ⚠️ **`canCancelStay` is a FOURTH lane, deliberately outside that ladder** — implied by none of
+  the three, and granting it implies none of them either. Writing off a guest's bill is not a
+  bigger version of configuring rooms, and a receptionist checking guests in all day should not
+  acquire it by default. Always ALSO gated on the Security PIN, for the owner too.
 - **STOCK_ACCESS**: `canViewStock` (view|manage_stock) · `canManageStock` · `canViewPurchases`
   (view_stock|manage_stock|manage_purchases) · `canManagePurchases` · `canViewVendors`
   (…|manage_vendors) · `canManageVendors` · `canViewExpenses` (manage_expenses|view_finance) ·
@@ -53,6 +57,12 @@ Helpers encode tiers so a manager needn't tick a read box under a write box:
   ⚠️ `canViewExpenses` deliberately does **NOT** pass on a stock right, unlike Purchases and
   Vendors: those are the buying workflow a storekeeper lives in, whereas the overheads list is the
   landlord and the power bill — closer to the Finance report than the store room.
+  **`canAddExpenses`** (manage_expenses|add_expenses) is the write gate on the two ADD actions
+  only; withdrawals and pot CRUD stay on `canManageExpenses`. **`expensesTodayOnly`** is the one
+  predicate that decides the restricted view (`add && !manage && !view_finance`) — it drives the
+  server-forced period, whether pot balances are computed at all, and the UI controls. Never
+  re-derive that expression at a call site. `lib/permissions.test.ts` covers the matrix, including
+  that a wider right cancels the restriction rather than the narrow one subtracting from it.
 - **WALKIN_ACCESS**: `canViewWalkins` (view|manage — read-only section) · `canManageWalkins`
   (open/edit/order/bill/close). Enforced type-aware in shared session actions (`pos.ts`
   `walkInWriteBlocked`) since walk-ins reuse the table session pipeline.

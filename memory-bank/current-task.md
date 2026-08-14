@@ -6,6 +6,113 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
+**Cancel a checked-in stay (2026-08-13) — CODE COMPLETE on DEV, not yet exercised in a browser.**
+A stay could only ever end via `check_out_room`. Now it can be CANCELLED: ended without being
+billed, with the deposit settled in the same step.
+
+⚠️ **The whole design is where the KEPT money goes.** A deposit already raised cash AND
+`advances_held` on the day it was taken. Keep ₹2,000 of it and, if that is not recognised as
+income, it stays booked as a deposit against a stay that no longer exists — **`advances_held` never
+returns to zero**. The balances still reconcile; they reconcile to a lie. So a retained deposit is
+a **SALE**: one `payments` row, `total = amount = advance_amount = kept`, `cash/online/card = 0`.
+No new money moves, the sale is recognised, held clears, and
+`left on credit = total − (cash+online+card+advance) = 0` keeps a cancellation out of receivables.
+A full refund writes **no payment row at all**. **Neither finance function needed changing** — a
+cancellation writes only `payments` and `room_advances`, which both already read.
+
+**A cancelled stay's BILL is the charge, not the nights.** `buildFolio` gained `cancelled` +
+`cancellation_charge`: one "Cancellation charge" line, `nights: 0`, no food, no extras, **and no
+tax or service** (the RPC records a payment of exactly the charge, so tax on top would print a bill
+that cannot reconcile to its own sale). It lives in the calculator, not the printer, because
+`getPaidBill` rebuilds paid room bills from the frozen stay.
+
+**Permission + PIN.** `cancel_room_stay` is a FOURTH room lane, outside the
+view/check_in/manage ladder in both directions. Owner passes automatically. The Security PIN gates
+**everyone including the owner** — the only PIN op not on `requireRestaurantAdmin`, which is why it
+lives in `app/actions/rooms.ts` rather than `security.ts`. Checks run permission → tenancy → PIN so
+a wrong PIN cannot probe which stay ids exist; the audit detail carries held/kept/refunded.
+
+⚠️ **TWO migrations, and they MUST stay separate.** `20260818000000` adds the enum value;
+`20260818000100` uses it. The runner wraps each file in `begin…commit` and Postgres refuses a new
+enum value in the transaction that created it. **Proved, not assumed** — the merged shape raises
+`55P04 unsafe use of new value`. Merging them looks tidier and fails on first run.
+
+**Verified on DEV, 27/27 end-to-end** with real stays: deposit 5,000 (3,000 cash + 2,000 online),
+keep 2,000 → sales **+2,000** (a ROOM sale), cash net **+2,000**, bank net **0**, **advances held
+back to ZERO**, **no phantom debt**, payment settled entirely by the advance, stay `cancelled`,
+room in `cleaning`. Full refund → no payment row. No deposit → nothing moves. Guards:
+`STAY_NOT_ACTIVE`, `INVALID_CHARGE`, `REFUND_MISMATCH`. **Ledger reconciles 0.0000 on both legs.**
+All figures back to baseline afterwards; the user's own "sanjib Pandey" stay untouched throughout.
+`tsc` clean, build clean, `node --test` **77/77** (10 new).
+
+**Follow-up fix (same day, no migration): the ledger now NAMES a refund.** A refund read
+"Room Advance", identical to the deposit it reverses. `txLabel(t, showRooms)` in `lib/finance.ts`
+is now the single labeller for the screen AND the CSV (they had drifted to "Room sale" vs
+"Room Sale"). Negative `room_advance` → **Room Advance Refund**; negative `extra_expense` →
+**Saving Withdrawal** (only the `saving` category may go negative, so the inference is safe).
+⚠️ The label reads the row's SIGN, the colour reads the DELTAS — different inputs on purpose, and
+`lib/finance.test.ts` asserts they never contradict (refund red −, withdrawal green +).
+Measured on the real DEV ledger: **4 of 4** negative rows were mislabelled, all now correct.
+`lib/finance.ts` also switched to a relative `./business-day.ts` import so it is node-testable.
+
+**Remaining:**
+1. **In-app QA on DEV**: cancel from Admin → Rooms and from a staff folio; confirm a staffer
+   without the permission sees no Cancel control on either; wrong PIN refused and visible as a
+   **failure** in Settings → Security activity; the freed room accepts a new check-in once cleaned.
+2. **Reprint parity**: a cancelled stay's bill in Sales must show the cancellation charge, not the
+   nights it would have cost.
+3. **Production migrations `20260817000000`, `20260818000000`, `20260818000100` are PENDING** —
+   three, in that order. **DB before app.**
+4. Nothing committed — user drives git.
+
+---
+
+## Previous feature
+**Staff-dashboard expenses/payroll + add-only permission + pot opening balance (2026-08-13) —
+CODE COMPLETE on DEV, not yet exercised in a browser.** Three requests in one pass.
+
+**1. Extra Expenses and Payroll reach the staff dashboard**, after Vendors, as summary cards →
+thin `/employee/{expenses,payroll}` pages reusing the admin clients (the Vendors pattern).
+⚠️ **Payroll's card and page gate differently on purpose**: the card needs `manage_payroll`, the
+page opens on either payroll right. The dashboard is tighter because it puts salaries on a screen
+left open at the counter. The card reads `getPayrollSheet`, NOT `getPayrollSummary` — the latter
+is gated on `view_finance` and would return zeros for a payroll-only staffer.
+
+**2. `add_expenses` ("Add Expenses & Saving")** — file an expense or a saving, see **today only**,
+never a pot's running balance. Enforced SERVER-side in three places, not by hiding UI:
+`listExtraExpenses` forces `period="today"` and drops any from/to; `listSavingTitles` filters to
+today BEFORE summing and never reads `opening_amount`, so **no running total exists in the
+payload**; `withdrawSaving` + all pot CRUD stay on `manage_expenses`. One predicate,
+`STOCK_ACCESS.expensesTodayOnly` (`add && !manage && !view_finance`), drives all of it —
+never re-derive it at a call site. New `lib/permissions.test.ts` covers the matrix, including that
+a wider right CANCELS the restriction (granting both boxes must not strand a manager on today).
+
+**3. `saving_titles.opening_amount`** — what a pot held before the app tracked it.
+⚠️ **The obvious implementation (write it as a saving row) is wrong and expensive**: every finance
+figure sums those rows, so a ₹50,000 opening would take ₹50,000 out of today's cash, add a ledger
+outflow that never happened and cut the month's profit. It lives on the TITLE instead, like
+`finance_openings`. Verified on DEV: closing cash, closing online and `extra_expenses_total` all
+unchanged after inserting one; no ledger row; negative refused (`23514`).
+Consequence: pot balance = `opening + Σ rows`, while the cash/online split covers only the rows —
+they do NOT add up and must not, so the UI names the opening figure explicitly. Withdrawals can
+draw against it (the money exists), so `withdrawSaving` and the PIN-gated edit in `security.ts`
+both include it when measuring "held" — keep those two identical.
+
+**Verified:** `tsc` clean, `npm run build` clean (`/employee/expenses`, `/employee/payroll`
+registered), `node --test` **67/67** (10 new permission tests). DB probe 7/7, all test data removed.
+
+**Remaining:**
+1. **In-app QA on DEV**: grant only "Add Expenses & Saving" to a test staffer — confirm the
+   dashboard card appears, the page shows today only with no period picker, the Saving tab shows
+   pots with today's figures and no balances, and there is no Withdraw / New saving / edit control.
+   Then grant Manage as well and confirm the full view returns.
+2. Create a pot with an opening amount; confirm Finance is unmoved and the pot reads the sum.
+3. **Production migration `20260817000000` is PENDING.** DB before app.
+4. Nothing committed — user drives git.
+
+---
+
+## Earlier feature
 **Room night boundary (2026-08-13) — CODE COMPLETE on DEV, not yet exercised in a browser.**
 Room charges used to step up on a rolling 24-hour clock from check-in. They now step up at the
 hotel's **checkout hour**, the same wall-clock time for every guest.
@@ -56,19 +163,32 @@ the stay; the snapshot rule charges 1 night where the live rule charges 2; a +3h
 back to 1; a 24h shift is refused by the DB (`23514`). PostgREST embed for `price_shift_by` → 200.
 All test data removed and settings restored byte-for-byte (asserted).
 
+**✅ PRODUCTION MIGRATED 2026-08-13** (`20260816000000`, 1/1). Production and DEV are both at 91/91.
+Pre-flight confirmed prod's `check_in_room` was the exact 17-arg signature the `drop` targets —
+had it differed, the drop would have silently no-opped and left two overloads for a `42725` at
+runtime. After: **one** overload, 19 params / 8 required / 11 defaulted, so the currently deployed
+build's 17-arg call still resolves; body **byte-identical to DEV** (`8d1288a2…`); all 5 columns,
+3 CHECKs and the `price_shift_by` FK present; all 31 existing stays untouched (shift 0, snapshots
+null, so they follow the live setting exactly as designed).
+
+**Deploy impact measured on the real data: ZERO.** All **9 stays currently open on production**
+were priced under both rules — every one bills the **same** number of nights, net change **+0**.
+Nothing to warn a front desk about. (Measured read-only; the migration itself changes no billing,
+since the whole rule is in TypeScript — the re-pricing moment is the APP deploy, not the DB.)
+
 **Remaining:**
-1. **In-app QA on DEV**: set the two hours; check a guest in and confirm the folio names the next
-   boundary and the dashboard card counts down to the same instant; grant +3h and watch both move;
-   check out either side of the boundary; confirm a `view_rooms`-only user sees the boundary but no
+1. **Deploy the app** — the DB is ready and waiting.
+2. **In-app QA**: set the two hours; check a guest in and confirm the folio names the next boundary
+   and the dashboard card counts down to the same instant; grant +3h and watch both move; check out
+   either side of the boundary; confirm a `view_rooms`-only user sees the boundary but no
    "Give more time" control.
-2. **Reprint parity** (the regression that matters most): check a stay out, note nights and total,
+3. **Reprint parity** (the regression that matters most): check a stay out, note nights and total,
    change *both* admin settings, reprint from Sales — it must be identical.
-3. **Production migration `20260816000000` is PENDING.** DB before app. Nothing else is pending.
 4. Nothing committed — user drives git.
 
 ---
 
-## Previous feature
+## Earlier feature
 **Extra Expenses (2026-08-13) — CODE COMPLETE on DEV, not yet exercised in a browser.**
 Overheads that are neither stock nor people: rent, electricity, water, gas, internet, maintenance,
 marketing, licenses, transport, other. New page `/admin/expenses` in the Stock & Finance nav group.

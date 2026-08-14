@@ -2,7 +2,11 @@
 // action file so the screen, the report and the CSV export all resolve a period
 // identically — the exported file can never disagree with what's on screen.
 
-import { businessPeriodBounds } from "@/lib/business-day";
+// Relative, with the extension, and NOT through the `@/` alias — the same
+// deliberate choice lib/room-billing.ts makes. It is what lets this module be
+// exercised under `node --test`, which resolves neither tsconfig paths nor
+// extensionless specifiers. `business-day.ts` has no imports of its own.
+import { businessPeriodBounds } from "./business-day.ts";
 import type { ExpenseCategoryTotal } from "@/lib/expenses";
 
 export type FinancePeriod =
@@ -231,6 +235,48 @@ export const TX_LABEL: Record<FinanceTxKind, string> = {
   vendor_opening: "Vendor Opening Balance",
   customer_opening: "Customer Opening Balance",
 };
+
+/**
+ * What a ledger row is CALLED, for one row.
+ *
+ * `TX_LABEL` alone is not enough, because two kinds carry a signed amount and so
+ * mean opposite things depending on which way the row points:
+ *
+ *   room_advance   > 0  a deposit taken     < 0  a REFUND handed back
+ *   extra_expense  > 0  money spent         < 0  a saving WITHDRAWAL
+ *
+ * Both used to print their kind's name in either direction, so a ₹1,500 refund
+ * read "Room Advance" — identical to the deposit that created it, and the only
+ * clue it was a refund was the minus sign the colour fix had just added. Naming
+ * it is the fix; the colour was only ever half the story.
+ *
+ * The SIGN of `amount` is the signal, not the deltas. For these two kinds the
+ * sign IS the design (see `room_advances.amount` and the `extra_expenses` amount
+ * CHECK) and it is guaranteed by database constraints, whereas the deltas answer
+ * a different question — "which way did the money go" — that `txTone` already
+ * asks for the colour.
+ *
+ * ONE function, used by the screen AND the CSV. Those two had already drifted to
+ * "Room sale" and "Room Sale"; a shared label is what stops the next divergence
+ * being a meaningful one.
+ */
+export function txLabel(
+  t: Pick<FinanceTransaction, "kind" | "amount" | "source">,
+  showRooms: boolean
+): string {
+  // A sale says which side of the business raised it — but only for a client
+  // that HAS both sides. For a restaurant-only client every sale is a restaurant
+  // sale, so the qualifier would be noise on every row; it stays plain "Sale",
+  // matching the Sales block, which collapses to one heading the same way.
+  if (t.kind === "sale" && t.source && showRooms) {
+    return t.source === "room" ? "Room Sale" : "Restaurant Sale";
+  }
+  if (t.kind === "room_advance" && t.amount < 0) return "Room Advance Refund";
+  // A negative extra expense can ONLY be a saving withdrawal: the CHECK
+  // constraint permits a negative amount for the `saving` category and no other.
+  if (t.kind === "extra_expense" && t.amount < 0) return "Saving Withdrawal";
+  return TX_LABEL[t.kind] ?? t.kind;
+}
 
 /**
  * Money in reads green, money out red — the same language as the rest of the sheet.

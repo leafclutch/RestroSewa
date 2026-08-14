@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireAdminOrPermission } from "@/lib/auth/guards";
-import { PERMISSIONS } from "@/lib/permissions";
+import { PERMISSIONS, ROOM_ACCESS } from "@/lib/permissions";
+import { getActiveStays } from "@/app/actions/rooms";
 import { getRoomTypesWithRooms, getRoomDaySettings } from "@/app/actions/rooms-admin";
 import { getRestaurantSlug } from "@/app/actions/tables-admin";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -8,6 +9,7 @@ import { getRestaurantConfig } from "@/lib/restaurant-info";
 import { hasRooms } from "@/lib/business-type";
 import { RoomsClient } from "./_components/rooms-client";
 import { RoomDayClient } from "./_components/room-day-client";
+import { ActiveStaysClient } from "./_components/active-stays-client";
 
 export type EmployeeOption = { id: string; display_name: string };
 
@@ -22,10 +24,16 @@ export default async function RoomsPage() {
 
   const service = createServiceClient();
 
-  const [{ types, totalRooms }, restaurantSlug, roomDay, employeesResult] = await Promise.all([
+  // Empty for anyone without `cancel_room_stay` — the action returns [] rather
+  // than relying on this page to remember the gate.
+  const canCancel = ROOM_ACCESS.canCancelStay(restaurantUser);
+
+  const [{ types, totalRooms }, restaurantSlug, roomDay, activeStays, employeesResult] =
+    await Promise.all([
     getRoomTypesWithRooms(restaurant_id),
     getRestaurantSlug(restaurant_id),
     getRoomDaySettings(restaurant_id),
+    canCancel ? getActiveStays() : Promise.resolve([]),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("restaurant_users")
@@ -76,6 +84,8 @@ export default async function RoomsPage() {
       <p className="text-sm mb-8" style={{ color: "var(--color-ink-mute)" }}>
         Manage room types and individual rooms. Each room gets a unique QR code for guest ordering.
       </p>
+
+      {canCancel && <ActiveStaysClient stays={activeStays} />}
 
       <RoomDayClient newDayHour={roomDay.newDayHour} doubleHour={roomDay.doubleHour} />
 

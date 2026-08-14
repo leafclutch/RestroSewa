@@ -31,6 +31,15 @@ edits".
   logged explicitly (no RPC to be atomic with), a missing permission logs `blocked`. It needed **no
   migration** — `security_audit_log.operation` is plain `text` with no CHECK constraint, so a new
   operation is a one-line addition to the `SecurityOperation` union. See `modules/mock-bill.md`.
+- **Cancel a checked-in stay** (`cancel_room_stay`, 2026-08-13) — ends a stay without billing it
+  and settles the deposit. **The only PIN operation gated on a plain PERMISSION rather than on
+  `requireRestaurantAdmin`**: `cancel_room_stay` holders may do it themselves, and the owner passes
+  because `hasPermission` is true for admins. That split is the point — the permission says who may
+  try, the PIN says it is really them. It therefore lives in `app/actions/rooms.ts`, not
+  `app/actions/security.ts` (everything in that file is admin-only). The audit `detail` carries
+  **held / kept / refunded**: who cancelled, without how much they kept, is not an audit trail.
+  Checks run permission → tenancy/assignment → PIN, in that order, so a wrong PIN cannot be used to
+  probe which stay ids exist. See `modules/rooms.md`.
 
 # Business Rules
 - **PIN-gated always.** The **payment tender** edit (Sales) is open to **billing staff**

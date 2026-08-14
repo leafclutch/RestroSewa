@@ -298,6 +298,14 @@ export type Database = {
            */
           new_day_hour: number | null;
           double_hour: number | null;
+          cancelled_at: string | null;
+          cancelled_by: string | null;
+          /**
+           * What the hotel kept out of the deposit on cancellation. This IS the
+           * bill for a cancelled stay — see lib/room-billing.ts `buildFolio`.
+           */
+          cancellation_charge: number;
+          cancellation_reason: string | null;
         };
         Insert: {
           id?: string;
@@ -317,6 +325,10 @@ export type Database = {
           price_shift_at?: string | null;
           new_day_hour?: number | null;
           double_hour?: number | null;
+          cancelled_at?: string | null;
+          cancelled_by?: string | null;
+          cancellation_charge?: number;
+          cancellation_reason?: string | null;
         };
         Update: {
           id?: string;
@@ -336,6 +348,10 @@ export type Database = {
           price_shift_at?: string | null;
           new_day_hour?: number | null;
           double_hour?: number | null;
+          cancelled_at?: string | null;
+          cancelled_by?: string | null;
+          cancellation_charge?: number;
+          cancellation_reason?: string | null;
         };
       };
 
@@ -468,6 +484,11 @@ export type Database = {
           name: string;
           created_by: string | null;
           created_at: string;
+          /**
+           * What the pot held before the app was tracking it. NOT a payment:
+           * it moves no cash, writes no ledger row and does not touch profit.
+           */
+          opening_amount: number;
         };
         Insert: {
           id?: string;
@@ -475,9 +496,11 @@ export type Database = {
           name: string;
           created_by?: string | null;
           created_at?: string;
+          opening_amount?: number;
         };
         Update: {
           name?: string;
+          opening_amount?: number;
         };
       };
 
@@ -1418,7 +1441,7 @@ export type Database = {
       subscription_tier:   "free" | "basic" | "pro";
       user_role:           "restaurant_admin" | "restaurant_employee";
       room_status:         "available" | "occupied" | "cleaning" | "maintenance";
-      room_stay_status:    "active" | "checked_out";
+      room_stay_status:    "active" | "checked_out" | "cancelled";
       room_charge_type:    "room_rate" | "laundry" | "mini_bar" | "extra_bed" | "other";
       session_type:        "table" | "walk_in" | "credit" | "room_service";
       session_status:      "active" | "closed" | "pending_activation";

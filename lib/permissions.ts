@@ -33,6 +33,7 @@ export const PERMISSIONS = {
   VIEW_ROOMS:       "view_rooms",
   CHECK_IN:         "check_in",
   MANAGE_ROOMS:     "manage_rooms",
+  CANCEL_ROOM_STAY: "cancel_room_stay",
   // Billing
   PROCESS_PAYMENTS: "process_payments",
   APPLY_DISCOUNTS:  "apply_discounts",
@@ -51,6 +52,7 @@ export const PERMISSIONS = {
   // different trust levels, and an owner must be able to hand a manager the
   // second without the first. See STOCK_ACCESS.canManageExpenses.
   MANAGE_EXPENSES:  "manage_expenses",
+  ADD_EXPENSES:     "add_expenses",
   VIEW_FINANCE:     "view_finance",
   // Reports
   VIEW_REPORTS:     "view_reports",
@@ -139,6 +141,13 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
       { key: "view_rooms",   label: "View Rooms" },
       { key: "check_in",     label: "Check-in" },
       { key: "manage_rooms", label: "Manage Rooms" },
+      // Ending a stay WITHOUT billing it, and deciding how much of the deposit
+      // the hotel keeps. Its own permission and NOT implied by manage_rooms:
+      // configuring rooms and writing off a guest's bill are different acts.
+      // The owner passes automatically (hasPermission is true for admins), which
+      // is what makes them the default canceller with no extra wiring.
+      // Always ALSO gated on the Security PIN — see lib/security/authorize.ts.
+      { key: "cancel_room_stay", label: "Cancel a Checked-in Stay" },
     ],
   },
   {
@@ -180,6 +189,11 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
       // Recording rent, electricity and the rest. Write implies the read of the
       // Extra Expenses page. See STOCK_ACCESS.canManageExpenses.
       { key: "manage_expenses", label: "Manage Extra Expenses" },
+      // The narrow one: file an expense or a saving, see TODAY's entries only,
+      // and nothing else. Given to whoever actually pays the bills without
+      // showing them the running totals — in particular, never a saving pot's
+      // balance. Granting `manage_expenses` as well makes this one irrelevant.
+      { key: "add_expenses", label: "Add Expenses & Saving" },
     ],
   },
   {
@@ -374,6 +388,20 @@ export const ROOM_ACCESS = {
   /** Creates/edits/deletes rooms and room types, changes availability. */
   canManageRooms: (u: { role: string; permissions: string[] }) =>
     hasPermission(u, P_.MANAGE_ROOMS),
+  /**
+   * Ends a stay WITHOUT billing it, deciding how much of the deposit is kept.
+   *
+   * Deliberately NOT part of the view/check_in/manage ladder: writing off a
+   * guest's bill is not a bigger version of configuring rooms, and a front-desk
+   * receptionist who checks guests in all day should not acquire it by default.
+   * The owner passes because `hasPermission` is true for `restaurant_admin`.
+   *
+   * The permission decides who may TRY. The Security PIN — checked separately in
+   * `cancelRoomStay`, for everyone including the owner — decides whether it goes
+   * through, and records both outcomes.
+   */
+  canCancelStay: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.CANCEL_ROOM_STAY),
 };
 
 // Three independent write lanes now live under one module:
@@ -415,16 +443,35 @@ export const STOCK_ACCESS = {
    * this page holds.
    */
   canViewExpenses: (u: { role: string; permissions: string[] }) =>
-    hasAnyPermission(u, [P_.MANAGE_EXPENSES, P_.VIEW_FINANCE]),
+    hasAnyPermission(u, [P_.MANAGE_EXPENSES, P_.VIEW_FINANCE, P_.ADD_EXPENSES]),
   /** Records, corrects and deletes extra expenses. */
   canManageExpenses: (u: { role: string; permissions: string[] }) =>
     hasPermission(u, P_.MANAGE_EXPENSES),
+  /** May FILE an expense or a saving. The write gate on every add action. */
+  canAddExpenses: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.MANAGE_EXPENSES, P_.ADD_EXPENSES]),
+  /**
+   * True for the ADD-ONLY holder: they may file entries but must never see a
+   * running total — only what they themselves put in today.
+   *
+   * Defined as a single predicate, in this file, because it decides three
+   * different things (which period the server will return, whether pot balances
+   * are computed at all, and whether the UI offers a period picker or an edit
+   * control). Re-deriving `has add && !has manage` at each of those sites is how
+   * one of them eventually forgets the `!`, and a pot balance leaks.
+   *
+   * `restaurant_admin` never lands here: hasPermission returns true for owners,
+   * so canManageExpenses already passed.
+   */
+  expensesTodayOnly: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.ADD_EXPENSES) &&
+    !hasAnyPermission(u, [P_.MANAGE_EXPENSES, P_.VIEW_FINANCE]),
   /** Sees the Daily Finance Report (takings, margins, all outstanding debt). */
   canViewFinance: (u: { role: string; permissions: string[] }) =>
     hasPermission(u, P_.VIEW_FINANCE),
   /** Shows the Stock & Finance group in the admin sidebar at all. */
   canSeeModule: (u: { role: string; permissions: string[] }) =>
-    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.MANAGE_PURCHASES, P_.MANAGE_VENDORS, P_.MANAGE_EXPENSES, P_.VIEW_FINANCE]),
+    hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.MANAGE_PURCHASES, P_.MANAGE_VENDORS, P_.MANAGE_EXPENSES, P_.ADD_EXPENSES, P_.VIEW_FINANCE]),
 };
 
 // ─── Payroll (Staff → Payroll) ────────────────────────────────────────────────

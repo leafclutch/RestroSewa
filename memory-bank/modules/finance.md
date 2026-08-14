@@ -80,6 +80,19 @@ module covers the on-screen Finance report and the emailed daily report.
   "Saving" line and never the per-title detail** — that is deliberate, the pots live only on
   `/admin/expenses`. Savings DO reduce estimated profit (the user's explicit call), so a month
   with heavy saving reads as a weaker month.
+- **A pot's OPENING AMOUNT is not a payment.** `saving_titles.opening_amount` is what the pot held
+  before the app was tracking it. Writing it as a `saving` row — the obvious implementation — would
+  be wrong and expensively so: every finance figure sums those rows, so a ₹50,000 opening would
+  take ₹50,000 out of cash-in-hand *today*, add a ledger outflow that never happened, and cut
+  estimated profit for the month. The money was set aside months ago. So it lives on the TITLE,
+  exactly as `finance_openings` carries the one balance the app cannot derive: **no cash leg, no
+  ledger row, no effect on either finance function**, verified on DEV (closing cash, closing online
+  and `extra_expenses_total` all unchanged after inserting one).
+  ⚠️ Consequence: a pot's balance is `opening_amount + Σ rows`, while its cash/online breakdown
+  covers **only the rows** — those two do not add up, and must not. The UI names the opening figure
+  explicitly for that reason. Withdrawals CAN draw against it (the money physically exists), so
+  both `withdrawSaving` and the PIN-gated edit in `security.ts` include it when measuring "held" —
+  keep those two identical or an amount accepted on create is refused on edit.
 - **A WITHDRAWAL is a negative saving row** — `room_advances`' signed-row trick again, and again it
   meant no change to either finance function: every figure already SUMS these rows, so pot balance,
   period total, both cash balances and the ledger delta all come out right from the signs alone.
@@ -115,6 +128,24 @@ module covers the on-screen Finance report and the emailed daily report.
   ⚠️ The sale branch now LEFT JOINs sessions → room_stays → rooms and restaurant_tables. All are
   to primary keys, so no fan-out; row count was 121 before and after, which is the check to
   repeat if that branch is ever touched again.
+- **The ledger NAMES by direction too, for the two signed kinds.** `txLabel(t, showRooms)` in
+  `lib/finance.ts` is the single labeller — `TX_LABEL[kind]` alone was not enough, because
+  `room_advance` and `extra_expense` both carry a SIGNED amount and mean opposite things each way:
+  a negative advance is a **Room Advance Refund**, a negative extra expense is a **Saving
+  Withdrawal** (the CHECK constraint permits a negative amount for the `saving` category and no
+  other, so that inference is safe). Before this, a ₹1,500 refund read "Room Advance" — identical
+  to the deposit it reverses, with only the minus sign to tell them apart. Measured on DEV: **4 of
+  4** negative rows were mislabelled.
+  ⚠️ **The label reads the row's SIGN; the colour reads the DELTAS.** Different inputs on purpose —
+  "what is this row" vs "which way did the money go" — and they must not contradict: a refund is
+  red − (money out), a withdrawal is green + (money in). Covered by `lib/finance.test.ts`.
+  The screen and the CSV both call `txLabel`; they had already drifted to "Room sale" vs
+  "Room Sale", which is exactly why there is now one function. The CSV passes `showRooms: true`
+  because that file has no business-type gate and its exports have always qualified sales.
+  *(Not distinguished: a cancellation refund vs a checkout refund. The note that separates them
+  isn't in the ledger payload, so it would need a migration.)*
+  ⚠️ `lib/finance.ts` now imports `./business-day.ts` **relatively** so it is reachable under
+  `node --test` — the same deliberate choice `lib/room-billing.ts` makes. Do not "tidy" it to `@/`.
 - **The ledger colours by DIRECTION, never by kind.** `txFlow(t) = cashDelta + onlineDelta` decides:
   `> 0` green `+`, `< 0` red `−`, `0` amber "no money moved". The old `TX_TONE` map (one fixed
   colour per kind) was wrong for every row that can point both ways, and measured on DEV it
@@ -142,9 +173,21 @@ module covers the on-screen Finance report and the emailed daily report.
 write needs `manage_stock` + `view_finance`. Daily-report config is owner-only.
 `manage_expenses` gates recording an overhead — its own lane, NOT a rider on `manage_purchases`,
 because paying the landlord and recording a supplier bill are different trust levels. Viewing
-`/admin/expenses` passes on `manage_expenses` OR `view_finance`; a stock right alone does **not**
-open it (unlike Purchases/Vendors). Correcting or deleting one is admin-role + Security PIN. See
-`modules/permissions.md`.
+`/admin/expenses` passes on `manage_expenses`, `view_finance` OR `add_expenses`; a stock right
+alone does **not** open it (unlike Purchases/Vendors). Correcting or deleting one is admin-role +
+Security PIN. See `modules/permissions.md`.
+
+**`add_expenses` ("Add Expenses & Saving") is the narrow lane**: file an expense or a saving, see
+**today's entries only**, and never a pot's running balance. For whoever actually pays the bills,
+without showing them the totals. Three rules make it real, and all three are SERVER-side:
+`listExtraExpenses` forces `period = "today"` and ignores any `from`/`to` (a crafted call asking
+for "year" gets today); `listSavingTitles` filters the saving rows to today **before** summing and
+does not read `opening_amount` at all, so **there is no running total in the payload** for a client
+bug to leak; and `withdrawSaving` plus all pot CRUD stay on `manage_expenses` — the permission
+adds, it does not withdraw or decide what the pots are. `STOCK_ACCESS.expensesTodayOnly` is the
+single predicate behind all of it (`has add && !has manage && !has view_finance`) — never
+re-derive that expression at a call site, which is how one of them eventually drops the `!`.
+Covered by `lib/permissions.test.ts`.
 
 # Known Limitations
 - Profit is an estimate (COGS only for product-linked items).

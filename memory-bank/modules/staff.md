@@ -12,15 +12,24 @@ around fast floor work and realtime.
 # Features
 - **Dashboard** (`/employee/dashboard`) — sections stream in under their own `<Suspense>`
   (concurrent, not serial). Order: Orders → Tables → Walk-ins → Rooms → Sales → Credits → Menu →
-  Stock → Purchases → Vendors. Quick-nav + `?focus=`/`?credit=` deep links.
+  Stock → Purchases → Vendors → Extra Expenses → Payroll. Quick-nav + `?focus=`/`?credit=`
+  deep links.
 - **Orders** (`/employee/queue`), **Sales** (`/employee/sales`), **Credits** (`/employee/credits`
   — needs process_payments + close_bills), **Menu** (reuses admin MenuClient).
 - **Tables** & **Walk-ins** sections — see `modules/tables.md`, `modules/walkins.md`.
 - **Rooms** section — see `modules/rooms.md`.
-- **Stock / Purchases / Vendors** — summary cards → thin `/employee/{stock,purchases,vendors}`
-  pages reusing admin clients. Stock section gates on `canViewStock`; **Purchases/Vendors gate on
-  the MANAGE right** (`canManagePurchases`/`canManageVendors`) so a view-only storekeeper doesn't
-  see action cards they can't use.
+- **Stock / Purchases / Vendors / Extra Expenses / Payroll** — summary cards → thin
+  `/employee/{stock,purchases,vendors,expenses,payroll}` pages reusing admin clients. Stock gates
+  on `canViewStock`; **Purchases/Vendors gate on the MANAGE right**
+  (`canManagePurchases`/`canManageVendors`) so a view-only storekeeper doesn't see action cards
+  they can't use. Extra Expenses gates on `canViewExpenses` (which now includes the narrow
+  `add_expenses` — see `modules/finance.md`).
+  ⚠️ **Payroll's card and its page gate DIFFERENTLY, on purpose**: the section mounts only for
+  `manage_payroll`, while `/employee/payroll` opens on either payroll right. The dashboard is the
+  tighter of the two because it puts colleagues' salaries on a screen that stays open at the
+  counter; a reporting-only right shouldn't summon it there. Do not "fix" the inconsistency.
+  Its card reads `getPayrollSheet`, which computes its own totals — `getPayrollSummary` is gated
+  on `view_finance` and is the wrong source for a payroll-only staffer.
 
 # Business Rules
 - Section visibility is permission-derived (`getStaffNav` + direct `*_ACCESS` checks); each thin

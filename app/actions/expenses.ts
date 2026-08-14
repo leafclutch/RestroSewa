@@ -56,8 +56,17 @@ export async function listExtraExpenses(params?: {
   const ru = await getRestaurantUser();
   if (!STOCK_ACCESS.canViewExpenses(ru)) return [];
 
-  const period = params?.period ?? "month";
-  const { from, to } = periodBounds(period, ru.closingHour, params?.from, params?.to);
+  // The add-only holder sees TODAY and nothing else. Forced HERE, on the server,
+  // rather than by hiding the period picker: the picker is a convenience, this is
+  // the rule. A crafted call asking for "year" gets today.
+  const todayOnly = STOCK_ACCESS.expensesTodayOnly(ru);
+  const period = todayOnly ? "today" : params?.period ?? "month";
+  const { from, to } = periodBounds(
+    period,
+    ru.closingHour,
+    todayOnly ? null : params?.from,
+    todayOnly ? null : params?.to
+  );
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -109,7 +118,10 @@ export async function addExtraExpense(
   formData: FormData
 ): Promise<ActionResult> {
   const ru = await getRestaurantUser();
-  if (!STOCK_ACCESS.canManageExpenses(ru)) {
+  // Filing an expense is the ADD gate, not the manage gate — `add_expenses`
+  // exists precisely so the person who pays the bills can record them without
+  // being shown the totals.
+  if (!STOCK_ACCESS.canAddExpenses(ru)) {
     return { error: "You don't have permission to record expenses." };
   }
 
@@ -177,20 +189,34 @@ export async function listSavingTitles(): Promise<SavingTitle[]> {
   const ru = await getRestaurantUser();
   if (!STOCK_ACCESS.canViewExpenses(ru)) return [];
 
+  // For the add-only holder the running balance is never computed, never mind
+  // sent: the saving rows are filtered to today BEFORE they are summed, and the
+  // pot's opening amount is not read at all. There is no total in the payload
+  // for a client bug to reveal.
+  const todayOnly = STOCK_ACCESS.expensesTodayOnly(ru);
+  const today = todayOnly ? periodBounds("today", ru.closingHour) : null;
+
   const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let rowsQuery = (service as any)
+    .from("extra_expenses")
+    .select("saving_title_id, amount, cash_amount, online_amount")
+    .eq("restaurant_id", ru.restaurant_id)
+    .eq("category", "saving");
+  if (today) {
+    rowsQuery = rowsQuery
+      .gte("created_at", today.from.toISOString())
+      .lt("created_at", today.to.toISOString());
+  }
+
   const [titlesRes, rowsRes] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("saving_titles")
-      .select("id, name, created_at")
+      .select(todayOnly ? "id, name, created_at" : "id, name, created_at, opening_amount")
       .eq("restaurant_id", ru.restaurant_id)
       .order("created_at", { ascending: true }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (service as any)
-      .from("extra_expenses")
-      .select("saving_title_id, amount, cash_amount, online_amount")
-      .eq("restaurant_id", ru.restaurant_id)
-      .eq("category", "saving"),
+    rowsQuery,
   ]);
 
   // Totalled here rather than in SQL: an aggregate would need its own RPC, and a
@@ -210,14 +236,20 @@ export async function listSavingTitles(): Promise<SavingTitle[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return ((titlesRes?.data ?? []) as any[]).map((t) => {
     const agg = totals.get(t.id);
+    // The pot started with whatever was already set aside before the app knew
+    // about it. That figure is part of the BALANCE but of neither tender leg —
+    // no money moved when it was typed in. See migration 20260817000000.
+    const opening = todayOnly ? 0 : Number(t.opening_amount ?? 0);
     return {
       id: t.id,
       name: t.name,
-      total: agg?.total ?? 0,
+      total: opening + (agg?.total ?? 0),
+      openingAmount: opening,
       cash: agg?.cash ?? 0,
       online: agg?.online ?? 0,
       entryCount: agg?.n ?? 0,
       createdAt: t.created_at,
+      todayOnly,
     };
   });
 }
@@ -252,11 +284,26 @@ export async function createSavingTitle(
   if (!name) return { error: "Enter a name for this saving." };
   if (name.length > 60) return { error: "That name is too long." };
 
+  // What the pot already held before the app was tracking it. Optional, and it
+  // moves NO money: no expense row, no cash leg, no ledger entry, no effect on
+  // profit. See migration 20260817000000 for why writing it as a saving row —
+  // the obvious implementation — would misreport today's takings.
+  const openingRaw = String(formData.get("opening_amount") ?? "").trim();
+  const opening = openingRaw === "" ? 0 : parseFloat(openingRaw);
+  if (!Number.isFinite(opening) || opening < 0) {
+    return { error: "Enter a valid amount already collected, or leave it blank." };
+  }
+
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any)
     .from("saving_titles")
-    .insert({ restaurant_id: ru.restaurant_id, name, created_by: ru.id });
+    .insert({
+      restaurant_id: ru.restaurant_id,
+      name,
+      created_by: ru.id,
+      opening_amount: Math.round(opening * 100) / 100,
+    });
 
   if (error) {
     // The unique index is case-insensitive, so this also catches "emergency fund"
@@ -351,7 +398,9 @@ export async function addSaving(
   formData: FormData
 ): Promise<ActionResult> {
   const ru = await getRestaurantUser();
-  if (!STOCK_ACCESS.canManageExpenses(ru)) {
+  // Putting money IN is the add gate. Taking it out (withdrawSaving) is not, and
+  // deliberately stays on `manage_expenses`: "Add Expenses & Saving" adds.
+  if (!STOCK_ACCESS.canAddExpenses(ru)) {
     return { error: "You do not have permission to record savings." };
   }
 
@@ -446,7 +495,7 @@ export async function withdrawSaving(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("saving_titles")
-      .select("id, name")
+      .select("id, name, opening_amount")
       .eq("id", titleId)
       .eq("restaurant_id", ru.restaurant_id)
       .maybeSingle(),
@@ -460,8 +509,16 @@ export async function withdrawSaving(
 
   if (!titleRes?.data) return { error: "That saving no longer exists." };
 
+  // The opening balance COUNTS as held. That money physically exists — it was
+  // set aside before the app was tracking it — so a pot that is mostly opening
+  // balance must still be drawable, or the feature would create money the
+  // restaurant cannot reach. Taking it out IS a real movement (cash comes back
+  // into the till today), which is why the withdrawal is a normal signed row
+  // even though the opening figure never was one.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const held = ((rowsRes?.data ?? []) as any[]).reduce((s, r) => s + Number(r.amount ?? 0), 0);
+  const held =
+    Number(titleRes.data.opening_amount ?? 0) +
+    ((rowsRes?.data ?? []) as any[]).reduce((s, r) => s + Number(r.amount ?? 0), 0);
   if (amount > held + 0.005) {
     return {
       error:
@@ -497,4 +554,91 @@ export async function withdrawSaving(
   revalidatePath("/admin/expenses");
   revalidatePath("/admin/finance");
   return null;
+}
+
+// ─── Dashboard summary ────────────────────────────────────────────────────────
+
+/**
+ * The Extra Expenses card on the staff dashboard.
+ *
+ * Permission-aware by construction rather than by the caller remembering to
+ * check: an add-only holder gets today's figures and `savingsHeld: null`. The
+ * pot balance is not fetched for them at all, so there is no number in the
+ * payload for a careless render to print.
+ */
+export type ExpenseSummary = {
+  todayTotal: number;
+  todayCash: number;
+  todayOnline: number;
+  todayCount: number;
+  /** All-time savings held, or null when the viewer may not see running totals. */
+  savingsHeld: number | null;
+};
+
+const EMPTY_EXPENSE_SUMMARY: ExpenseSummary = {
+  todayTotal: 0,
+  todayCash: 0,
+  todayOnline: 0,
+  todayCount: 0,
+  savingsHeld: null,
+};
+
+export async function getExpenseSummary(): Promise<ExpenseSummary> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canViewExpenses(ru)) return EMPTY_EXPENSE_SUMMARY;
+
+  const todayOnly = STOCK_ACCESS.expensesTodayOnly(ru);
+  const { from, to } = periodBounds("today", ru.closingHour);
+  const service = createServiceClient();
+
+  const [todayRes, potsRes] = await Promise.all([
+    // Savings excluded, exactly as the Expenses list excludes them: they are
+    // counted under savings, and adding them here would double the same money.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("extra_expenses")
+      .select("amount, cash_amount, online_amount")
+      .eq("restaurant_id", ru.restaurant_id)
+      .neq("category", "saving")
+      .gte("created_at", from.toISOString())
+      .lt("created_at", to.toISOString()),
+    todayOnly
+      ? Promise.resolve(null)
+      : Promise.all([
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (service as any)
+            .from("extra_expenses")
+            .select("amount")
+            .eq("restaurant_id", ru.restaurant_id)
+            .eq("category", "saving"),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (service as any)
+            .from("saving_titles")
+            .select("opening_amount")
+            .eq("restaurant_id", ru.restaurant_id),
+        ]),
+  ]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = (todayRes?.data ?? []) as any[];
+
+  let savingsHeld: number | null = null;
+  if (potsRes) {
+    const [savingRows, titleRows] = potsRes;
+    savingsHeld =
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((savingRows?.data ?? []) as any[]).reduce((s, r) => s + Number(r.amount ?? 0), 0) +
+      // The pots' opening balances count towards what is held — see
+      // migration 20260817000000. They move no cash; they are still in the pot.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((titleRows?.data ?? []) as any[]).reduce((s, r) => s + Number(r.opening_amount ?? 0), 0);
+  }
+
+  return {
+    todayTotal: rows.reduce((s, r) => s + Number(r.amount ?? 0), 0),
+    todayCash: rows.reduce((s, r) => s + Number(r.cash_amount ?? 0), 0),
+    todayOnline: rows.reduce((s, r) => s + Number(r.online_amount ?? 0), 0),
+    todayCount: rows.length,
+    savingsHeld,
+  };
 }

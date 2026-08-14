@@ -509,6 +509,31 @@ function NewTitleForm({ onDone }: { onDone: () => void }) {
         </p>
       </div>
 
+      <div>
+        <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
+          Already collected <span style={{ opacity: 0.7 }}>(optional)</span>
+        </label>
+        <input
+          name="opening_amount"
+          type="number"
+          inputMode="decimal"
+          min="0"
+          step="0.01"
+          placeholder="0.00"
+          autoComplete="off"
+          className={inputClass}
+          style={inputStyle}
+        />
+        {/* Stated plainly because the opposite is the natural assumption, and
+            getting it wrong would have someone hunting a phantom ₹50,000 hole
+            in today's cash. */}
+        <p className="text-xs mt-1.5" style={{ color: "var(--color-ink-mute)" }}>
+          What this pot already held before you started tracking it here. It counts towards the
+          pot&apos;s balance but is <strong>not</strong> treated as money spent today — your cash,
+          bank and profit figures are untouched.
+        </p>
+      </div>
+
       {error && (
         <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
           {error}
@@ -589,16 +614,41 @@ function SavingPot({
               {title.name}
             </span>
             <span className="text-xs" style={{ color: "var(--color-ink-mute)", opacity: 0.8 }}>
-              {title.entryCount === 0
-                ? "Nothing saved yet"
-                : `${title.entryCount} ${
-                    title.entryCount === 1 ? "entry" : "entries"
-                  } · holds ${money2(title.cash)} cash + ${money2(title.online)} online`}
+              {title.todayOnly
+                ? // The add-only holder never sees a running balance. The figure
+                  // beside this line is TODAY's net, and it says so — an
+                  // unlabelled number here would read as the pot's size.
+                  title.entryCount === 0
+                  ? "Nothing added today"
+                  : `${title.entryCount} today · ${money2(title.cash)} cash + ${money2(
+                      title.online
+                    )} online`
+                : title.entryCount === 0 && title.openingAmount === 0
+                  ? "Nothing saved yet"
+                  : [
+                      title.entryCount > 0 &&
+                        `${title.entryCount} ${title.entryCount === 1 ? "entry" : "entries"}`,
+                      // Named explicitly, because the balance otherwise refuses
+                      // to equal cash + online and looks like an arithmetic bug.
+                      title.openingAmount > 0 &&
+                        `${money2(title.openingAmount)} already collected`,
+                      title.entryCount > 0 &&
+                        `${money2(title.cash)} cash + ${money2(title.online)} online since`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
             </span>
           </span>
         </button>
-        <span className="text-base tabular-nums shrink-0" style={{ color: "var(--color-ink)" }}>
-          {money2(title.total)}
+        <span className="shrink-0 text-right">
+          <span className="text-base tabular-nums block" style={{ color: "var(--color-ink)" }}>
+            {money2(title.total)}
+          </span>
+          {title.todayOnly && (
+            <span className="text-xs block" style={{ color: "var(--color-ink-mute)" }}>
+              today
+            </span>
+          )}
         </span>
       </div>
 
@@ -885,6 +935,8 @@ export function ExpensesClient({
   canManage,
   canEdit,
   securityEnabled,
+  canAdd,
+  todayOnly = false,
 }: {
   initialExpenses: ExtraExpense[];
   initialTitles: SavingTitle[];
@@ -892,12 +944,26 @@ export function ExpensesClient({
   canManage: boolean;
   canEdit: boolean;
   securityEnabled: boolean;
+  /**
+   * May file an expense or a saving. Wider than `canManage`: the add-only
+   * permission passes here and nowhere else. Defaults to `canManage` so every
+   * existing caller behaves exactly as before.
+   */
+  canAdd?: boolean;
+  /**
+   * The add-only view: today's entries, no period picker, no pot balances, no
+   * withdrawals. The SERVER already enforces all of this — it forces the period
+   * and never computes a running total. This flag only stops the UI offering
+   * controls that would be refused anyway.
+   */
+  todayOnly?: boolean;
 }) {
+  const mayAdd = canAdd ?? canManage;
   const [tab, setTab] = useState<"expenses" | "saving">("expenses");
   const [expenses, setExpenses] = useState(initialExpenses);
   const [titles, setTitles] = useState(initialTitles);
   const [savings, setSavings] = useState(initialSavings);
-  const [period, setPeriod] = useState<FinancePeriod>("month");
+  const [period, setPeriod] = useState<FinancePeriod>(todayOnly ? "today" : "month");
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [addingSaving, setAddingSaving] = useState(false);
@@ -926,9 +992,10 @@ export function ExpensesClient({
   }, []);
 
   useEffect(() => {
+    if (todayOnly) return; // the period is fixed; the server sent today already
     if (period === "month") return; // the server already sent this one
     load(period);
-  }, [period, load]);
+  }, [period, load, todayOnly]);
 
   const total = expenses.reduce((s, e) => s + e.amount, 0);
   const cash = expenses.reduce((s, e) => s + e.cash, 0);
@@ -970,24 +1037,31 @@ export function ExpensesClient({
             {loading && <span className="ml-2">Updating…</span>}
           </p>
         </div>
-        {canManage && !showSaving && (
+        {mayAdd && !showSaving && (
           <Button size="sm" onClick={() => setAdding(true)}>
             <Plus size={14} /> Add expense
           </Button>
         )}
-        {canManage && showSaving && (
+        {mayAdd && showSaving && (
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" size="sm" onClick={() => setAddingTitle(true)}>
-              <Plus size={14} /> New saving
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setWithdrawing(true)}
-              disabled={!hasFundedPot}
-            >
-              <ArrowUpFromLine size={14} /> Withdraw
-            </Button>
+            {/* Creating a pot, and taking money OUT of one, stay on the manage
+                right. "Add Expenses & Saving" adds — it does not withdraw, and
+                it does not decide what the pots are. */}
+            {canManage && (
+              <>
+                <Button variant="secondary" size="sm" onClick={() => setAddingTitle(true)}>
+                  <Plus size={14} /> New saving
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setWithdrawing(true)}
+                  disabled={!hasFundedPot}
+                >
+                  <ArrowUpFromLine size={14} /> Withdraw
+                </Button>
+              </>
+            )}
             <Button size="sm" onClick={() => setAddingSaving(true)} disabled={titles.length === 0}>
               <PiggyBank size={14} /> Add money
             </Button>
@@ -1023,7 +1097,14 @@ export function ExpensesClient({
       {/* The period picker belongs to spending only. A pot's balance is not a
           period figure — "how much is in the emergency fund" has one answer — so
           offering a period on the Saving tab would invite a misreading. */}
-      {!showSaving && (
+      {!showSaving && todayOnly && (
+        // No picker: this viewer only ever sees today. Saying so beats an empty
+        // gap where the periods used to be.
+        <p className="text-xs my-4" style={{ color: "var(--color-ink-mute)" }}>
+          Showing <strong style={{ color: "var(--color-ink)" }}>today&apos;s</strong> entries.
+        </p>
+      )}
+      {!showSaving && !todayOnly && (
         <div className="flex gap-2 overflow-x-auto my-4" style={{ scrollbarWidth: "none" }}>
           {PERIODS.map((p) => (
             <button
@@ -1055,12 +1136,14 @@ export function ExpensesClient({
               ? ([
                   ["Cash", savedCash],
                   ["Online", savedOnline],
-                  ["Saved", savedTotal],
+                  // For the add-only viewer this is what THEY put in today, not
+                  // what the pots hold — the label has to say which.
+                  [todayOnly ? "Added today" : "Saved", savedTotal],
                 ] as const)
               : ([
                   ["Cash", cash],
                   ["Online", online],
-                  ["Total", total],
+                  [todayOnly ? "Today" : "Total", total],
                 ] as const)
           ).map(([label, value], i) => (
             <div key={label} className="px-4 py-3">
@@ -1093,7 +1176,9 @@ export function ExpensesClient({
               style={{ color: "var(--color-ink-mute)", opacity: 0.5 }}
             />
             <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
-              No savings yet. Create one — an emergency fund, a new oven — then file money into it.
+              {canManage
+                ? "No savings yet. Create one — an emergency fund, a new oven — then file money into it."
+                : "No savings have been set up yet. Ask an owner to create one."}
             </p>
           </div>
         ) : (
