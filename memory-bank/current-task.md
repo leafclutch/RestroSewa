@@ -6,12 +6,11 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
-**Discount While Clearing Customer Credit & Finance Polish (2026-08-16) — CODE COMPLETE & VERIFIED.**
-1. **Security & Discount PIN**: Gated credit repayment discount application behind `APPLY_DISCOUNTS` permission and the restaurant's **Discount PIN** (`verify_discount_pin` RPC).
-2. **Multi-Tender & Balance Math**: Supports Cash, Online, Card, and Mixed (Cash + Online) splits for the received money. Total credit debt cleared equals `amount_received + discount_amount`, reducing customer balance to 0 without leaving unpaid credit balances.
-3. **Database Migration & Finance Integration**: Applied `20260820000000_credit_payment_discount.sql` to DEV DB. Updated `finance_report` to combine till discounts and credit clearance discounts into `discounts_total`, and return `customer_credit_discounted` and `credit_discounts_total`. Updated `finance_transactions` to format ledger credit repayment labels and credit debt deltas.
-4. **Finance UI & PDF Report Polish**: Removed redundant "Sales before discount" and "Sales after discount" rows from `/admin/finance`, CSV exports, and daily summary PDF reports. Added "Discount written off" row to Customer credits section and broke down "Till / sales discounts" vs "Credit clearance discounts" in Discounts section on `/admin/finance` and PDF reports.
-5. **Verification**: `tsc` clean (0 errors), `node --test` 95/95 passing (including `lib/credit-discount.test.ts`).
+**Mixed Menu + Customized Items Order Submission Fix (2026-08-16) — CODE COMPLETE & VERIFIED.**
+1. **Root Cause Resolved**: Fixed bulk insert key structure mismatch between `resolveOrderItems` and `resolveCustomItems`. `ResolvedOrderItem` in `lib/order-items.ts` now explicitly includes `is_custom: false`.
+2. **Single-Submission Ordering**: Staff can add any combination of menu items and customized/manual items to the cart and submit them together in a single order submission without errors.
+3. **Pipeline Integrity**: Workstation routing, docket generation, stock deduction, billing, and cancellation remain fully preserved for both item types.
+4. **Verification**: `tsc` clean (0 errors), `node --test` 98/98 passing (including `lib/mixed-order.test.ts`).
 
 ---
 

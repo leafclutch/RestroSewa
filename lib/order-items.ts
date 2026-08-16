@@ -34,6 +34,7 @@ export type ResolvedOrderItem = {
   workstation_name: string | null;
   quantity: number;
   notes: string | null;
+  is_custom: false;
 };
 
 export type ResolveResult =
@@ -137,6 +138,7 @@ export async function resolveOrderItems(
       workstation_name: ws?.name ?? null,
       quantity,
       notes: line.notes?.trim() || null,
+      is_custom: false,
     });
   }
 

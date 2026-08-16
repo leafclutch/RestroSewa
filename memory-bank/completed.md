@@ -3,6 +3,12 @@
 Chronological log of meaningful shipped features (newest first). Not every commit — only
 features worth remembering. Dates are approximate to the work, not necessarily merge dates.
 
+## 2026-08-16 — Mixed Menu + Customized Items Order Submission Fix
+Resolved bug where staff could not order menu items and customized/manual items together in a single order submission:
+1. **Root Cause**: `resolveOrderItems` in `lib/order-items.ts` omitted `is_custom` property on menu items, while `resolveCustomItems` in `lib/custom-items.ts` set `is_custom: true`. Concatenating both in `submitOrder` created heterogeneous object key structures in `allItems`, causing Supabase PostgREST bulk insert payload failures.
+2. **Fix**: Explicitly added `is_custom: false` to `ResolvedOrderItem` type and return objects in `lib/order-items.ts`. All item objects in an order now carry uniform key structures.
+3. **Verification**: Added `lib/mixed-order.test.ts` unit tests; TypeScript compiler clean (0 errors), test suite 98/98 passing.
+
 ## 2026-08-16 — Discount While Clearing Customer Credit
 Added optional discount support when clearing customer credit in `/employee/credits` and `/admin/credits`:
 1. **Security & Authorization**: Applying a discount is gated behind the existing **Discount PIN** (`verify_discount_pin` RPC) and `APPLY_DISCOUNTS` permission. Invalid PINs block submission.
