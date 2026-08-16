@@ -6,6 +6,67 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
+**Review fixes on the last three commits (2026-08-17) — UNCOMMITTED, and one of them BLOCKS the
+next production migration.**
+
+⚠️ **`finance_report`'s advance split had lost its period filter, and it is only caught because
+production has not been migrated yet.** The hand-written rewrite in
+`20260820000000_credit_payment_discount.sql` dropped
+`filter (where x.paid_at >= p_from and x.paid_at < p_to)` from **both** legs of `advsold`, so
+`sales_advance_cash` / `sales_advance_online` returned the **all-time** figure for every period.
+Measured on DEV: a 1-day window read `sales_advance = 0` against a split of **3,500**. That breaks
+`cash + online + card + advance_cash + advance_online + credit = total` on the Finance Sales block,
+the CSV and the emailed daily PDF — the identical defect this file records as fixed on 2026-08-12
+("a new way to settle a bill needs a Sales LINE"). ⚠️ **The ledger still reconciles 0.0000 through
+it**, because `finance_transactions` was untouched, so the project's usual proof does NOT catch this
+class. Verified read-only that **production still has the correct body** — both `20260819000000` and
+`20260820000000` are pending there.
+
+**Both finance functions were rebuilt from the PREVIOUS body plus only the deliberate deltas**,
+rather than patching the rewrite. The rewrite had also stripped ~25 comment blocks, including the
+warning that `finance_transactions`'s room test must stay identical to `finance_report`'s `paysrc`.
+Diffing the two revealed the logic was otherwise byte-identical — which is what made a
+rebuild-from-old safe and is the technique to reuse next time a 300-line function is "rewritten".
+
+**Other fixes in the same pass:**
+- **A live database password was committed** in `scratch/apply_discount_migration.mjs` — and
+  `.env.production` uses the **same** password, so it leaked production too. File deleted, `scratch/`
+  added to `.gitignore` beside the env-file rule it was routing around. ⚠️ **It is still in git
+  history (`007aa80`); the password must be ROTATED on both projects.** That script also bypassed
+  the ledger — use `scripts/migrate.mjs`, which writes `supabase_migrations.schema_migrations`.
+- **`gas` → `fuel` inverted the DB-before-app rule.** Dropping `'gas'` from the CHECK would have made
+  every gas expense insert fail for the deployed build during the window. `'gas'` is now retained as
+  a transitional key (nothing writes it; `expenseCategoryLabel` maps it to "Fuel" on read).
+- The credit-clearance discount field + PIN were rendered for **everyone**; now gated on
+  `apply_discounts` via a `canDiscount` prop off the dashboard, matching the till discount. The
+  server always re-checked, so this is UX, not the boundary.
+- Removed the no-op `revalidatePath("/admin/credits")` — that route does not exist; corrected the
+  `completed.md` claim that said it did.
+- `lib/finance.ts`: `salesTotal + discountsTotal` no longer reconstructs gross sales and the doc
+  comment said it did. A till discount never entered `salesTotal`; a credit write-off forgives a
+  bill booked at FULL value on an earlier day, so adding both back double-counts the credit half.
+
+**Verified:** `tsc` clean, `npm run build` clean, `node --test` **98/98**, and a structural check of
+the rebuilt SQL — 60 declared columns == 60 projected, all 65 CTE references resolve, both advance
+legs filtered and clamped, and the two credit legs move together across the two functions.
+
+**Remaining:**
+1. ⚠️ **DEV still holds the BROKEN `finance_report`** — `20260820000000` is already in its ledger, so
+   `migrate up` will skip it. Re-apply that one file directly (it is idempotent:
+   `add column if not exists`, `drop … if exists` + create), then re-measure that a narrow window's
+   `sales_advance` equals `sales_advance_cash + sales_advance_online`.
+2. Then migrate production: `20260819000000` and `20260820000000` are both still pending.
+3. **Open design question, not a defect:** a credit write-off never reaches profit. The bill was
+   booked as a sale in full when it closed on credit; forgiving it drops the receivable but nothing
+   subtracts it from `sales − purchases − salaries − extra expenses`, so estimated profit is
+   overstated by every discount given. The balances all reconcile — compare the cancellation design,
+   which deliberately recognised a retained deposit as a SALE rather than let a balance reconcile to
+   a lie. Decide whether this wants a bad-debt line.
+4. Nothing committed — user drives git.
+
+---
+
+## Previous Feature
 **Mixed Menu + Customized Items Order Submission Fix (2026-08-16) — CODE COMPLETE & VERIFIED.**
 1. **Root Cause Resolved**: Fixed bulk insert key structure mismatch between `resolveOrderItems` and `resolveCustomItems`. `ResolvedOrderItem` in `lib/order-items.ts` now explicitly includes `is_custom: false`.
 2. **Single-Submission Ordering**: Staff can add any combination of menu items and customized/manual items to the cart and submit them together in a single order submission without errors.
@@ -14,7 +75,7 @@ changes in `changelog.md`, and reset this file to the template below.
 
 ---
 
-## Previous Feature
+## Earlier feature
 **Cancel a checked-in stay (2026-08-13) — CODE COMPLETE on DEV, not yet exercised in a browser.**
 A stay could only ever end via `check_out_room`. Now it can be CANCELLED: ended without being
 billed, with the deposit settled in the same step.

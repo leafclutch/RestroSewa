@@ -180,18 +180,19 @@ AS $function$
       sum(coalesce(p.total_amount,p.amount)) filter (where p.created_at >= p_from and p.created_at < p_to) total_in
     from payments p where p.restaurant_id = p_restaurant_id
   ),
+  -- The same bills, cut by which side of the business raised them.
   paysrc as (
     select
       sum(p.cash_amount)                       filter (where in_period and is_room) room_cash,
       sum(p.online_amount)                     filter (where in_period and is_room) room_online,
       sum(coalesce(p.card_amount,0))           filter (where in_period and is_room) room_card,
+      sum(coalesce(p.total_amount,p.amount))   filter (where in_period and is_room) room_total,
       sum(p.cash_amount)                       filter (where in_period and not is_room) table_cash,
       sum(p.online_amount)                     filter (where in_period and not is_room) table_online,
       sum(coalesce(p.card_amount,0))           filter (where in_period and not is_room) table_card,
-      sum(coalesce(p.total_amount,p.amount))   filter (where in_period and is_room) room_total,
       sum(coalesce(p.total_amount,p.amount))   filter (where in_period and not is_room) table_total
     from (
-      select p.cash_amount, p.online_amount, p.card_amount, p.total_amount, p.amount,
+      select p.*,
              (p.created_at >= p_from and p.created_at < p_to) in_period,
              (p.room_stay_id is not null
                or se.room_stay_id is not null
@@ -202,35 +203,57 @@ AS $function$
       where p.restaurant_id = p_restaurant_id
     ) p
   ),
+  -- Room deposits. Signed rows: a refund is negative, so one set of sums serves
+  -- money in and money back out, and the split legs are the same sums under
+  -- opposite sign filters.
   adv as (
     select
-      sum(a.cash_amount)   filter (where a.created_at >= (select eff from seed) and a.created_at < p_from) cash_before,
+      sum(a.cash_amount) filter (where a.created_at >= (select eff from seed) and a.created_at < p_from) cash_before,
       sum(a.online_amount + a.card_amount) filter (where a.created_at >= (select eff from seed) and a.created_at < p_from) online_before,
-      sum(a.amount)        filter (where a.amount > 0 and a.created_at >= p_from and a.created_at < p_to) received,
-      sum(-a.amount)       filter (where a.amount < 0 and a.created_at >= p_from and a.created_at < p_to) refunded,
-      sum(a.cash_amount)   filter (where a.amount > 0 and a.created_at >= p_from and a.created_at < p_to) adv_cash_in,
-      sum(a.online_amount + a.card_amount) filter (where a.amount > 0 and a.created_at >= p_from and a.created_at < p_to) adv_online_in,
-      sum(-a.cash_amount)  filter (where a.amount < 0 and a.created_at >= p_from and a.created_at < p_to) ref_cash_in,
-      sum(-(a.online_amount + a.card_amount)) filter (where a.amount < 0 and a.created_at >= p_from and a.created_at < p_to) ref_online_in,
-      sum(a.cash_amount)   filter (where a.created_at >= p_from and a.created_at < p_to) cash_in,
+      sum(a.cash_amount) filter (where a.created_at >= p_from and a.created_at < p_to) cash_in,
       sum(a.online_amount + a.card_amount) filter (where a.created_at >= p_from and a.created_at < p_to) online_in,
-      sum(a.amount)        filter (where a.created_at < p_from) held_raised_before,
-      sum(a.amount)        filter (where a.created_at < p_to)   held_raised_to
+      sum(a.amount) filter (where a.amount > 0 and a.created_at >= p_from and a.created_at < p_to) received,
+      sum(-a.amount) filter (where a.amount < 0 and a.created_at >= p_from and a.created_at < p_to) refunded,
+      -- Deposits TAKEN, split. Card rides with online: it is bank money for every
+      -- balance in this app.
+      sum(a.cash_amount) filter (where a.amount > 0 and a.created_at >= p_from and a.created_at < p_to) adv_cash_in,
+      sum(a.online_amount + a.card_amount) filter (where a.amount > 0 and a.created_at >= p_from and a.created_at < p_to) adv_online_in,
+      -- Refunds RETURNED, split and negated so they report as positive amounts.
+      sum(-a.cash_amount) filter (where a.amount < 0 and a.created_at >= p_from and a.created_at < p_to) ref_cash_in,
+      sum(-(a.online_amount + a.card_amount)) filter (where a.amount < 0 and a.created_at >= p_from and a.created_at < p_to) ref_online_in,
+      -- Liability legs. NO `eff` floor, for the same reason the credit legs have
+      -- none: a deposit taken before the books opened is still owed to the guest.
+      sum(a.amount) filter (where a.created_at < p_from) held_raised_before,
+      sum(a.amount) filter (where a.created_at < p_to)   held_raised_to
     from room_advances a where a.restaurant_id = p_restaurant_id
   ),
+  -- The other half of the liability: a deposit stops being held the moment it is
+  -- applied to a bill. `applied_in` is also the Sales figure.
   advuse as (
     select
-      sum(coalesce(p.advance_amount, 0)) filter (where p.created_at >= p_from and p.created_at < p_to) applied_in,
-      sum(coalesce(p.advance_amount, 0)) filter (where p.created_at < p_from) applied_before,
-      sum(coalesce(p.advance_amount, 0)) filter (where p.created_at < p_to)   applied_to
-    from payments p where p.restaurant_id = p_restaurant_id and coalesce(p.advance_amount, 0) > 0
+      sum(p.advance_amount) filter (where p.created_at < p_from) applied_before,
+      sum(p.advance_amount) filter (where p.created_at < p_to)   applied_to,
+      sum(p.advance_amount) filter (where p.created_at >= p_from and p.created_at < p_to) applied_in
+    from payments p where p.restaurant_id = p_restaurant_id
   ),
+  -- How the applied advance behind the period's SALES was originally tendered.
+  --
+  -- Keyed on the PAYMENT's date (the checkout day), while the deposit rows it
+  -- reads may be days older — that is the whole point of an advance.
+  --
+  -- A settled stay's NET advance rows equal `payments.advance_amount` by
+  -- construction (a refund is negative and already netted), so the cash figure is
+  -- the cash actually RETAINED, not the cash originally taken.
+  --
+  -- The online part is derived as `applied - cash`, and cash is clamped to
+  -- [0, applied]. That makes the two halves sum to `sales_advance` always, so the
+  -- Sales block cannot stop adding up.
   advsold as (
     select
-      sum(x.stay_cash) cash_total,
-      sum(x.applied - x.stay_cash) online_total,
-      sum(least(x.applied, x.stay_cash)) sales_adv_cash,
-      sum(greatest(0, x.applied - x.stay_cash)) sales_adv_online
+      sum(least(greatest(x.stay_cash, 0), x.applied))
+        filter (where x.paid_at >= p_from and x.paid_at < p_to) sales_adv_cash,
+      sum(x.applied - least(greatest(x.stay_cash, 0), x.applied))
+        filter (where x.paid_at >= p_from and x.paid_at < p_to) sales_adv_online
     from (
       select
         p.created_at paid_at,
@@ -251,7 +274,18 @@ AS $function$
       sum(cp.cash_amount) filter (where cp.created_at >= p_from and cp.created_at < p_to) cash_in,
       sum(cp.online_amount) filter (where cp.created_at >= p_from and cp.created_at < p_to) online_in,
       sum(cp.amount) filter (where cp.created_at >= p_from and cp.created_at < p_to) collected,
+      -- Debt FORGIVEN in the period. Reported beside the money so "collected" stays
+      -- what actually arrived; the two together are what the customer stopped owing.
       sum(coalesce(cp.discount_amount, 0)) filter (where cp.created_at >= p_from and cp.created_at < p_to) discounted,
+      -- Credit-to-us legs. These have NO `eff` floor on purpose: the cash seed
+      -- replaces pre-books cash movement, but a debt raised before the books
+      -- opened is still owed today, and the customer's own opening term carries
+      -- it. Flooring these would forgive it.
+      --
+      -- `+ discount_amount` is load-bearing: a write-off clears debt without moving
+      -- money, so a leg counting only `amount` would leave the forgiven part sitting
+      -- in the closing balance forever. The ledger's credit delta is
+      -- `-(amount + discount)` for the same reason — the two must move together.
       sum(cp.amount + coalesce(cp.discount_amount, 0)) filter (where cp.created_at < p_from) collected_before,
       sum(cp.amount + coalesce(cp.discount_amount, 0)) filter (where cp.created_at < p_to)   collected_to
     from credit_payments cp where cp.restaurant_id = p_restaurant_id
@@ -263,6 +297,8 @@ AS $function$
       sum(c.bill_amount - c.down_payment) filter (where c.created_at < p_to)   raised_to
     from credits c where c.restaurant_id = p_restaurant_id
   ),
+  -- Credit sales, cut the same way. Same room test as `paysrc`, via the credit's
+  -- own session.
   crsrc as (
     select
       sum(c.owed) filter (where c.in_period and c.is_room) room_credit,
@@ -281,6 +317,7 @@ AS $function$
   cust as (
     select coalesce(sum(balance),0) outstanding,
            count(*) filter (where balance > 0)::int pending,
+           -- The pre-system anchor, dated at the account's creation.
            coalesce(sum(opening_balance) filter (where created_at < p_from),0) open_before,
            coalesce(sum(opening_balance) filter (where created_at < p_to),0)   open_to
     from credit_customers where restaurant_id = p_restaurant_id
@@ -293,6 +330,7 @@ AS $function$
       sum(pu.online_amount) filter (where pu.created_at >= p_from and pu.created_at < p_to) online_out,
       sum(pu.credit_amount) filter (where pu.created_at >= p_from and pu.created_at < p_to) credit_out,
       sum(pu.total_amount) filter (where pu.created_at >= p_from and pu.created_at < p_to) total_out,
+      -- Credit-by-us legs, unfloored for the same reason as the customer side.
       sum(pu.credit_amount) filter (where pu.created_at < p_from) owed_before,
       sum(pu.credit_amount) filter (where pu.created_at < p_to)   owed_to
     from purchases pu where pu.restaurant_id = p_restaurant_id
@@ -318,6 +356,8 @@ AS $function$
       sum(sp.amount) filter (where sp.created_at >= p_from and sp.created_at < p_to) total_out
     from salary_payments sp where sp.restaurant_id = p_restaurant_id
   ),
+  -- Overheads: rent, power, water, internet. Money out, no credit leg — an
+  -- expense row IS the payment (see the table's own migration).
   exp as (
     select
       sum(e.cash_amount) filter (where e.created_at >= (select eff from seed) and e.created_at < p_from) cash_before,
@@ -327,6 +367,10 @@ AS $function$
       sum(e.amount) filter (where e.created_at >= p_from and e.created_at < p_to) total_out
     from extra_expenses e where e.restaurant_id = p_restaurant_id
   ),
+  -- "Where did the cash go" answered without a second round trip. Categories with
+  -- no spend in the period are simply absent, so a quiet day stays short rather
+  -- than printing ten zeroes. Ordered biggest-first, with the category name as a
+  -- tie-break so the same period always renders in the same order.
   expcat as (
     select coalesce(
       jsonb_agg(jsonb_build_object(
@@ -347,6 +391,17 @@ AS $function$
       group by e.category
     ) t
   ),
+  -- Money given away, from the TWO places it can be given: at the till (a bill
+  -- discounted at payment) and at credit clearance (debt forgiven when a customer
+  -- settles). Neither is a balance movement here — the till discount never entered
+  -- `sales_total` in the first place (the NET amount IS the sale everywhere in this
+  -- app), and the credit write-off moves the receivable via `crp`, not this CTE.
+  -- Reported so the owner can see what was foregone.
+  --
+  -- `credit_total` is broken out because the two are NOT interchangeable: a till
+  -- discount reduced a sale that was never booked at gross, while a credit write-off
+  -- forgives a sale already booked in full on an earlier day. `total` is the sum of
+  -- both, so a caller wanting till-only must subtract `credit_total`.
   disc as (
     select
       coalesce(sum(d.discount_amount), 0) total,
@@ -388,6 +443,7 @@ AS $function$
         - coalesce((select online_before from sal),0)
         - coalesce((select online_before from exp),0) open_online,
 
+      -- The two credit balances, evaluated at each end of the period.
       (select open_before from cust) + coalesce((select raised_before from cr),0)
         - coalesce((select collected_before from crp),0) open_to_us,
       (select open_to from cust) + coalesce((select raised_to from cr),0)
@@ -397,6 +453,7 @@ AS $function$
       (select open_to from ven) + coalesce((select owed_to from pur),0)
         - coalesce((select paid_to from vp),0) close_by_us,
 
+      -- The fifth balance: taken, less applied to a bill.
       coalesce((select held_raised_before from adv),0)
         - coalesce((select applied_before from advuse),0) open_held,
       coalesce((select held_raised_to from adv),0)
@@ -491,6 +548,11 @@ AS $function$
   ),
 
   moves as (
+    -- A bill. The tendered split is real money; the gap up to the bill total is
+    -- credit raised against the customer — EXCEPT for anything already settled by
+    -- a room deposit, which is money we took on an earlier day. Without the
+    -- advance term here, a prepaid bill reads as a credit sale and the receivable
+    -- climbs by a debt nobody owes.
     select
       p.created_at occurred_at,
       'sale'::text kind,
@@ -514,6 +576,13 @@ AS $function$
       (p.online_amount + coalesce(p.card_amount,0)) online_delta,
       (coalesce(p.total_amount,p.amount) - (p.cash_amount + p.online_amount + coalesce(p.card_amount,0) + coalesce(p.advance_amount,0))) credit_to_us_delta,
       0::numeric credit_by_us_delta,
+      -- WHICH SIDE OF THE BUSINESS raised this bill, and which table or room.
+      --
+      -- The room test is IDENTICAL to `paysrc` in finance_report. If the two ever
+      -- drift apart the ledger and the Sales block would classify the same bill
+      -- differently — exactly the sort of quiet contradiction nobody reports until
+      -- it has been wrong for a month. Three markers, because `room_id` survives a
+      -- session transfer while a type set at creation might not.
       case
         when p.room_stay_id is not null or se.room_stay_id is not null
           or se.room_id is not null or se.type = 'room_service' then 'room'
@@ -531,6 +600,9 @@ AS $function$
       end::text source_label
     from payments p
     left join sessions se on se.id = p.session_id
+    -- The stay can hang off the PAYMENT or the SESSION, and the room can be
+    -- reached through either; coalesce covers both. Every join is to a primary
+    -- key, so none of them can multiply a payment into two ledger rows.
     left join room_stays rs on rs.id = coalesce(p.room_stay_id, se.room_stay_id)
     left join rooms r on r.id = coalesce(se.room_id, rs.room_id)
     left join restaurant_tables t on t.id = se.table_id
@@ -539,6 +611,9 @@ AS $function$
 
     union all
 
+    -- A room deposit taken, or (negative) returned. Real money, no sale, no credit
+    -- leg — the sale books in full when the guest checks out. The signs mean one
+    -- branch serves both directions.
     select
       a.created_at, 'room_advance',
       rs.guest_name,
@@ -558,6 +633,15 @@ AS $function$
 
     union all
 
+    -- Money received against an existing debt: cash in, receivable down. NOT new
+    -- revenue — the bill was already counted when it was raised (accrual).
+    --
+    -- A clearance may also FORGIVE part of the debt. The cash and online legs carry
+    -- only what actually arrived, but the receivable falls by money + discount —
+    -- otherwise the forgiven part would sit in the closing credit balance forever.
+    -- `finance_report`'s `crp` legs use the same `amount + discount_amount`; if one
+    -- moves without the other, `opening + Σ deltas == closing` breaks on the credit
+    -- leg alone and nothing else fails.
     select
       cp.created_at, 'credit_repayment',
       cc.name,
@@ -569,6 +653,9 @@ AS $function$
       -(cp.amount + coalesce(cp.discount_amount, 0)),
       0::numeric,
       null::text,
+      -- The reference column is free on this branch (a repayment has no code of its
+      -- own), so it names the write-off rather than leaving the row reading as a
+      -- payment that cleared more than it collected.
       case when coalesce(cp.discount_amount, 0) > 0.005
            then 'Discount ₹' || trim(to_char(cp.discount_amount, 'FM999,999,990.00'))
            else null end
@@ -579,6 +666,8 @@ AS $function$
 
     union all
 
+    -- A supplier bill. Only the settled part leaves the till; the rest is a
+    -- payable.
     select
       pu.created_at, 'purchase',
       v.name,
@@ -597,6 +686,7 @@ AS $function$
 
     union all
 
+    -- Paying a supplier down: money out AND the payable falls.
     select
       vp.created_at, 'vendor_payment',
       v.name,
@@ -615,6 +705,8 @@ AS $function$
 
     union all
 
+    -- Wages. Money out, no credit leg — payroll's own liability is reported
+    -- separately and is not a vendor-style payable.
     select
       sp.created_at,
       case when sp.kind = 'advance' then 'salary_advance' else 'salary' end,
@@ -634,6 +726,11 @@ AS $function$
 
     union all
 
+    -- An overhead. `party` carries the category so the ledger reads "Electricity"
+    -- where a purchase would read the vendor's name; the note becomes the
+    -- reference, which is where a bill number or purchase code sits on other
+    -- rows. `initcap` matches the labels in lib/expenses.ts by construction —
+    -- the category keys are deliberately single words so the two cannot drift.
     select
       e.created_at,
       'extra_expense',
@@ -652,6 +749,10 @@ AS $function$
 
     union all
 
+    -- An account OPENED during the period carrying a balance from paper books.
+    -- No money moves, but the debt is real from that moment and it lands in the
+    -- closing balance — so without these two branches the running total falls
+    -- short by exactly the carried amount.
     select
       v.created_at, 'vendor_opening',
       v.name, 'credit'::text, v.opening_credit, v.vendor_code,
@@ -684,6 +785,10 @@ AS $function$
     ((select obu from opening) + sum(m.credit_by_us_delta) over w)::numeric,
     m.source, m.source_label
   from moves m
+  -- `occurred_at` alone is not a total order — two movements can share an
+  -- instant — so the running balance would be non-deterministic without a
+  -- tie-break. Ordering the frame by (time, kind, reference) makes every read
+  -- of the same period produce the same ledger.
   window w as (order by m.occurred_at, m.kind, m.reference
                rows between unbounded preceding and current row)
   order by m.occurred_at desc, m.kind, m.reference;

@@ -10,7 +10,9 @@ Resolved bug where staff could not order menu items and customized/manual items 
 3. **Verification**: Added `lib/mixed-order.test.ts` unit tests; TypeScript compiler clean (0 errors), test suite 98/98 passing.
 
 ## 2026-08-16 — Discount While Clearing Customer Credit
-Added optional discount support when clearing customer credit in `/employee/credits` and `/admin/credits`:
+Added optional discount support when clearing customer credit. The surface is the staff
+dashboard's Credits section (`/employee/credits` is a redirect stub into it) — **there is no
+`/admin/credits` route**; the admin sees the effect on `/admin/finance` only.
 1. **Security & Authorization**: Applying a discount is gated behind the existing **Discount PIN** (`verify_discount_pin` RPC) and `APPLY_DISCOUNTS` permission. Invalid PINs block submission.
 2. **Multi-Tender & Clearance Math**: Supports Cash, Online, Card, and Mixed (Cash + Online) splits for the received money. The total credit cleared equals `amount_received + discount_amount`, reducing customer debt without leaving the discount as unpaid credit.
 3. **Database & Finance Integration**: Applied migration `20260820000000_credit_payment_discount.sql` adding `discount_amount` and `discount_by` to `credit_payments`, updating `record_credit_payment` RPC for FIFO bill clearance, updating `finance_report` for total discounts (till + credit) & `customer_credit_discounted`, and updating `finance_transactions` ledger rows.

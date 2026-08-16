@@ -134,10 +134,12 @@ function CustomerCard({
 
 function CustomerDetailModal({
   customerId,
+  canDiscount,
   onClose,
   onChanged,
 }: {
   customerId: string;
+  canDiscount: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -181,7 +183,10 @@ function CustomerDetailModal({
   const balance = detail?.balance ?? 0;
   const settled = balance <= 0;
   const amountNum = parseFloat(amount) || 0;
-  const discountNum = parseFloat(discount) || 0;
+  // Read as zero without the permission, so a stale value in state can never reach the
+  // maths or the summary card if the field is taken away mid-session. The field itself
+  // isn't rendered, and the server refuses a discount from this user either way.
+  const discountNum = canDiscount ? parseFloat(discount) || 0 : 0;
   const totalCleared = amountNum + discountNum;
 
   const pinValid = discountNum <= 0 || discountPin.trim().length > 0;
@@ -318,7 +323,7 @@ function CustomerDetailModal({
                     Record a payment / clearance
                   </p>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className={`grid gap-3 ${canDiscount ? "grid-cols-2" : "grid-cols-1"}`}>
                     <div className="flex flex-col gap-1.5">
                       <label
                         htmlFor="credit_pay_amount"
@@ -349,6 +354,7 @@ function CustomerDetailModal({
                       </div>
                     </div>
 
+                    {canDiscount && (
                     <div className="flex flex-col gap-1.5">
                       <label
                         htmlFor="credit_pay_discount"
@@ -378,6 +384,7 @@ function CustomerDetailModal({
                         />
                       </div>
                     </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-3">
@@ -629,12 +636,19 @@ export function CreditsView({
   initialCredits,
   initialSummary,
   initialOpenId = null,
+  canDiscount = false,
   embedded = false,
 }: {
   initialCredits: CreditCustomer[];
   initialSummary: CreditStats;
   /** The account to open on arrival — set after a bill is closed on credit. */
   initialOpenId?: string | null;
+  /**
+   * May this user forgive part of a debt at clearance? `apply_discounts`, the same
+   * permission a till discount needs. False hides the field entirely; the server
+   * re-checks it and the Discount PIN regardless.
+   */
+  canDiscount?: boolean;
   embedded?: boolean;
 }) {
   const [customers, setCustomers] = useState(initialCredits);
@@ -774,6 +788,7 @@ export function CreditsView({
       {openId && (
         <CustomerDetailModal
           customerId={openId}
+          canDiscount={canDiscount}
           onClose={() => setOpenId(null)}
           onChanged={refresh}
         />

@@ -424,7 +424,9 @@ export async function addCreditPayment(
   revalidatePath("/employee/credits");
   revalidatePath("/employee/dashboard");
   revalidatePath("/employee/sales");
-  revalidatePath("/admin/credits");
+  // Credits live only on the staff surface — there is no /admin/credits route.
+  // A repayment does move Finance, though: the receivable falls, and a write-off
+  // lands in the Discounts block.
   revalidatePath("/admin/finance");
   return null;
 }

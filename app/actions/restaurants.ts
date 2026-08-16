@@ -64,21 +64,49 @@ export async function getRestaurantWithStaff(
   const service = createServiceClient();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: restaurant } = await (service as any)
+  const { data: restaurant, error } = await (service as any)
     .from("restaurants")
     .select("id, name, slug, type, is_active, subscription_tier, max_tables, max_rooms, logo_url, pan_vat_number, address, contact_phone, contact_email, customer_ordering_enabled, qr_mode, settings, created_at")
     .eq("id", id)
     .maybeSingle();
 
+  // ⚠️ A FAILED LOOKUP IS NOT AN ABSENT RESTAURANT, and conflating the two is why a
+  // 404 here used to be undiagnosable. `error` was discarded, so a dropped
+  // connection, an expired service-role key, a column this select names that the
+  // database doesn't have yet (a migration not applied to THIS environment), or a
+  // PostgREST schema cache that hadn't picked a new column up all produced
+  // `data: null` — identical to "no such row" — and the page rendered `notFound()`.
+  // The operator then sees a plain 404 for a restaurant they are looking straight at
+  // in the dashboard, with nothing in any log to say why.
+  //
+  // Throw instead. A 500 with a message is worth far more than a tidy 404 that lies,
+  // and the caller's `notFound()` now means only what it says.
+  if (error) {
+    throw new Error(
+      `getRestaurantWithStaff(${id}): restaurant lookup failed — ` +
+        `${error.code ?? "?"} ${error.message ?? error}`
+    );
+  }
+
   if (!restaurant) return null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: staff } = await (service as any)
+  const { data: staff, error: staffError } = await (service as any)
     .from("restaurant_users")
     .select("id, display_name, title, role, is_active, auth_user_id, created_at, permissions")
     .eq("restaurant_id", id)
     .order("role")
     .order("display_name");
+
+  // Same reasoning, different blast radius: `?? []` turned a failed staff query into
+  // a restaurant that appears to have NO STAFF. That is worse than an error page —
+  // it invites an admin to "re-add" people who already exist.
+  if (staffError) {
+    throw new Error(
+      `getRestaurantWithStaff(${id}): staff lookup failed — ` +
+        `${staffError.code ?? "?"} ${staffError.message ?? staffError}`
+    );
+  }
 
   return {
     restaurant: restaurant as RestaurantDetail,

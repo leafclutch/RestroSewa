@@ -110,18 +110,29 @@ export type FinanceReport = {
   salesTotal: number;
 
   /**
-   * Money given away at the till, and how many bills carried it.
+   * Money given away, and how many transactions carried it. TWO kinds are summed
+   * here — a discount at the till, and a debt written off when a customer clears
+   * their credit — so `discountsTotal - creditDiscountsTotal` is the till figure.
    *
-   * NOT a balance movement. The net amount IS the sale everywhere in this app —
-   * there is no gross/net split — so a discount never touches cash, bank or
-   * credit and no closing figure moves. It is reported so an owner can see what
-   * was foregone; `salesTotal + discountsTotal` is what the bills would have
-   * come to. That also means it needs no leg in `finance_transactions`, which is
-   * why this is the one figure here with no matching ledger row.
+   * ⚠️ `salesTotal + discountsTotal` is NOT what the bills would have come to, and
+   * used to be: a till discount never entered `salesTotal` (the net amount IS the
+   * sale everywhere in this app), but a credit write-off forgives a bill that was
+   * already booked at FULL value on an earlier day. Adding both back would count
+   * the credit half twice. Nothing should reconstruct a gross sales figure from
+   * this — the Finance screen and the CSV deliberately stopped trying.
+   *
+   * A till discount is not a balance movement and has no ledger row. A credit
+   * write-off IS one: it moves `customerCreditDiscounted` and the receivable, via
+   * the credit leg of the repayment's `finance_transactions` row.
    */
   discountsTotal: number;
   discountedBills: number;
-  /** Discounts given specifically on credit repayment clearance. */
+  /**
+   * The credit-clearance half of `discountsTotal`. Broken out because the staff
+   * Sales screen reports only till discounts (it reads `getSalesReport`, which
+   * sums `payments.discount_amount` alone) — so the two screens will disagree by
+   * exactly this figure, and that is expected, not drift.
+   */
   creditDiscountsTotal: number;
 
   purchasesCash: number;
