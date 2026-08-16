@@ -6,6 +6,16 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
+**Room Advance Payment Methods: Cash, Online, Card, Mixed Cash+Online (2026-08-16) — CODE COMPLETE & VERIFIED.**
+1. **AdvanceFields & PaymentMethodPicker**: Integrated application-wide `PaymentMethodPicker` into `AdvanceFields` (`app/(employee)/employee/_components/advance-fields.tsx`), standardizing Cash, Online, Card, and Mixed (Cash + Online) payment methods across check-in and folio advance forms.
+2. **Split Validation**: Added live complement calculation and validation (`splitIsValid`), disabling form submission if mixed split amounts do not sum to total advance amount.
+3. **Finance & Ledger Consistency**: Verified database RPCs (`record_room_advance`, `check_in_room`) and server actions (`resolveAdvanceSplit`), ensuring Cash advances move Cash balance, Online/Card advances move Bank balance, Mixed advances split per entered amounts, and checkout billing credits previous advances without double counting.
+
+Verified: `tsc` clean (0 errors), `node --test` 90/90 passed.
+
+---
+
+## Previous Feature
 **Cancel a checked-in stay (2026-08-13) — CODE COMPLETE on DEV, not yet exercised in a browser.**
 A stay could only ever end via `check_out_room`. Now it can be CANCELLED: ended without being
 billed, with the deposit settled in the same step.
@@ -55,14 +65,28 @@ is now the single labeller for the screen AND the CSV (they had drifted to "Room
 Measured on the real DEV ledger: **4 of 4** negative rows were mislabelled, all now correct.
 `lib/finance.ts` also switched to a relative `./business-day.ts` import so it is node-testable.
 
+**✅ PRODUCTION MIGRATED 2026-08-14.** All three (`20260817000000`, `20260818000000`,
+`20260818000100`) applied 3/3. Production and DEV are both at 94/94, `pending: 0`.
+Verified: enum now `active, checked_out, cancelled`; **one** `cancel_room_stay` overload whose body
+is **byte-identical to DEV** (`06f7526e…`); all 4 cancellation columns, both new CHECKs and the
+`service_role` grant present; the opening-amount column defaulting to 0. **Nothing moved** —
+8 restaurants × 7 figures identical before/after — and the **ledger reconciles 0.0000** on both
+legs for all 8. Prod had **12 active stays** at the time, untouched, and **0 saving pots**, so the
+opening column affected no existing row.
+
+📘 **The manual procedure is now written down**: `docs/runbooks/migrating-to-production.md` —
+targets and interlocks, `npm run` swallowing flags, what to look for when reading a migration
+(drop-before-create, the enum-in-one-transaction rule), the read-only pre-flight, the money
+snapshot, apply, then the four verification tiers (function hashes → nothing moved → ledger
+reconciles → PostgREST + deploy-window). Point future sessions at it rather than re-deriving.
+
 **Remaining:**
-1. **In-app QA on DEV**: cancel from Admin → Rooms and from a staff folio; confirm a staffer
-   without the permission sees no Cancel control on either; wrong PIN refused and visible as a
-   **failure** in Settings → Security activity; the freed room accepts a new check-in once cleaned.
-2. **Reprint parity**: a cancelled stay's bill in Sales must show the cancellation charge, not the
+1. **Deploy the app** — the DB is ready and waiting for all three features.
+2. **In-app QA**: cancel from Admin → Rooms and from a staff folio; confirm a staffer without the
+   permission sees no Cancel control on either; wrong PIN refused and visible as a **failure** in
+   Settings → Security activity; the freed room accepts a new check-in once cleaned.
+3. **Reprint parity**: a cancelled stay's bill in Sales must show the cancellation charge, not the
    nights it would have cost.
-3. **Production migrations `20260817000000`, `20260818000000`, `20260818000100` are PENDING** —
-   three, in that order. **DB before app.**
 4. Nothing committed — user drives git.
 
 ---

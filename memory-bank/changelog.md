@@ -19,6 +19,12 @@ Versioning is informal (the app ships continuously); dates anchor the entries.
 > moves when the app deploys.
 
 ### Added
+- **Room Advance Payment Methods**: Staff Dashboard → Rooms (Check-in modal and Room Folio advance forms) now features standard payment method selection for advances: Cash, Online, Card, and Mixed (Cash + Online) with auto-complement logic and split validation matching the rest of the system.
+- **Purchase Credit + Partial/Mixed Payment**: Support for partial and mixed (Cash + Online) immediate payments when purchasing products on credit. Correctly tracks immediate cash/online movement and remaining vendor credit debt in Finance and ledger.
+- **Room Assignment Assign All / Unassign All**: Added "Assign all" and "Clear all" (Unassign All) one-tap toggle buttons to Room Types and individual Rooms in Admin Dashboard → Rooms, matching Table Group assignments.
+- **Extra Expenses Category Fuel**: Renamed "Gas" category to "Fuel" across Extra Expenses UI, filters, reports, and database schema constraints, updating historical records seamlessly.
+
+### Added
 - **You can now cancel a checked-in guest.** Under Admin → Rooms there is a **Checked-in guests**
   list with a Cancel button on each stay, and permitted staff get the same control on the guest's
   folio. Cancelling ends the stay without billing it: whatever the guest has run up is written off

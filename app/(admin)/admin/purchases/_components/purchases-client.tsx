@@ -92,7 +92,7 @@ export type PurchaseFormInitial = {
   notes: string;
   lines: Line[];
   paidNow: string;
-  paidTender: "cash" | "online";
+  paidTender: "cash" | "online" | "mixed";
   mixCash: string;
   mixOnline: string;
 };
@@ -115,7 +115,7 @@ function PurchaseForm({
   const [vendorId, setVendorId] = useState(edit?.initial.vendorId ?? "");
   const [method, setMethod] = useState<"cash" | "online" | "credit" | "mixed">(edit?.initial.method ?? "cash");
   const [paidNow, setPaidNow] = useState(edit?.initial.paidNow ?? "");
-  const [paidTender, setPaidTender] = useState<"cash" | "online">(edit?.initial.paidTender ?? "cash");
+  const [paidTender, setPaidTender] = useState<"cash" | "online" | "mixed">(edit?.initial.paidTender ?? "cash");
   const [notes, setNotes] = useState(edit?.initial.notes ?? "");
   const [mixCash, setMixCash] = useState(edit?.initial.mixCash ?? "");
   const [mixOnline, setMixOnline] = useState(edit?.initial.mixOnline ?? "");
@@ -149,10 +149,12 @@ function PurchaseForm({
 
   const paidNowNum = parseFloat(paidNow) || 0;
   const onCredit = method === "credit" ? Math.max(0, total - paidNowNum) : 0;
-  // A mixed purchase must be settled in full: cash + online = the line total the
-  // server will recompute. The server re-checks, so this only stops a doomed submit.
+  // A mixed purchase must be settled in full: cash + online = total.
+  // A credit purchase with mixed paid-now must also split paidNow into cash + online.
   const mixValid = method !== "mixed" || splitIsValid("mixed", total, mixCash, mixOnline);
-  const creditValid = method !== "credit" || (paidNowNum >= 0 && paidNowNum < total);
+  const creditMixValid =
+    method !== "credit" || paidNowNum === 0 || paidTender !== "mixed" || splitIsValid("mixed", paidNowNum, mixCash, mixOnline);
+  const creditValid = method !== "credit" || (paidNowNum >= 0 && paidNowNum < total && creditMixValid);
 
   const canSubmit =
     !pending && !!vendorId && validLines.length > 0 && total > 0 && creditValid && mixValid;
@@ -167,11 +169,11 @@ function PurchaseForm({
     method,
     cash:
       method === "mixed" ? (parseFloat(mixCash) || 0)
-      : method === "credit" ? (paidTender === "cash" ? paidNowNum : 0)
+      : method === "credit" ? (paidTender === "mixed" ? (parseFloat(mixCash) || 0) : paidTender === "cash" ? paidNowNum : 0)
       : 0,
     online:
       method === "mixed" ? (parseFloat(mixOnline) || 0)
-      : method === "credit" ? (paidTender === "online" ? paidNowNum : 0)
+      : method === "credit" ? (paidTender === "mixed" ? (parseFloat(mixOnline) || 0) : paidTender === "online" ? paidNowNum : 0)
       : 0,
     items: validLines.map((l) => ({
       product_id: l.product_id,
@@ -187,8 +189,8 @@ function PurchaseForm({
       <input type="hidden" name="method" value={method} />
       <input type="hidden" name="paid_now" value={method === "credit" ? paidNow : ""} />
       <input type="hidden" name="paid_tender" value={paidTender} />
-      <input type="hidden" name="cash_amount" value={method === "mixed" ? mixCash : ""} />
-      <input type="hidden" name="online_amount" value={method === "mixed" ? mixOnline : ""} />
+      <input type="hidden" name="cash_amount" value={method === "mixed" || (method === "credit" && paidTender === "mixed") ? mixCash : ""} />
+      <input type="hidden" name="online_amount" value={method === "mixed" || (method === "credit" && paidTender === "mixed") ? mixOnline : ""} />
       <input
         type="hidden"
         name="items"
@@ -372,25 +374,41 @@ function PurchaseForm({
           </div>
 
           {paidNowNum > 0 && (
-            <div className="grid grid-cols-2 gap-1">
-              {(["cash", "online"] as const).map((t) => {
-                const active = paidTender === t;
-                return (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setPaidTender(t)}
-                    className="py-1.5 rounded-lg border text-sm transition-colors"
-                    style={{
-                      borderColor: active ? "var(--color-primary)" : "var(--color-hairline-input)",
-                      background: active ? "rgba(99,102,241,0.06)" : "var(--color-canvas-soft)",
-                      color: "var(--color-ink)",
-                    }}
-                  >
-                    Paid by {METHOD_LABEL[t]}
-                  </button>
-                );
-              })}
+            <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-3 gap-1">
+                {(["cash", "online", "mixed"] as const).map((t) => {
+                  const active = paidTender === t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setPaidTender(t)}
+                      className="py-1.5 rounded-lg border text-xs sm:text-sm transition-colors"
+                      style={{
+                        borderColor: active ? "var(--color-primary)" : "var(--color-hairline-input)",
+                        background: active ? "rgba(99,102,241,0.06)" : "var(--color-canvas-soft)",
+                        color: "var(--color-ink)",
+                      }}
+                    >
+                      Paid by {t === "mixed" ? "Mixed" : METHOD_LABEL[t]}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {paidTender === "mixed" && (
+                <PaymentMethodPicker
+                  methods={["mixed"]}
+                  value="mixed"
+                  onChange={() => {}}
+                  total={paidNowNum}
+                  cash={mixCash}
+                  online={mixOnline}
+                  onSplitChange={(n) => { setMixCash(n.cash); setMixOnline(n.online); }}
+                  disabled={pending}
+                  mixedLabel="Cash + Online Paid Now"
+                />
+              )}
             </div>
           )}
         </div>
@@ -533,11 +551,14 @@ function PurchaseDetailView({
               unit_cost: String(i.unit_cost),
             })),
             // For a credit purchase the "paid now" is whatever was tendered up front
-            // (one of cash/online is zero); mixed carries the full cash/online split.
+            // (cash, online, or mixed); mixed carries the full cash/online split.
             paidNow: m === "credit" ? String(detail.cash_amount + detail.online_amount) : "",
-            paidTender: detail.online_amount > 0 && detail.cash_amount === 0 ? "online" : "cash",
-            mixCash: m === "mixed" ? String(detail.cash_amount) : "",
-            mixOnline: m === "mixed" ? String(detail.online_amount) : "",
+            paidTender:
+              detail.online_amount > 0 && detail.cash_amount > 0 ? "mixed"
+              : detail.online_amount > 0 ? "online"
+              : "cash",
+            mixCash: m === "mixed" || (m === "credit" && detail.cash_amount > 0 && detail.online_amount > 0) ? String(detail.cash_amount) : "",
+            mixOnline: m === "mixed" || (m === "credit" && detail.cash_amount > 0 && detail.online_amount > 0) ? String(detail.online_amount) : "",
           },
         }}
       />

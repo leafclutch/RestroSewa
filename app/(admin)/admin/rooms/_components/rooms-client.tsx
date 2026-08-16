@@ -290,44 +290,67 @@ function RoomPill({
       </div>
 
       {/* Waiter assignment — multi-select pills */}
-      {assignOpen && employees.length > 0 && (
-        <div
-          className="border-t px-3 pb-2 flex flex-col gap-1"
-          style={{ borderColor: "var(--color-hairline)" }}
-        >
-          <p className="text-xs pt-1.5" style={{ color: "var(--color-ink-mute)" }}>
-            Assign waiters (tap to toggle)
-          </p>
-          <div className="flex flex-wrap gap-1">
-            {employees.map((e) => {
-              const active = localAssigned.includes(e.id);
-              return (
-                <button
-                  key={e.id}
-                  type="button"
-                  className="text-xs px-2 py-0.5 rounded-full border"
-                  style={{
-                    background: active ? "rgba(99,102,241,0.08)" : "transparent",
-                    borderColor: active ? "var(--color-primary)" : "var(--color-hairline)",
-                    color: active ? "var(--color-primary)" : "var(--color-ink-mute)",
-                  }}
-                  onClick={() =>
-                    startAssign(async () => {
-                      const next = active
-                        ? localAssigned.filter((id) => id !== e.id)
-                        : [...localAssigned, e.id];
-                      setLocalAssigned(next);
-                      await setRoomWaiters(room.id, next);
-                    })
-                  }
-                >
-                  {e.display_name}
-                </button>
-              );
-            })}
+      {assignOpen && employees.length > 0 && (() => {
+        const allIds = employees.map((e) => e.id);
+        const allAssigned = allIds.length > 0 && allIds.every((id) => localAssigned.includes(id));
+        return (
+          <div
+            className="border-t px-3 pb-2 flex flex-col gap-1"
+            style={{ borderColor: "var(--color-hairline)" }}
+          >
+            <p className="text-xs pt-1.5" style={{ color: "var(--color-ink-mute)" }}>
+              Assign waiters (tap to toggle)
+            </p>
+            <div className="flex flex-wrap gap-1">
+              <button
+                type="button"
+                title={allAssigned ? "Remove every staff member from this room" : "Assign every staff member to this room"}
+                className="text-xs px-2 py-0.5 rounded-full border font-medium"
+                style={{
+                  background: "rgba(99,102,241,0.08)",
+                  borderColor: "var(--color-primary)",
+                  color: "var(--color-primary)",
+                }}
+                onClick={() =>
+                  startAssign(async () => {
+                    const next = allAssigned ? [] : allIds;
+                    setLocalAssigned(next);
+                    await setRoomWaiters(room.id, next);
+                  })
+                }
+              >
+                {allAssigned ? "Clear all" : "Assign all"}
+              </button>
+              {employees.map((e) => {
+                const active = localAssigned.includes(e.id);
+                return (
+                  <button
+                    key={e.id}
+                    type="button"
+                    className="text-xs px-2 py-0.5 rounded-full border"
+                    style={{
+                      background: active ? "rgba(99,102,241,0.08)" : "transparent",
+                      borderColor: active ? "var(--color-primary)" : "var(--color-hairline)",
+                      color: active ? "var(--color-primary)" : "var(--color-ink-mute)",
+                    }}
+                    onClick={() =>
+                      startAssign(async () => {
+                        const next = active
+                          ? localAssigned.filter((id) => id !== e.id)
+                          : [...localAssigned, e.id];
+                        setLocalAssigned(next);
+                        await setRoomWaiters(room.id, next);
+                      })
+                    }
+                  >
+                    {e.display_name}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -355,6 +378,9 @@ function RoomTypeWaiterBar({
 
   if (employees.length === 0) return null;
 
+  const allIds = employees.map((e) => e.id);
+  const allAssigned = allIds.length > 0 && allIds.every((id) => localAssigned.includes(id));
+
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
       <button
@@ -367,6 +393,25 @@ function RoomTypeWaiterBar({
       </button>
       {open && (
         <div className="flex flex-wrap gap-1">
+          <button
+            type="button"
+            title={allAssigned ? "Remove every staff member from this room type" : "Assign every staff member to this room type"}
+            className="text-xs px-2 py-0.5 rounded-full border font-medium"
+            style={{
+              background: "rgba(99,102,241,0.08)",
+              borderColor: "var(--color-primary)",
+              color: "var(--color-primary)",
+            }}
+            onClick={() =>
+              startAssign(async () => {
+                const next = allAssigned ? [] : allIds;
+                setLocalAssigned(next);
+                await setRoomTypeWaiters(roomTypeId, next);
+              })
+            }
+          >
+            {allAssigned ? "Clear all" : "Assign all"}
+          </button>
           {employees.map((e) => {
             const active = localAssigned.includes(e.id);
             return (

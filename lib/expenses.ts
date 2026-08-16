@@ -21,7 +21,7 @@ export const SPENDING_CATEGORIES = [
   "rent",
   "electricity",
   "water",
-  "gas",
+  "fuel",
   "internet",
   "maintenance",
   "marketing",
@@ -53,7 +53,7 @@ export const EXPENSE_CATEGORY_LABEL: Record<ExpenseCategory, string> = {
   rent: "Rent",
   electricity: "Electricity",
   water: "Water",
-  gas: "Gas",
+  fuel: "Fuel",
   internet: "Internet",
   maintenance: "Maintenance",
   marketing: "Marketing",
@@ -75,6 +75,7 @@ export function isSpendingCategory(v: string): v is SpendingCategory {
 
 /** A category label from a raw DB value, tolerating anything unexpected. */
 export function expenseCategoryLabel(v: string): string {
+  if (v === "gas") return "Fuel";
   return isExpenseCategory(v)
     ? EXPENSE_CATEGORY_LABEL[v]
     : v.charAt(0).toUpperCase() + v.slice(1);

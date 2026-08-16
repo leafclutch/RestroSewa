@@ -178,6 +178,20 @@ follow-up. This exists so future work doesn't re-propose things already chosen o
   `restaurant_user_table_groups`) had also never been RLS-enabled — the repo could not reproduce
   what production had set by hand. Since **the anon key ships inside the client bundle**, those two
   together meant a public key could read and rewrite staff-to-table assignment. `20260801000001`
+
+- **Purchase Credit + Mixed Payment Architecture (2026-08-16):**
+  When a product is purchased on credit with an immediate down payment (`paidNow > 0`), the down payment may be tendered via Cash, Online, or Mixed (Cash + Online).
+  The server action `recordPurchase` (`app/actions/purchases.ts`) re-derives `p_cash` and `p_online` from `formData` and passes them to `record_purchase` RPC.
+  Database RPCs (`record_purchase`, `edit_purchase`, `finance_report`, `finance_transactions`) already handle multi-tender splits and vendor debt without DB changes.
+  Revalidations expand to `/admin/finance`, `/admin/dashboard`, `/admin/purchases`, `/admin/vendors`, `/employee/purchases`.
+
+- **Room Advance Payment Methods Standardization (2026-08-16):**
+  `AdvanceFields` (`app/(employee)/employee/_components/advance-fields.tsx`) was refactored to reuse the application-wide `PaymentMethodPicker` (`components/ui/payment-method-picker.tsx`).
+  Ensures Cash, Online, Card, and Mixed (Cash + Online) advance payments behave identically across Check-in and Folio advance forms, with `splitIsValid` enforcing cash+online complement totals before submit.
+
+- **Extra Expenses Fuel Category Migration (2026-08-16):**
+  Renamed the `'gas'` spending category to `'fuel'` across Extra Expenses UI, reports, and filters.
+  Migration `20260819000000_rename_gas_to_fuel.sql` updates historical records (`category = 'gas'` -> `'fuel'`) and replaces `extra_expenses_category_check` CHECK constraint. `lib/expenses.ts` includes fallback mapping for backward compatibility.
   enables RLS on the three and revokes anon/authenticated, iterating `pg_default_acl` under
   `pg_has_role` so it also works where the migration runs as `postgres` (which is not a member of
   `supabase_admin`). Safe to revoke because there is **no client-side table access anywhere** —

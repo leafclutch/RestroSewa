@@ -3,6 +3,13 @@
 Chronological log of meaningful shipped features (newest first). Not every commit — only
 features worth remembering. Dates are approximate to the work, not necessarily merge dates.
 
+## 2026-08-16 — Purchase Credit/Mixed Payment, Room Assignment Toggles, Fuel Category, Room Advance Payment Methods
+Four related financial and operational enhancements across the application:
+1. **Purchase Credit + Partial/Mixed Payment**: `recordPurchase` (`app/actions/purchases.ts`) and `PurchaseForm` (`purchases-client.tsx`) now support immediate partial payments tendered via Cash, Online, or Mixed (Cash + Online) when buying on credit. Correctly records immediate cash/online movement and remaining vendor credit debt. Revalidates Finance, Dashboard, Purchases, and Vendors screens.
+2. **Room Assignment Assign All / Unassign All**: Added "Assign all" and "Clear all" toggle buttons to `RoomTypeWaiterBar` and `RoomCard` in `rooms-client.tsx`, matching `TableGroupWaiterBar`. Persists via `setRoomTypeWaiters` and `setRoomWaiters` server actions.
+3. **Extra Expenses Category Fuel**: Applied DB migration `20260819000000_rename_gas_to_fuel.sql` to update historical `'gas'` rows to `'fuel'` and update table CHECK constraint. Updated `lib/expenses.ts` vocabulary (`"fuel"`, `"Fuel"`).
+4. **Room Advance Payment Methods**: Integrated standard `PaymentMethodPicker` into `AdvanceFields` (`app/(employee)/employee/_components/advance-fields.tsx`), providing Cash, Online, Card, and Mixed (Cash + Online) with auto-complementing split inputs and `splitIsValid` validation across check-in and folio advance forms.
+
 ## 2026-08-06/07 — Workstation reporting: Purchases by station + the Deduction Report
 Shipped to production 2026-08-07 (`d59af56`, migration `20260806000000` applied and verified
 against the live schema). Two things the POS could never answer by station.

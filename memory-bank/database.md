@@ -74,8 +74,8 @@ almost everything is reached through the **service_role** client or **RPCs** (RL
 - **credits / credit_payments / credit_customers** — customer **receivables** (money owed TO
   us), accrual: the sale counts at billing; repayments move cash later. Gated on
   process_payments + close_bills.
-- **extra_expenses** — overheads (rent/electricity/water/gas/internet/maintenance/marketing/
-  licenses/transport/other). The shape of `purchases` **minus the credit leg**: CHECK enforces
+- **extra_expenses** — overheads (rent/electricity/water/fuel/internet/maintenance/marketing/
+  licenses/transport/other — updated from 'gas' via `20260819000000_rename_gas_to_fuel.sql`). The shape of `purchases` **minus the credit leg**: CHECK enforces
   `cash_amount + online_amount = amount` and `amount > 0`; `payment_method` in (cash|online|mixed)
   — `credit` is excluded because "we didn't pay" is the absence of an expense, not a kind of one.
   **No status column and no RPCs**: the row IS the payment, written by a plain insert through
