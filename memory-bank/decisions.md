@@ -3,6 +3,12 @@
 Append-only log of architectural decisions and **why**. Never delete an entry — refine or add a
 follow-up. This exists so future work doesn't re-propose things already chosen or rejected.
 
+- **Customer credit repayment discounts gate behind Discount PIN and clear debt via FIFO.**
+  *Reason:* Settling customer credit with a discount write-off (e.g. ₹310 debt cleared with ₹300 cash and ₹10 discount) reduces customer debt without generating fake cash flow or leaving unpaid credit balances. Requiring the restaurant's Discount PIN via `verify_discount_pin` RPC ensures staff cannot forgive customer debt without authorization. The total cleared amount (`amount + discount`) settles open bills FIFO and reduces `credit_customers.balance`, while `credit_payments` records `amount`, `discount_amount`, tender split, receiver staff, and PIN authorizer staff.
+
+- **Finance discounts block is net-focused and omits gross before/after discount calculations.**
+  *Reason:* Everywhere in RestroSewa, the NET amount IS the sale (no gross/net split). Rendering "Sales before discount" and "Sales after discount" caused confusion and risked double-deduction misunderstandings. The Discounts section on `/admin/finance`, CSV exports, and daily PDF reports present a clean, net-focused breakdown: "Transactions discounted", "Till / sales discounts", "Credit clearance discounts", and "Discount given (Total)".
+
 - **Derived stock, not cached.** No `current_stock` column; `stock_report` computes it from
   source rows. *Reason:* a cache drifts from the POS; a derived figure can't. Corollary: no
   nightly rollover job (today's opening = yesterday's closing by construction).

@@ -3,6 +3,13 @@
 Chronological log of meaningful shipped features (newest first). Not every commit — only
 features worth remembering. Dates are approximate to the work, not necessarily merge dates.
 
+## 2026-08-16 — Discount While Clearing Customer Credit
+Added optional discount support when clearing customer credit in `/employee/credits` and `/admin/credits`:
+1. **Security & Authorization**: Applying a discount is gated behind the existing **Discount PIN** (`verify_discount_pin` RPC) and `APPLY_DISCOUNTS` permission. Invalid PINs block submission.
+2. **Multi-Tender & Clearance Math**: Supports Cash, Online, Card, and Mixed (Cash + Online) splits for the received money. The total credit cleared equals `amount_received + discount_amount`, reducing customer debt without leaving the discount as unpaid credit.
+3. **Database & Finance Integration**: Applied migration `20260820000000_credit_payment_discount.sql` adding `discount_amount` and `discount_by` to `credit_payments`, updating `record_credit_payment` RPC for FIFO bill clearance, updating `finance_report` for total discounts (till + credit) & `customer_credit_discounted`, and updating `finance_transactions` ledger rows.
+4. **Finance UI & PDF Polish**: Removed redundant "Sales before discount" and "Sales after discount" rows from `/admin/finance`, CSV export, and email PDF reports. `/admin/finance` displays "Discount written off" under Customer credits and cleanly breaks down "Till / sales discounts" vs "Credit clearance discounts" under Discounts. `getCustomerDetail` and `CustomerDetailModal` display payment history including received tender, discount badge, cleared credit total, and PIN authorizer name.
+
 ## 2026-08-16 — Purchase Credit/Mixed Payment, Room Assignment Toggles, Fuel Category, Room Advance Payment Methods
 Four related financial and operational enhancements across the application:
 1. **Purchase Credit + Partial/Mixed Payment**: `recordPurchase` (`app/actions/purchases.ts`) and `PurchaseForm` (`purchases-client.tsx`) now support immediate partial payments tendered via Cash, Online, or Mixed (Cash + Online) when buying on credit. Correctly records immediate cash/online movement and remaining vendor credit debt. Revalidates Finance, Dashboard, Purchases, and Vendors screens.

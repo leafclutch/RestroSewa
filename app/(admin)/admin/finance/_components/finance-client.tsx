@@ -997,9 +997,14 @@ export function FinanceClient({
             note="Owed to us"
             rows={[
               {
-                label: `Collected · ${periodLabel}`,
+                label: `Collected (Cash/Online) · ${periodLabel}`,
                 value: report.customerCreditCollected,
                 tone: report.customerCreditCollected > 0 ? "#1a7a4a" : undefined,
+              },
+              {
+                label: `Discount written off · ${periodLabel}`,
+                value: report.customerCreditDiscounted,
+                tone: report.customerCreditDiscounted > 0 ? "#6366f1" : undefined,
               },
               {
                 label: `New credits · ${periodLabel}`,
@@ -1096,23 +1101,26 @@ export function FinanceClient({
             no ledger row and no effect on Closing. */}
         <Section
           title={`Discounts · ${periodLabel}`}
-          note="Given away at the till — already deducted from every sales figure above"
+          note="Given away at the till or on credit clearance"
           rows={[
             {
-              label: "Bills discounted",
+              label: "Transactions discounted",
               value: report.discountedBills,
               display:
-                report.discountedBills === 1 ? "1 bill" : `${report.discountedBills} bills`,
+                report.discountedBills === 1 ? "1 transaction" : `${report.discountedBills} transactions`,
             },
             {
-              label: "Sales before discount",
-              hint: "What those bills would have come to",
-              value: report.salesTotal + report.discountsTotal,
+              label: "Till / sales discounts",
+              value: report.discountsTotal - report.creditDiscountsTotal,
             },
-            { label: "Sales after discount", value: report.salesTotal },
+            {
+              label: "Credit clearance discounts",
+              value: report.creditDiscountsTotal,
+              tone: report.creditDiscountsTotal > 0 ? "#6366f1" : undefined,
+            },
           ]}
           total={{
-            label: "Discount given",
+            label: "Discount given (Total)",
             value: report.discountsTotal,
             tone: report.discountsTotal > 0 ? "#f97316" : undefined,
           }}

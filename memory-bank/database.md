@@ -72,7 +72,10 @@ almost everything is reached through the **service_role** client or **RPCs** (RL
   which is what keeps `finance_report`'s customer-credit leg (`bill_amount − down_payment`) correct
   with no change.
 - **credits / credit_payments / credit_customers** — customer **receivables** (money owed TO
-  us), accrual: the sale counts at billing; repayments move cash later. Gated on
+  us), accrual: the sale counts at billing; repayments move cash later. `credit_payments` supports
+  `discount_amount` and `discount_by` (migration `20260820000000_credit_payment_discount.sql`),
+  populated via `record_credit_payment` RPC with Discount PIN verification (`verify_discount_pin`).
+  Settles open bills FIFO and reduces `credit_customers.balance` by `amount + discount_amount`. Gated on
   process_payments + close_bills.
 - **extra_expenses** — overheads (rent/electricity/water/fuel/internet/maintenance/marketing/
   licenses/transport/other — updated from 'gas' via `20260819000000_rename_gas_to_fuel.sql`). The shape of `purchases` **minus the credit leg**: CHECK enforces

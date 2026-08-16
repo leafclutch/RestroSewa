@@ -103,15 +103,14 @@ module covers the on-screen Finance report and the emailed daily report.
   ⚠️ Since saving cuts profit, withdrawing RAISES it — a month that empties a pot reads strong.
   That is the mirror of treating saving as an expense and cancels over any period holding both;
   the thing to revisit is whether saving should hit profit at all, not how withdrawals work.
-- **Discounts are REPORTED, never accounted.** `discounts_total` + `discounted_bills` on
-  `finance_report`, shown in their own block placed immediately BEFORE Closing balance, plus the
-  CSV. The net amount IS the sale everywhere (no gross/net split), so a discount touches no
-  balance, has **no ledger row**, and cannot change Closing — it is the one figure on the sheet
-  with no counterpart in `finance_transactions`, and that is correct, not an omission. Kept OUT of
-  the Sales block on purpose: every sales figure is already net, so a Sales row would invite
-  subtracting it twice. "Sales before discount" is `salesTotal + discountsTotal`, derived on the
-  client. `buildDailySummary` now reads the figure from `finance_report` instead of summing
-  `payments.discount_amount` itself, so screen, CSV and PDF state one number from one place.
+- **Discounts are REPORTED, combining Till & Credit clearance discounts.** `discounts_total` + `discounted_bills` on
+  `finance_report` include both till discounts (`payments`) and credit clearance discounts (`credit_payments`).
+  Shown in their own block placed immediately BEFORE Closing balance, plus CSV and daily PDF. The net amount IS
+  the sale everywhere (no gross/net split). Discounts given on credit clearance are tracked separately as
+  `creditDiscountsTotal` and shown in the Customer credits block as `customerCreditDiscounted` (debt written off).
+  Redundant "Sales before discount" and "Sales after discount" rows were removed across UI, CSV, and PDF reports.
+  The Discounts block presents: "Transactions discounted", "Till / sales discounts", "Credit clearance discounts",
+  and "Discount given (Total)". `buildDailySummary` reads the unified figure from `finance_report`.
 - **Estimated profit** = sales − purchases − salaries − extra expenses; it's optimistic
   (bought-stock cost, not consumed; unlinked dishes have no cost) and must always be labelled an
   estimate. The dashboard's "Today's profit" tile is deliberately NOT this formula — it is

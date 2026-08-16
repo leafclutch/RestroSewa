@@ -123,6 +123,9 @@ export async function renderDailySummaryPdf(
 
   pdf.sectionTitle("Credit");
   pdf.row("Customer credit collected", money(m.customerCreditCollected));
+  if (m.customerCreditDiscounted > 0) {
+    pdf.row("Customer credit discounted", money(m.customerCreditDiscounted));
+  }
   pdf.row("New customer credit", money(m.customerCreditCreated));
   pdf.row("Customer credit outstanding", money(m.customerCreditOutstanding));
   pdf.row("Vendor credit outstanding", money(m.vendorCreditOutstanding));

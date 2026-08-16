@@ -6,12 +6,12 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
-**Room Advance Payment Methods: Cash, Online, Card, Mixed Cash+Online (2026-08-16) — CODE COMPLETE & VERIFIED.**
-1. **AdvanceFields & PaymentMethodPicker**: Integrated application-wide `PaymentMethodPicker` into `AdvanceFields` (`app/(employee)/employee/_components/advance-fields.tsx`), standardizing Cash, Online, Card, and Mixed (Cash + Online) payment methods across check-in and folio advance forms.
-2. **Split Validation**: Added live complement calculation and validation (`splitIsValid`), disabling form submission if mixed split amounts do not sum to total advance amount.
-3. **Finance & Ledger Consistency**: Verified database RPCs (`record_room_advance`, `check_in_room`) and server actions (`resolveAdvanceSplit`), ensuring Cash advances move Cash balance, Online/Card advances move Bank balance, Mixed advances split per entered amounts, and checkout billing credits previous advances without double counting.
-
-Verified: `tsc` clean (0 errors), `node --test` 90/90 passed.
+**Discount While Clearing Customer Credit & Finance Polish (2026-08-16) — CODE COMPLETE & VERIFIED.**
+1. **Security & Discount PIN**: Gated credit repayment discount application behind `APPLY_DISCOUNTS` permission and the restaurant's **Discount PIN** (`verify_discount_pin` RPC).
+2. **Multi-Tender & Balance Math**: Supports Cash, Online, Card, and Mixed (Cash + Online) splits for the received money. Total credit debt cleared equals `amount_received + discount_amount`, reducing customer balance to 0 without leaving unpaid credit balances.
+3. **Database Migration & Finance Integration**: Applied `20260820000000_credit_payment_discount.sql` to DEV DB. Updated `finance_report` to combine till discounts and credit clearance discounts into `discounts_total`, and return `customer_credit_discounted` and `credit_discounts_total`. Updated `finance_transactions` to format ledger credit repayment labels and credit debt deltas.
+4. **Finance UI & PDF Report Polish**: Removed redundant "Sales before discount" and "Sales after discount" rows from `/admin/finance`, CSV exports, and daily summary PDF reports. Added "Discount written off" row to Customer credits section and broke down "Till / sales discounts" vs "Credit clearance discounts" in Discounts section on `/admin/finance` and PDF reports.
+5. **Verification**: `tsc` clean (0 errors), `node --test` 95/95 passing (including `lib/credit-discount.test.ts`).
 
 ---
 

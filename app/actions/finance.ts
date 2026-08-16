@@ -51,6 +51,7 @@ const EMPTY = (period: FinancePeriod, from: string, to: string): FinanceReport =
   salesTotal: 0,
   discountsTotal: 0,
   discountedBills: 0,
+  creditDiscountsTotal: 0,
   purchasesCash: 0,
   purchasesOnline: 0,
   purchasesCredit: 0,
@@ -61,6 +62,7 @@ const EMPTY = (period: FinancePeriod, from: string, to: string): FinanceReport =
   extraExpensesByCategory: [],
   customerCreditCreated: 0,
   customerCreditCollected: 0,
+  customerCreditDiscounted: 0,
   vendorCreditCreated: 0,
   vendorCreditPaid: 0,
   customerCreditOutstanding: 0,
@@ -155,6 +157,7 @@ export async function getFinanceReport(params?: {
 
     discountsTotal: num(row.discounts_total),
     discountedBills: Number(row.discounted_bills ?? 0),
+    creditDiscountsTotal: num(row.credit_discounts_total),
 
     purchasesCash: num(row.purchases_cash),
     purchasesOnline: num(row.purchases_online),
@@ -177,6 +180,7 @@ export async function getFinanceReport(params?: {
 
     customerCreditCreated: num(row.customer_credit_created),
     customerCreditCollected: num(row.customer_credit_collected),
+    customerCreditDiscounted: num(row.customer_credit_discounted),
     vendorCreditCreated: num(row.vendor_credit_created),
     vendorCreditPaid: num(row.vendor_credit_paid),
     customerCreditOutstanding: num(row.customer_credit_outstanding),
@@ -465,9 +469,10 @@ export async function exportFinanceCsv(params?: {
     // Reported, not accounted: the net IS the sale, so no balance moves. Gross is
     // stated so the two figures explain each other.
     ["DISCOUNTS"],
-    ["Bills Discounted", report.discountedBills],
-    ["Sales Before Discount", fmt(report.salesTotal + report.discountsTotal)],
-    ["Discount Given", fmt(report.discountsTotal)],
+    ["Transactions Discounted", report.discountedBills],
+    ["Till / Sales Discounts", fmt(report.discountsTotal - report.creditDiscountsTotal)],
+    ["Credit Clearance Discounts", fmt(report.creditDiscountsTotal)],
+    ["Total Discounts Given", fmt(report.discountsTotal)],
     [],
     // Deliberately its OWN block, not a Sales line: a deposit is money in with no
     // sale behind it yet. Adding it to Sales would double-count at checkout.

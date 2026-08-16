@@ -121,6 +121,8 @@ export type FinanceReport = {
    */
   discountsTotal: number;
   discountedBills: number;
+  /** Discounts given specifically on credit repayment clearance. */
+  creditDiscountsTotal: number;
 
   purchasesCash: number;
   purchasesOnline: number;
@@ -147,6 +149,8 @@ export type FinanceReport = {
 
   customerCreditCreated: number;
   customerCreditCollected: number;
+  /** Debt forgiven / written off as discount when clearing customer credit. */
+  customerCreditDiscounted: number;
   vendorCreditCreated: number;
   vendorCreditPaid: number;
   customerCreditOutstanding: number;
