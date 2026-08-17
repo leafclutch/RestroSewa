@@ -10,7 +10,13 @@ import { notifyStaff } from "@/lib/push/send";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ServiceClient = any;
 
-type ItemRow = { item_name: string; quantity: number; item_price: number | string | null };
+type ItemRow = {
+  item_name: string;
+  quantity: number;
+  /** Net of cancellations; what a summary should show. Absent on older shapes. */
+  active_quantity?: number | null;
+  item_price: number | string | null;
+};
 
 // Raises a "table activation request" for no-PIN ordering. The customer has
 // placed a first order against a `pending_activation` session (invisible to the
@@ -50,13 +56,15 @@ export async function emitTableActivationRequest(
   // screen rather than requiring a walk to the till to find out what's at stake.
   const { data: items } = await service
     .from("session_order_items")
-    .select("item_name, quantity, item_price")
+    // active_quantity: a new order has none cancelled, but reading it keeps every
+    // summary in the app agreeing on what "how many" means.
+    .select("item_name, quantity, active_quantity, item_price")
     .eq("order_id", params.orderId)
     .is("cancelled_at", null);
 
   const summary = ((items ?? []) as ItemRow[]).map((it) => ({
     name: it.item_name,
-    quantity: it.quantity,
+    quantity: Number(it.active_quantity ?? it.quantity),
     price: Number(it.item_price ?? 0),
   }));
 
@@ -120,11 +128,17 @@ export type StationWork = Map<string, { name: string; items: OrderItemRow[] }>;
 export async function captureStations(
   service: ServiceClient,
   orderId: string,
-  itemIds?: string[]
+  itemIds?: string[],
+  /**
+   * How many units of each item are being cancelled, when it isn't the whole line.
+   * Without this the station is told "stop Chicken Momo" for a line where two of the
+   * three are still wanted — which is worse than saying nothing.
+   */
+  cancelledQty?: Map<string, number>
 ): Promise<StationWork> {
   let q = service
     .from("session_order_items")
-    .select("id, workstation_id, workstation_name, item_name, quantity, item_price")
+    .select("id, workstation_id, workstation_name, item_name, quantity, active_quantity, item_price")
     .eq("order_id", orderId)
     .is("cancelled_at", null);
 
@@ -134,7 +148,13 @@ export async function captureStations(
 
   const byStation: StationWork = new Map();
 
-  for (const it of ((data ?? []) as OrderItemRow[])) {
+  for (const raw of ((data ?? []) as (OrderItemRow & { id: string; active_quantity?: number })[])) {
+    // What the station is being told to stop: the units coming off, if the caller
+    // said, otherwise everything still live on the line.
+    const it: OrderItemRow = {
+      ...raw,
+      quantity: cancelledQty?.get(raw.id) ?? Number(raw.active_quantity ?? raw.quantity),
+    };
     // An item with no station has nobody to route to — a menu item the admin never
     // assigned to one. It still reaches the Orders queue; it just cannot ring a
     // phone, because there is no phone to ring.
@@ -314,13 +334,15 @@ async function emitGeneralNewOrder(service: ServiceClient, ctx: OrderContext): P
 
   const { data: items } = await service
     .from("session_order_items")
-    .select("item_name, quantity, item_price")
+    // active_quantity: a new order has none cancelled, but reading it keeps every
+    // summary in the app agreeing on what "how many" means.
+    .select("item_name, quantity, active_quantity, item_price")
     .eq("order_id", ctx.orderId)
     .is("cancelled_at", null);
 
   const summary = ((items ?? []) as ItemRow[]).map((it) => ({
     name: it.item_name,
-    quantity: it.quantity,
+    quantity: Number(it.active_quantity ?? it.quantity),
     price: Number(it.item_price ?? 0),
   }));
 

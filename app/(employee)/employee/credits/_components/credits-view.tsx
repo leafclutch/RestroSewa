@@ -134,16 +134,20 @@ function CustomerCard({
 
 function CustomerDetailModal({
   customerId,
+  canDiscount,
   onClose,
   onChanged,
 }: {
   customerId: string;
+  canDiscount: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
   const [detail, setDetail] = useState<CreditCustomerDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
+  const [discount, setDiscount] = useState("");
+  const [discountPin, setDiscountPin] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [split, setSplit] = useState({ cash: "", online: "" });
   const [state, action, pending] = useActionState<ActionResult, FormData>(addCreditPayment, null);
@@ -168,6 +172,8 @@ function CustomerDetailModal({
   useEffect(() => {
     if (wasPending.current && !pending && !state?.error) {
       setAmount("");
+      setDiscount("");
+      setDiscountPin("");
       load();
       onChanged();
     }
@@ -177,9 +183,20 @@ function CustomerDetailModal({
   const balance = detail?.balance ?? 0;
   const settled = balance <= 0;
   const amountNum = parseFloat(amount) || 0;
-  // A mixed payment only becomes submittable once its two halves reconcile.
+  // Read as zero without the permission, so a stale value in state can never reach the
+  // maths or the summary card if the field is taken away mid-session. The field itself
+  // isn't rendered, and the server refuses a discount from this user either way.
+  const discountNum = canDiscount ? parseFloat(discount) || 0 : 0;
+  const totalCleared = amountNum + discountNum;
+
+  const pinValid = discountNum <= 0 || discountPin.trim().length > 0;
   const amountValid =
-    amountNum > 0 && amountNum <= balance + 0.005 && splitIsValid(method, amountNum, split.cash, split.online);
+    totalCleared > 0 &&
+    amountNum >= 0 &&
+    discountNum >= 0 &&
+    totalCleared <= balance + 0.005 &&
+    splitIsValid(method, amountNum, split.cash, split.online) &&
+    pinValid;
 
   if (!mounted) return null;
 
@@ -303,47 +320,137 @@ function CustomerDetailModal({
                   <input type="hidden" name="method" value={method} />
 
                   <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
-                    Record a payment
+                    Record a payment / clearance
                   </p>
 
-                  <div className="flex flex-col gap-1.5">
-                    <label
-                      htmlFor="credit_pay_amount"
-                      className="text-xs uppercase tracking-wide"
-                      style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
-                    >
-                      Amount received (₹)
-                    </label>
-                    <div className="relative">
-                      <span
-                        className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
-                        style={{ color: "var(--color-ink-mute)" }}
+                  <div className={`grid gap-3 ${canDiscount ? "grid-cols-2" : "grid-cols-1"}`}>
+                    <div className="flex flex-col gap-1.5">
+                      <label
+                        htmlFor="credit_pay_amount"
+                        className="text-xs uppercase tracking-wide"
+                        style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
                       >
-                        ₹
-                      </span>
-                      <Input
-                        id="credit_pay_amount"
-                        name="amount"
-                        type="number"
-                        min="0.01"
-                        max={detail.balance}
-                        step="0.01"
-                        required
-                        placeholder="0.00"
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        className="pl-7"
-                      />
+                        Amount received (₹)
+                      </label>
+                      <div className="relative">
+                        <span
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
+                          style={{ color: "var(--color-ink-mute)" }}
+                        >
+                          ₹
+                        </span>
+                        <Input
+                          id="credit_pay_amount"
+                          name="amount"
+                          type="number"
+                          min="0"
+                          max={detail.balance}
+                          step="0.01"
+                          placeholder="0.00"
+                          value={amount}
+                          onChange={(e) => setAmount(e.target.value)}
+                          className="pl-7"
+                        />
+                      </div>
                     </div>
+
+                    {canDiscount && (
+                    <div className="flex flex-col gap-1.5">
+                      <label
+                        htmlFor="credit_pay_discount"
+                        className="text-xs uppercase tracking-wide"
+                        style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+                      >
+                        Discount (₹)
+                      </label>
+                      <div className="relative">
+                        <span
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
+                          style={{ color: "var(--color-ink-mute)" }}
+                        >
+                          ₹
+                        </span>
+                        <Input
+                          id="credit_pay_discount"
+                          name="discount"
+                          type="number"
+                          min="0"
+                          max={detail.balance}
+                          step="0.01"
+                          placeholder="0.00"
+                          value={discount}
+                          onChange={(e) => setDiscount(e.target.value)}
+                          className="pl-7"
+                        />
+                      </div>
+                    </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3">
                     <button
                       type="button"
-                      onClick={() => setAmount(detail.balance.toFixed(2))}
-                      className="self-start text-xs underline"
+                      onClick={() => {
+                        setAmount(detail.balance.toFixed(2));
+                        setDiscount("");
+                      }}
+                      className="text-xs underline"
                       style={{ color: "var(--color-primary)" }}
                     >
                       Settle in full ({money2(detail.balance)})
                     </button>
                   </div>
+
+                  {discountNum > 0 && (
+                    <div className="flex flex-col gap-1.5 pt-1 border-t" style={{ borderColor: "var(--color-hairline)" }}>
+                      <label
+                        htmlFor="credit_pay_discount_pin"
+                        className="text-xs uppercase tracking-wide font-medium"
+                        style={{ color: "var(--color-primary)", letterSpacing: "0.06em" }}
+                      >
+                        Discount PIN (Required for discount)
+                      </label>
+                      <Input
+                        id="credit_pay_discount_pin"
+                        name="discount_pin"
+                        type="password"
+                        inputMode="numeric"
+                        placeholder="Enter Discount PIN"
+                        value={discountPin}
+                        onChange={(e) => setDiscountPin(e.target.value)}
+                      />
+                    </div>
+                  )}
+
+                  {/* Summary card before submitting */}
+                  {totalCleared > 0 && (
+                    <div
+                      className="rounded-lg border px-3 py-2.5 flex flex-col gap-1 text-xs"
+                      style={{
+                        background: "var(--color-canvas)",
+                        borderColor: totalCleared > balance + 0.005 ? "var(--color-ruby)" : "var(--color-hairline)",
+                      }}
+                    >
+                      <div className="flex justify-between">
+                        <span style={{ color: "var(--color-ink-mute)" }}>Amount received:</span>
+                        <span className="font-medium" style={{ color: "var(--color-ink)" }}>{money2(amountNum)}</span>
+                      </div>
+                      {discountNum > 0 && (
+                        <div className="flex justify-between">
+                          <span style={{ color: "var(--color-ink-mute)" }}>Discount given:</span>
+                          <span className="font-medium" style={{ color: "var(--color-primary)" }}>− {money2(discountNum)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between border-t pt-1 font-medium" style={{ borderColor: "var(--color-hairline)" }}>
+                        <span style={{ color: "var(--color-ink)" }}>Total credit cleared:</span>
+                        <span style={{ color: "var(--color-success)" }}>{money2(totalCleared)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span style={{ color: "var(--color-ink-mute)" }}>Remaining credit balance:</span>
+                        <span>{money2(Math.max(0, balance - totalCleared))}</span>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex flex-col gap-1.5">
                     <p
@@ -370,11 +477,15 @@ function CustomerDetailModal({
 
                   <Input name="notes" type="text" placeholder="Note (optional)" autoComplete="off" />
 
-                  {amount !== "" && !amountValid && (
+                  {totalCleared > balance + 0.005 && (
                     <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
-                      {amountNum > balance
-                        ? `That's more than the ${money2(balance)} they owe.`
-                        : "Enter an amount greater than zero."}
+                      That clears more than the {money2(balance)} they owe.
+                    </p>
+                  )}
+
+                  {discountNum > 0 && !discountPin.trim() && (
+                    <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
+                      Enter the Discount PIN to apply a discount.
                     </p>
                   )}
 
@@ -388,7 +499,7 @@ function CustomerDetailModal({
                   )}
 
                   <Button type="submit" variant="primary" disabled={pending || !amountValid}>
-                    {pending ? "Recording…" : `Record ${amountNum > 0 ? money2(amountNum) : "payment"}`}
+                    {pending ? "Recording…" : `Clear ${totalCleared > 0 ? money2(totalCleared) : "credit"}`}
                   </Button>
                 </form>
               )}
@@ -473,6 +584,11 @@ function CustomerDetailModal({
                         <div className="flex-1 min-w-0">
                           <p className="text-sm" style={{ color: "var(--color-ink)" }}>
                             {METHOD_LABEL[p.method] ?? p.method}
+                            {p.discount_amount > 0 && (
+                              <span className="ml-2 text-xs px-1.5 py-0.5 rounded font-normal" style={{ background: "rgba(99,102,241,0.1)", color: "var(--color-primary)" }}>
+                                Discount {money2(p.discount_amount)}
+                              </span>
+                            )}
                           </p>
                           <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
                             {new Date(p.created_at).toLocaleString("en-IN", {
@@ -480,6 +596,7 @@ function CustomerDetailModal({
                               timeStyle: "short",
                             })}
                             {p.staff_name ? ` · ${p.staff_name}` : ""}
+                            {p.discount_amount > 0 && p.discount_by_name ? ` · PIN by ${p.discount_by_name}` : ""}
                           </p>
                           {p.notes && (
                             <p className="text-xs italic mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
@@ -487,9 +604,16 @@ function CustomerDetailModal({
                             </p>
                           )}
                         </div>
-                        <p className="text-sm font-medium tabular-nums shrink-0" style={{ color: "var(--color-success)" }}>
-                          {money2(p.amount)}
-                        </p>
+                        <div className="text-right shrink-0">
+                          <p className="text-sm font-medium tabular-nums" style={{ color: "var(--color-success)" }}>
+                            {money2(p.amount)}
+                          </p>
+                          {p.discount_amount > 0 && (
+                            <p className="text-[10px] tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
+                              Cleared {money2(p.amount + p.discount_amount)}
+                            </p>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -512,12 +636,19 @@ export function CreditsView({
   initialCredits,
   initialSummary,
   initialOpenId = null,
+  canDiscount = false,
   embedded = false,
 }: {
   initialCredits: CreditCustomer[];
   initialSummary: CreditStats;
   /** The account to open on arrival — set after a bill is closed on credit. */
   initialOpenId?: string | null;
+  /**
+   * May this user forgive part of a debt at clearance? `apply_discounts`, the same
+   * permission a till discount needs. False hides the field entirely; the server
+   * re-checks it and the Discount PIN regardless.
+   */
+  canDiscount?: boolean;
   embedded?: boolean;
 }) {
   const [customers, setCustomers] = useState(initialCredits);
@@ -657,6 +788,7 @@ export function CreditsView({
       {openId && (
         <CustomerDetailModal
           customerId={openId}
+          canDiscount={canDiscount}
           onClose={() => setOpenId(null)}
           onChanged={refresh}
         />

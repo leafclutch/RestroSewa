@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { SessionDetail, OrderItemRow, OrderTicketRow } from "@/app/actions/pos";
-import { generateOrderTicket } from "@/app/actions/pos";
-import { Printer, Receipt, RotateCcw } from "lucide-react";
+import type { SessionDetail, OrderItemRow, OrderTicketRow, VoidTicketLine } from "@/app/actions/pos";
+import { generateOrderTicket, generateVoidTicket, getPendingVoids } from "@/app/actions/pos";
+import { Printer, Receipt, RotateCcw, Ban } from "lucide-react";
 import {
   PrintModal,
   BillTicket,
@@ -91,6 +91,23 @@ function resolveOrderNumber(
  * This is the ONLY place items are routed to a ticket, so no two dockets can disagree
  * about where an item belongs.
  */
+/**
+ * ⚠️ TWO MEANINGS OF `quantity` ON A TICKET, AND THEY MUST NOT BE MIXED.
+ *
+ * A ticket about to be PRINTED must say what the kitchen has to make right now —
+ * `active_quantity`, net of anything cancelled before it went out. A REPRINT of an
+ * already-issued ticket must say what that paper said when it was handed over, which
+ * is the ordered `quantity`, even if the food was cancelled afterwards.
+ *
+ * So the about-to-print path normalises here, once, when the docket is built; the
+ * reprint path passes its items through untouched. Do not branch on this inside the
+ * renderer — that is how the two meanings get swapped by a later edit.
+ */
+const toActive = (it: OrderItemRow): OrderItemRow => ({
+  ...it,
+  quantity: Number(it.active_quantity ?? it.quantity),
+});
+
 function splitDockets(items: OrderItemRow[], workstations: PrintStation[]): Docket[] {
   const byId = new Map<string, PrintStation>();
   const byName = new Map<string, PrintStation>();
@@ -217,6 +234,77 @@ function StationTicket({
   );
 }
 
+/**
+ * The cancellation ticket.
+ *
+ * Deliberately NOT a corrected copy of the original. An item belongs to one ticket
+ * for life — that is what makes reprints stable — so this names only the units that
+ * came off, and the station reconciles it against the docket already on its rail.
+ * The wording is imperative ("CANCEL 1 ×") because a cook glancing at a rail needs
+ * to be told what to do, not shown a diff.
+ */
+function VoidTicket({
+  session,
+  restaurant,
+  staffName,
+  at,
+  name,
+  lines,
+  number,
+}: {
+  session: SessionDetail;
+  restaurant: RestaurantInfo;
+  staffName: string;
+  at: Date;
+  name: string;
+  lines: VoidTicketLine[];
+  number: { label: string; value: string };
+}) {
+  return (
+    <>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontWeight: 700, fontSize: 15 }}>{restaurant.name}</div>
+        <div style={{ fontWeight: 700, letterSpacing: 1, marginTop: 2, fontSize: 15 }}>
+          *** CANCELLATION ***
+        </div>
+        <div style={{ fontWeight: 700, letterSpacing: 1, marginTop: 2 }}>
+          {name.toUpperCase()}
+        </div>
+      </div>
+      <Divider />
+      <div style={{ textAlign: "center", fontWeight: 700, fontSize: 20, margin: "2px 0 6px" }}>
+        {locationLabel(session)}
+      </div>
+      <Line label={number.label} value={number.value} />
+      <Line label="Date" value={at.toLocaleDateString("en-IN", { dateStyle: "medium" })} />
+      <Line label="Time" value={at.toLocaleTimeString("en-IN", { timeStyle: "short" })} />
+      {staffName && <Line label="Staff" value={staffName} />}
+      <Divider />
+
+      {lines.map((l) => (
+        <div key={l.cancellation_id} style={{ marginTop: 4 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <span style={{ fontWeight: 700, minWidth: 62, fontSize: 15 }}>CANCEL</span>
+            <span style={{ fontWeight: 700, minWidth: 28, fontSize: 15 }}>{l.qty}×</span>
+            <span style={{ flex: 1, overflowWrap: "anywhere" }}>
+              {l.item_name}
+              {l.is_custom && <span style={{ fontSize: 11, fontWeight: 700 }}> (custom)</span>}
+            </span>
+          </div>
+        </div>
+      ))}
+
+      <Divider />
+      <div style={{ textAlign: "center", fontSize: 11 }}>
+        Units cancelled: {lines.reduce((s, l) => s + l.qty, 0)}
+      </div>
+      <div style={{ textAlign: "center", fontSize: 11, marginTop: 2 }}>
+        Anything not listed here is still wanted.
+      </div>
+    </>
+  );
+}
+
 // ── public: buttons that open the previews ─────────────────────────────────────
 
 export function SessionPrintButtons({
@@ -244,12 +332,39 @@ export function SessionPrintButtons({
   // Tickets committed during this mount, by docket key. Presence means "already sent" —
   // pressing Print again re-prints the same paper instead of issuing a second ticket.
   const [issued, setIssued] = useState<Record<string, Issued>>({});
+  /** The same, for cancellation tickets — keyed by station. */
+  const [issuedVoids, setIssuedVoids] = useState<
+    Record<string, { ticket: OrderTicketRow; lines: VoidTicketLine[] }>
+  >({});
   // A ticket was issued, so the server's view of the session is stale. Refreshing is
   // deferred to modal close: doing it mid-print would re-render the docket list out from
   // under the open preview.
   const [stale, setStale] = useState(false);
 
   const paperWidthMm = restaurant.paper_width_mm ?? 80;
+
+  // Cancelled units that ALREADY WENT to a station and have not been un-printed yet.
+  // Fetched rather than derived: `session.items` cannot say which slice of a line was
+  // cancelled or whether that slice has had paper, and both live on the event rows.
+  const [voids, setVoids] = useState<VoidTicketLine[]>([]);
+  const loadVoids = useCallback(() => {
+    getPendingVoids(session.id)
+      .then(setVoids)
+      .catch(() => setVoids([]));
+  }, [session.id]);
+  useEffect(loadVoids, [loadVoids, session.items]);
+
+  // One void ticket per station, same as an order ticket: a cook only wants the
+  // cancellations for the rail they are standing at.
+  const voidsByStation = useMemo(() => {
+    const m = new Map<string, { name: string; lines: VoidTicketLine[] }>();
+    for (const v of voids) {
+      const key = v.workstation_id ?? NO_STATION;
+      if (!m.has(key)) m.set(key, { name: v.workstation_name || "General", lines: [] });
+      m.get(key)!.lines.push(v);
+    }
+    return m;
+  }, [voids]);
 
   // The order's shared number — used identically on every workstation ticket and the bill.
   const orderNo = resolveOrderNumber(session, restaurant);
@@ -258,7 +373,13 @@ export function SessionPrintButtons({
   // is the fix for the reprint bug: previously every live item was routed onto every OT,
   // so adding one dish reprinted the whole table.
   const dockets = useMemo(
-    () => splitDockets(session.items.filter((i) => !i.ticket_id), workstations),
+    () =>
+      splitDockets(
+        session.items
+          .filter((i) => !i.ticket_id && Number(i.active_quantity) > 0)
+          .map(toActive),
+        workstations
+      ),
     [session.items, workstations]
   );
 
@@ -267,6 +388,9 @@ export function SessionPrintButtons({
   const rows = useMemo(() => {
     const byKey = new Map(dockets.map((d) => [d.key, d]));
     for (const t of session.tickets) {
+      // Void tickets are a cancellation record, not a station's work. Letting one
+      // create a station button would produce a button with nothing behind it.
+      if (t.kind === "void") continue;
       const key = t.workstation_id ?? NO_STATION;
       if (byKey.has(key)) continue;
       const st = workstations.find((w) => w.id === t.workstation_id);
@@ -287,15 +411,19 @@ export function SessionPrintButtons({
   }, [dockets, session.tickets, workstations]);
 
   const showTickets = canPrintTickets && rows.length > 0;
-  if (!showTickets && !canPrintBill) return null;
+  const showVoids = canPrintTickets && voidsByStation.size > 0;
+  if (!showTickets && !showVoids && !canPrintBill) return null;
 
-  const billItems: BillItem[] = session.items.map((it) => ({
-    id: it.id,
-    item_name: it.item_name,
-    item_price: Number(it.item_price),
-    quantity: it.quantity,
-    is_custom: it.is_custom,
-  }));
+  // The bill: ACTIVE units only, so the printed line totals equal the session total.
+  const billItems: BillItem[] = session.items
+    .filter((it) => Number(it.active_quantity) > 0)
+    .map((it) => ({
+      id: it.id,
+      item_name: it.item_name,
+      item_price: Number(it.item_price),
+      quantity: Number(it.active_quantity),
+      is_custom: it.is_custom,
+    }));
 
   const openPreview = (key: string) => {
     setAt(new Date());
@@ -335,6 +463,30 @@ export function SessionPrintButtons({
     return { ok: true };
   };
 
+  /** The same commit-on-Print contract, for a cancellation ticket. */
+  const commitVoid =
+    (key: string, lines: VoidTicketLine[]) =>
+    async (): Promise<{ ok: true } | { ok: false; error?: string }> => {
+      if (issuedVoids[key]) return { ok: true }; // already sent; this press is a re-print
+      const res = await generateVoidTicket(
+        session.id,
+        key === NO_STATION ? null : key,
+        lines.map((l) => l.cancellation_id)
+      );
+      if ("error" in res) return { ok: false, error: res.error };
+      if (!("lines" in res)) return { ok: false, error: "Unexpected response." };
+      setIssuedVoids((prev) => ({ ...prev, [key]: { ticket: res.ticket, lines: res.lines } }));
+      setStale(true);
+      return { ok: true };
+    };
+
+  /** A station's docket code, for the void ticket's number line. */
+  const codeOfStation = (key: string, stations: PrintStation[]): string => {
+    if (key === NO_STATION) return "OT";
+    const st = stations.find((w) => w.id === key);
+    return st ? ticketCodeOf(st) : "OT";
+  };
+
   // The number line: pending until the ticket exists, then this station's own OT number,
   // falling back to the order's shared number when OT numbering is switched off.
   const numberLine = (code: string, t: OrderTicketRow | null): { label: string; value: string } => {
@@ -349,7 +501,11 @@ export function SessionPrintButtons({
   const btnStyle = { borderColor: "var(--color-hairline)", background: "var(--color-canvas)", color: "var(--color-ink)" };
 
   // Items belonging to an already-printed ticket, for the reprint previews.
-  const itemsOfTicket = (id: string) => session.items.filter((i) => i.ticket_id === id);
+  //
+  // ⚠️ Reads `allItems`, not `items`. An item keeps its ticket for life, so a ticket
+  // whose food was cancelled afterwards still has to reprint as the kitchen was
+  // handed it — reading the live list made those tickets reprint as "No items."
+  const itemsOfTicket = (id: string) => session.allItems.filter((i) => i.ticket_id === id);
   const reprintTicket = openKey?.startsWith("reprint:")
     ? session.tickets.find((t) => t.id === openKey.slice("reprint:".length)) ?? null
     : null;
@@ -374,6 +530,25 @@ export function SessionPrintButtons({
               <Printer size={15} /> Print {d.code}
               <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
                 · {d.items.length} new
+              </span>
+            </button>
+          ))}
+        {/* Only for cancellations that already reached a station. Units cancelled
+            before their KOT went out never got there, so there is nothing to un-print
+            and no button appears. */}
+        {showVoids &&
+          [...voidsByStation.entries()].map(([key, v]) => (
+            <button
+              key={`void:${key}`}
+              type="button"
+              onClick={() => openPreview(`void:${key}`)}
+              className={btn}
+              style={{ ...btnStyle, borderColor: "#dc2626", color: "#dc2626" }}
+            >
+              <Ban size={15} /> Void · {v.name}
+              <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                · {v.lines.reduce((s, l) => s + l.qty, 0)} unit
+                {v.lines.reduce((s, l) => s + l.qty, 0) === 1 ? "" : "s"}
               </span>
             </button>
           ))}
@@ -422,10 +597,45 @@ export function SessionPrintButtons({
         </div>
       )}
 
+      {/* The void preview. Commits on Print for the same reason an order ticket does:
+          an idly-opened preview must not burn an OT number or mark the cancellation
+          as already announced. */}
+      {showVoids &&
+        [...voidsByStation.entries()].map(([key, v]) => {
+          const sent = issuedVoids[key] ?? null;
+          const code = codeOfStation(key, workstations);
+          return (
+            <PrintModal
+              key={`void:${key}`}
+              open={openKey === `void:${key}`}
+              onClose={() => {
+                close();
+                loadVoids();
+              }}
+              title={`${v.name} — cancellation preview`}
+              paperWidthMm={paperWidthMm}
+              onBeforePrint={commitVoid(key, v.lines)}
+              printLabel={sent ? "Print again" : "Print & send"}
+            >
+              <VoidTicket
+                session={session}
+                restaurant={restaurant}
+                staffName={staffName}
+                at={sent ? new Date(sent.ticket.printed_at) : at}
+                name={v.name}
+                lines={sent ? sent.lines : v.lines}
+                number={numberLine(code, sent?.ticket ?? null)}
+              />
+            </PrintModal>
+          );
+        })}
+
       {showTickets &&
         rows.map((d) => {
           const sent = issued[d.key] ?? null;
-          const items = sent ? sent.items : d.items;
+          // `d.items` are already active-normalised by splitDockets; the server's
+          // read-back is not, so normalise it the same way. Both are about-to-print.
+          const items = sent ? sent.items.map(toActive) : d.items;
           return (
             <PrintModal
               key={d.key}

@@ -51,13 +51,14 @@ async function SalesBody({ canEditTender }: { canEditTender: boolean }) {
   return <SalesView initial={report} embedded canEditTender={canEditTender} />;
 }
 
-async function CreditsBody({ openId }: { openId: string | null }) {
+async function CreditsBody({ openId, canDiscount }: { openId: string | null; canDiscount: boolean }) {
   const [credits, summary] = await Promise.all([getCredits({ status: "all" }), getCreditSummary()]);
   return (
     <CreditsView
       initialCredits={credits}
       initialSummary={summary}
       initialOpenId={openId}
+      canDiscount={canDiscount}
       embedded
     />
   );
@@ -106,6 +107,12 @@ export default async function EmployeeDashboardPage({
   // permission, off every job preset — decides who is even offered it. No PIN set ⇒ the
   // button doesn't exist, and neither does the route.
   const canMockBill = config.securityEnabled && hasPermission(restaurantUser, PERMISSIONS.PRINT_MOCK_BILLS);
+  // Forgiving part of a customer's debt at clearance is a discount, gated the same way
+  // one at the till is: the permission decides who is OFFERED it, the Discount PIN
+  // decides whether it goes through, and `addCreditPayment` re-checks both. Hiding the
+  // field is UX, not the boundary — a staffer without the right should not be typing a
+  // discount and a PIN only to be refused on submit.
+  const canDiscount = hasPermission(restaurantUser, PERMISSIONS.APPLY_DISCOUNTS);
 
   const SCROLLABLE: SectionKey[] = ["orders", "tables", "walkins", "rooms", "sales", "credits", "menu", "stock", "purchases", "vendors"];
   const focusSection: SectionKey | null = openCreditId
@@ -201,7 +208,7 @@ export default async function EmployeeDashboardPage({
       subtitle: "Customer accounts & repayments",
       body: (
         <Suspense fallback={<SectionSkeleton />}>
-          <CreditsBody openId={openCreditId ?? null} />
+          <CreditsBody openId={openCreditId ?? null} canDiscount={canDiscount} />
         </Suspense>
       ),
     });

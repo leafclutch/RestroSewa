@@ -213,8 +213,15 @@ export async function listSavingTitles(): Promise<SavingTitle[]> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("saving_titles")
-      .select(todayOnly ? "id, name, created_at" : "id, name, created_at, opening_amount")
+      .select(
+        todayOnly
+          ? "id, name, created_at, closed_at"
+          : "id, name, created_at, opening_amount, closed_at"
+      )
       .eq("restaurant_id", ru.restaurant_id)
+      // Closed pots are RETURNED, not filtered out — their history has to stay
+      // reachable, and Finance still counts their rows. The screen collapses them into
+      // a "Closed" group and the "file into" picker drops them; see `closedAt`.
       .order("created_at", { ascending: true }),
     rowsQuery,
   ]);
@@ -249,6 +256,7 @@ export async function listSavingTitles(): Promise<SavingTitle[]> {
       online: agg?.online ?? 0,
       entryCount: agg?.n ?? 0,
       createdAt: t.created_at,
+      closedAt: t.closed_at ?? null,
       todayOnly,
     };
   });
@@ -375,8 +383,19 @@ export async function deleteSavingTitle(id: string): Promise<ActionResult> {
     .eq("restaurant_id", ru.restaurant_id)
     .eq("saving_title_id", id);
 
+  // ⚠️ ENTRIES, not balance — and the message must say so.
+  //
+  // It used to read "This saving has money in it", which is false for the case that
+  // actually hits it: a pot deposited into and then fully withdrawn holds nothing and
+  // still has rows. Those rows are dated cash movements Finance has already counted,
+  // so they cannot be removed to make the pot deletable. Such a pot is CLOSED
+  // instead — see closeSavingTitle.
   if ((count ?? 0) > 0) {
-    return { error: "This saving has money in it. Remove its entries first." };
+    return {
+      error:
+        "This saving already has entries, so deleting it would take real cash movements " +
+        "out of Finance. Withdraw whatever is left and close it instead.",
+    };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -389,6 +408,128 @@ export async function deleteSavingTitle(id: string): Promise<ActionResult> {
   if (error) return { error: "Could not delete the saving." };
 
   revalidatePath("/admin/expenses");
+  revalidatePath("/employee/expenses");
+  return null;
+}
+
+/**
+ * The pot's balance right now: its opening amount plus every row filed against it
+ * (withdrawals are negative rows, so they are already netted).
+ *
+ * Read server-side rather than trusted from the client for the same reason the rest of
+ * this file does it: the number decides whether a pot may be retired.
+ */
+async function savingBalance(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  service: any,
+  restaurantId: string,
+  id: string
+): Promise<{ balance: number; entries: number } | null> {
+  const [titleRes, rowsRes] = await Promise.all([
+    service
+      .from("saving_titles")
+      .select("id, opening_amount")
+      .eq("id", id)
+      .eq("restaurant_id", restaurantId)
+      .maybeSingle(),
+    service
+      .from("extra_expenses")
+      .select("amount")
+      .eq("restaurant_id", restaurantId)
+      .eq("saving_title_id", id),
+  ]);
+
+  if (!titleRes.data) return null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = (rowsRes.data ?? []) as any[];
+  const net = rows.reduce((s, r) => s + Number(r.amount ?? 0), 0);
+  return {
+    balance: Number(titleRes.data.opening_amount ?? 0) + net,
+    entries: rows.length,
+  };
+}
+
+/**
+ * Retire an EMPTIED pot.
+ *
+ * Closing rather than deleting is not a compromise — it is the only correct answer for
+ * a pot that has history. Its saving rows are dated cash movements that already moved
+ * the day's closing cash and were already reported; removing them to make the pot
+ * disappear would rewrite a settled day. So the money stays exactly where it is and
+ * only the pot leaves the screen.
+ *
+ * Requires a ZERO balance: closing a pot with money still in it would hide the money.
+ */
+export async function closeSavingTitle(id: string): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canManageExpenses(ru)) {
+    return { error: "You do not have permission to manage savings." };
+  }
+
+  const service = createServiceClient();
+  const state = await savingBalance(service, ru.restaurant_id, id);
+  if (!state) return { error: "That saving no longer exists." };
+
+  // Paisa tolerance, matching every other money comparison in the app.
+  if (Math.abs(state.balance) > 0.005) {
+    return {
+      error:
+        `This saving still holds ₹${state.balance.toFixed(2)}. ` +
+        `Withdraw the balance first — closing it now would hide the money.`,
+    };
+  }
+
+  // A pot that never held anything has no history worth keeping; deleting is cleaner
+  // and is still offered. Closing is for the ones that cannot be deleted.
+  if (state.entries === 0) {
+    return deleteSavingTitle(id);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("saving_titles")
+    .update({ closed_at: new Date().toISOString(), closed_by: ru.id })
+    .eq("id", id)
+    .eq("restaurant_id", ru.restaurant_id)
+    // Idempotent: closing an already-closed pot must not move `closed_at` and rewrite
+    // who retired it.
+    .is("closed_at", null);
+
+  if (error) return { error: "Could not close the saving." };
+
+  revalidatePath("/admin/expenses");
+  revalidatePath("/employee/expenses");
+  return null;
+}
+
+/** Undo a close. A pot retired by mistake must not be a dead end. */
+export async function reopenSavingTitle(id: string): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!STOCK_ACCESS.canManageExpenses(ru)) {
+    return { error: "You do not have permission to manage savings." };
+  }
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("saving_titles")
+    .update({ closed_at: null, closed_by: null })
+    .eq("id", id)
+    .eq("restaurant_id", ru.restaurant_id);
+
+  if (error) {
+    // The name index is unique among OPEN pots only, so reopening can collide with a
+    // pot created under the same name in the meantime.
+    return {
+      error:
+        "Could not reopen this saving — another open saving already uses its name. " +
+        "Rename that one first.",
+    };
+  }
+
+  revalidatePath("/admin/expenses");
+  revalidatePath("/employee/expenses");
   return null;
 }
 

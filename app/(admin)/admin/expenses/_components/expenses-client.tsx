@@ -14,8 +14,10 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import {
   addExtraExpense,
   addSaving,
+  closeSavingTitle,
   createSavingTitle,
   deleteSavingTitle,
+  reopenSavingTitle,
   listExtraExpenses,
   listSavings,
   listSavingTitles,
@@ -239,6 +241,10 @@ function SavingTitleSelect({
   titles: SavingTitle[];
   value?: string | null;
 }) {
+  // A closed pot is retired: nothing new may be filed into it. The one it is already
+  // set to stays selectable, so EDITING an old entry that belongs to a closed pot does
+  // not silently re-file it somewhere else.
+  const open = titles.filter((t) => !t.closedAt || t.id === value);
   return (
     <div>
       <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
@@ -246,13 +252,14 @@ function SavingTitleSelect({
       </label>
       <select
         name="saving_title_id"
-        defaultValue={value ?? titles[0]?.id ?? ""}
+        defaultValue={value ?? open[0]?.id ?? ""}
         className={inputClass}
         style={inputStyle}
       >
-        {titles.map((t) => (
+        {open.map((t) => (
           <option key={t.id} value={t.id}>
             {t.name}
+            {t.closedAt ? " (closed)" : ""}
           </option>
         ))}
       </select>
@@ -596,6 +603,37 @@ function SavingPot({
     });
   }
 
+  function close() {
+    setError(null);
+    startTransition(async () => {
+      const res = await closeSavingTitle(title.id);
+      if (res && "error" in res) setError(res.error);
+      else onChanged();
+    });
+  }
+
+  function reopen() {
+    setError(null);
+    startTransition(async () => {
+      const res = await reopenSavingTitle(title.id);
+      if (res && "error" in res) setError(res.error);
+      else onChanged();
+    });
+  }
+
+  // What may be done with this pot.
+  //
+  // ⚠️ Keyed on the BALANCE, not on the entry count — that confusion is the bug this
+  // replaced. A pot deposited into and fully withdrawn holds nothing, and used to be
+  // stuck on the screen forever with "This saving has money in it".
+  //
+  // Hidden entirely for the add-only holder (`todayOnly`), whose `total` is today's
+  // net contribution rather than the pot's balance — retiring a pot on the strength of
+  // a number that does not mean what it looks like is exactly the wrong outcome.
+  const isEmpty = !title.todayOnly && Math.abs(title.total) < 0.005;
+  const canDelete = !title.todayOnly && title.entryCount === 0 && isEmpty;
+  const canClose = !title.todayOnly && !title.closedAt && title.entryCount > 0 && isEmpty;
+
   return (
     <div style={{ borderTop: "1px solid var(--color-hairline)" }}>
       <div className="flex items-center justify-between gap-3 px-4 py-3">
@@ -610,8 +648,27 @@ function SavingPot({
             <ChevronRight size={15} style={{ color: "var(--color-ink-mute)" }} />
           )}
           <span className="min-w-0">
-            <span className="text-sm block truncate" style={{ color: "var(--color-ink)" }}>
+            <span
+              className="text-sm block truncate"
+              style={{ color: title.closedAt ? "var(--color-ink-mute)" : "var(--color-ink)" }}
+            >
               {title.name}
+              {/* A retired pot stays visible so its history is reachable, but it must
+                  not look like somewhere money can still go. */}
+              {title.closedAt && (
+                <span
+                  className="ml-1.5 px-1 rounded align-middle"
+                  style={{
+                    fontSize: "9px",
+                    lineHeight: "14px",
+                    background: "var(--color-canvas-soft)",
+                    color: "var(--color-ink-mute)",
+                    letterSpacing: "0.04em",
+                  }}
+                >
+                  CLOSED
+                </span>
+              )}
             </span>
             <span className="text-xs" style={{ color: "var(--color-ink-mute)", opacity: 0.8 }}>
               {title.todayOnly
@@ -731,11 +788,10 @@ function SavingPot({
                   >
                     Rename
                   </button>
-                  {/* Offered only for an empty pot. The FK is `on delete restrict`,
-                      so a pot with money in it cannot be deleted even if this were
-                      bypassed — the entries would otherwise be stranded while
-                      Finance still counted them. */}
-                  {title.entryCount === 0 && (
+                  {/* A pot that never held anything has no history to protect, so it
+                      is genuinely deleted. The FK is `on delete restrict`, so this
+                      cannot strand entries even if the gate were bypassed. */}
+                  {canDelete && (
                     <button
                       type="button"
                       onClick={remove}
@@ -744,6 +800,42 @@ function SavingPot({
                       style={{ color: "var(--color-ruby)" }}
                     >
                       Delete
+                    </button>
+                  )}
+                  {/* Emptied, but it has history. Its saving rows are dated cash
+                      movements Finance has already counted, so they stay — only the
+                      pot is retired. */}
+                  {canClose && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (
+                          !confirm(
+                            `Close "${title.name}"?\n\nIt is empty, so it comes off the list ` +
+                              `and can't be filed into any more. Its ${title.entryCount} past ` +
+                              `entr${title.entryCount === 1 ? "y stays" : "ies stay"} in Finance, ` +
+                              `unchanged. You can reopen it later.`
+                          )
+                        )
+                          return;
+                        close();
+                      }}
+                      disabled={pending}
+                      className="text-xs underline"
+                      style={{ color: "var(--color-ruby)" }}
+                    >
+                      Close
+                    </button>
+                  )}
+                  {title.closedAt && (
+                    <button
+                      type="button"
+                      onClick={reopen}
+                      disabled={pending}
+                      className="text-xs underline"
+                      style={{ color: "var(--color-primary)" }}
+                    >
+                      Reopen
                     </button>
                   )}
                 </>

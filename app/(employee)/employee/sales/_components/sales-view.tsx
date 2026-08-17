@@ -404,7 +404,13 @@ export function SalesView({
         <StatTile label="Number of Orders" value={String(report.orderCount)} />
         <StatTile label="Avg. Order Value" value={money(report.avgOrderValue)} />
         {/* Sales above is already net of this — it's shown so a manager can see how much
-            was given away, not so it can be added back on. */}
+            was given away, not so it can be added back on.
+
+            TILL discounts only. This reads `getSalesReport`, which sums
+            `payments.discount_amount`; Admin → Finance sums those PLUS credit-clearance
+            write-offs, so its "Discount given (Total)" is legitimately larger. Don't
+            "fix" the gap by pointing this at the finance figure — a debt forgiven weeks
+            after the sale isn't a discount on this period's sales. */}
         {report.discountsTotal > 0 && (
           <StatTile label="Discounts Given" value={money(report.discountsTotal)} />
         )}

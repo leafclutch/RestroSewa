@@ -520,5 +520,9 @@ export async function payVendor(
   }
 
   revalidatePath("/admin/vendors");
+  revalidatePath("/admin/purchases");
+  revalidatePath("/admin/finance");
+  revalidatePath("/admin/dashboard");
+  revalidatePath("/employee/purchases");
   return null;
 }

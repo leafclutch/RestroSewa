@@ -2,7 +2,7 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
-import { NAV_ACCESS, STOCK_ACCESS } from "@/lib/permissions";
+import { NAV_ACCESS, STOCK_ACCESS, hasPermission, PERMISSIONS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { computeCreditStats } from "@/lib/credits";
 import { resolveSplit } from "@/lib/payment-split";
@@ -51,9 +51,11 @@ export type CreditBill = {
 export type CreditPaymentEntry = {
   id: string;
   amount: number;
+  discount_amount: number;
   method: string;
   notes: string | null;
   staff_name: string | null;
+  discount_by_name: string | null;
   created_at: string;
 };
 
@@ -277,7 +279,7 @@ export async function getCreditDetail(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("credit_payments")
-      .select("id, amount, method, notes, received_by, created_at")
+      .select("id, amount, discount_amount, method, notes, received_by, discount_by, created_at")
       .eq("customer_id", customerId)
       .order("created_at", { ascending: false }),
   ]);
@@ -287,7 +289,9 @@ export async function getCreditDetail(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const payRows = (paymentsRes.data ?? []) as any[];
 
-  const staffIds = [...new Set(payRows.map((p) => p.received_by).filter(Boolean))] as string[];
+  const staffIds = [
+    ...new Set(payRows.flatMap((p) => [p.received_by, p.discount_by]).filter(Boolean)),
+  ] as string[];
   const names = new Map<string, string>();
   if (staffIds.length > 0) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -325,9 +329,11 @@ export async function getCreditDetail(
     payments: payRows.map((p) => ({
       id: p.id,
       amount: Number(p.amount),
+      discount_amount: Number(p.discount_amount ?? 0),
       method: p.method,
       notes: p.notes ?? null,
       staff_name: p.received_by ? names.get(p.received_by) ?? null : null,
+      discount_by_name: p.discount_by ? names.get(p.discount_by) ?? null : null,
       created_at: p.created_at,
     })),
   };
@@ -350,15 +356,43 @@ export async function addCreditPayment(
   }
 
   const customerId = formData.get("customer_id") as string;
-  const amount = parseFloat(formData.get("amount") as string);
+  const amountRaw = formData.get("amount") as string;
+  const discountRaw = formData.get("discount") as string;
   const method = ((formData.get("method") as string) || "cash").toLowerCase();
   const notes = ((formData.get("notes") as string) || "").trim();
 
+  const amount = amountRaw === "" || amountRaw == null ? 0 : parseFloat(amountRaw);
+  const discount = discountRaw === "" || discountRaw == null ? 0 : parseFloat(discountRaw);
+
   if (!customerId) return { error: "Customer not found." };
-  if (isNaN(amount) || amount <= 0) {
-    return { error: "Enter a payment amount greater than zero." };
+  if (isNaN(amount) || amount < 0) {
+    return { error: "Enter an amount received of zero or more." };
+  }
+  if (isNaN(discount) || discount < 0) {
+    return { error: "The discount cannot be negative." };
+  }
+  if (amount + discount <= 0) {
+    return { error: "Enter a payment amount or a discount greater than zero." };
   }
   if (!REPAYMENT_METHODS.has(method)) return { error: "Invalid payment method." };
+
+  if (discount > 0) {
+    if (!hasPermission(ru, PERMISSIONS.APPLY_DISCOUNTS)) {
+      return { error: "You don't have permission to apply a discount." };
+    }
+    const pin = ((formData.get("discount_pin") as string) || "").trim();
+    if (!pin) return { error: "Enter the discount PIN to apply a discount." };
+
+    const service = createServiceClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: pinOk, error: pinErr } = await (service as any).rpc("verify_discount_pin", {
+      p_restaurant_id: ru.restaurant_id,
+      p_pin: pin,
+    });
+    if (pinErr || pinOk !== true) {
+      return { error: "Incorrect discount PIN. The discount was not applied." };
+    }
+  }
 
   const split = resolveSplit(
     method,
@@ -379,6 +413,8 @@ export async function addCreditPayment(
     p_received_by: ru.id,
     p_cash: split.cash,
     p_online: split.online,
+    p_discount: discount,
+    p_discount_by: discount > 0 ? ru.id : null,
   });
 
   if (error) {
@@ -388,6 +424,10 @@ export async function addCreditPayment(
   revalidatePath("/employee/credits");
   revalidatePath("/employee/dashboard");
   revalidatePath("/employee/sales");
+  // Credits live only on the staff surface — there is no /admin/credits route.
+  // A repayment does move Finance, though: the receivable falls, and a write-off
+  // lands in the Discounts block.
+  revalidatePath("/admin/finance");
   return null;
 }
 

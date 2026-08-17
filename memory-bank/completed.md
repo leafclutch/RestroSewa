@@ -3,6 +3,28 @@
 Chronological log of meaningful shipped features (newest first). Not every commit — only
 features worth remembering. Dates are approximate to the work, not necessarily merge dates.
 
+## 2026-08-16 — Mixed Menu + Customized Items Order Submission Fix
+Resolved bug where staff could not order menu items and customized/manual items together in a single order submission:
+1. **Root Cause**: `resolveOrderItems` in `lib/order-items.ts` omitted `is_custom` property on menu items, while `resolveCustomItems` in `lib/custom-items.ts` set `is_custom: true`. Concatenating both in `submitOrder` created heterogeneous object key structures in `allItems`, causing Supabase PostgREST bulk insert payload failures.
+2. **Fix**: Explicitly added `is_custom: false` to `ResolvedOrderItem` type and return objects in `lib/order-items.ts`. All item objects in an order now carry uniform key structures.
+3. **Verification**: Added `lib/mixed-order.test.ts` unit tests; TypeScript compiler clean (0 errors), test suite 98/98 passing.
+
+## 2026-08-16 — Discount While Clearing Customer Credit
+Added optional discount support when clearing customer credit. The surface is the staff
+dashboard's Credits section (`/employee/credits` is a redirect stub into it) — **there is no
+`/admin/credits` route**; the admin sees the effect on `/admin/finance` only.
+1. **Security & Authorization**: Applying a discount is gated behind the existing **Discount PIN** (`verify_discount_pin` RPC) and `APPLY_DISCOUNTS` permission. Invalid PINs block submission.
+2. **Multi-Tender & Clearance Math**: Supports Cash, Online, Card, and Mixed (Cash + Online) splits for the received money. The total credit cleared equals `amount_received + discount_amount`, reducing customer debt without leaving the discount as unpaid credit.
+3. **Database & Finance Integration**: Applied migration `20260820000000_credit_payment_discount.sql` adding `discount_amount` and `discount_by` to `credit_payments`, updating `record_credit_payment` RPC for FIFO bill clearance, updating `finance_report` for total discounts (till + credit) & `customer_credit_discounted`, and updating `finance_transactions` ledger rows.
+4. **Finance UI & PDF Polish**: Removed redundant "Sales before discount" and "Sales after discount" rows from `/admin/finance`, CSV export, and email PDF reports. `/admin/finance` displays "Discount written off" under Customer credits and cleanly breaks down "Till / sales discounts" vs "Credit clearance discounts" under Discounts. `getCustomerDetail` and `CustomerDetailModal` display payment history including received tender, discount badge, cleared credit total, and PIN authorizer name.
+
+## 2026-08-16 — Purchase Credit/Mixed Payment, Room Assignment Toggles, Fuel Category, Room Advance Payment Methods
+Four related financial and operational enhancements across the application:
+1. **Purchase Credit + Partial/Mixed Payment**: `recordPurchase` (`app/actions/purchases.ts`) and `PurchaseForm` (`purchases-client.tsx`) now support immediate partial payments tendered via Cash, Online, or Mixed (Cash + Online) when buying on credit. Correctly records immediate cash/online movement and remaining vendor credit debt. Revalidates Finance, Dashboard, Purchases, and Vendors screens.
+2. **Room Assignment Assign All / Unassign All**: Added "Assign all" and "Clear all" toggle buttons to `RoomTypeWaiterBar` and `RoomCard` in `rooms-client.tsx`, matching `TableGroupWaiterBar`. Persists via `setRoomTypeWaiters` and `setRoomWaiters` server actions.
+3. **Extra Expenses Category Fuel**: Applied DB migration `20260819000000_rename_gas_to_fuel.sql` to update historical `'gas'` rows to `'fuel'` and update table CHECK constraint. Updated `lib/expenses.ts` vocabulary (`"fuel"`, `"Fuel"`).
+4. **Room Advance Payment Methods**: Integrated standard `PaymentMethodPicker` into `AdvanceFields` (`app/(employee)/employee/_components/advance-fields.tsx`), providing Cash, Online, Card, and Mixed (Cash + Online) with auto-complementing split inputs and `splitIsValid` validation across check-in and folio advance forms.
+
 ## 2026-08-06/07 — Workstation reporting: Purchases by station + the Deduction Report
 Shipped to production 2026-08-07 (`d59af56`, migration `20260806000000` applied and verified
 against the live schema). Two things the POS could never answer by station.

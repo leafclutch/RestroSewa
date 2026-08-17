@@ -32,7 +32,7 @@ Mirrors tables (sessions) but adds a stay/folio and a three-tier permission. See
   hardcodes `card = 0`. The refund panel shows how the deposit was originally held, so the
   receptionist can see what is actually available to hand back.
 - **Room service** — add/remove charges to the folio (an order-style charge).
-- **Assignments** — staff assigned to rooms (`restaurant_user_rooms`) see only their rooms.
+- **Assignments** — staff assigned to rooms (`restaurant_user_rooms`) see only their rooms. Supports room-type level and individual room level "Assign all" and "Clear all" toggle buttons matching table group assignments.
 - **Cleaning** — room parks in Cleaning on checkout; `markRoomClean` turns it over.
 - **Room shifting** — move a stay to another room via the shared session-transfer service.
 

@@ -21,7 +21,7 @@ export const SPENDING_CATEGORIES = [
   "rent",
   "electricity",
   "water",
-  "gas",
+  "fuel",
   "internet",
   "maintenance",
   "marketing",
@@ -53,7 +53,7 @@ export const EXPENSE_CATEGORY_LABEL: Record<ExpenseCategory, string> = {
   rent: "Rent",
   electricity: "Electricity",
   water: "Water",
-  gas: "Gas",
+  fuel: "Fuel",
   internet: "Internet",
   maintenance: "Maintenance",
   marketing: "Marketing",
@@ -75,6 +75,7 @@ export function isSpendingCategory(v: string): v is SpendingCategory {
 
 /** A category label from a raw DB value, tolerating anything unexpected. */
 export function expenseCategoryLabel(v: string): string {
+  if (v === "gas") return "Fuel";
   return isExpenseCategory(v)
     ? EXPENSE_CATEGORY_LABEL[v]
     : v.charAt(0).toUpperCase() + v.slice(1);
@@ -133,6 +134,15 @@ export type SavingTitle = {
   online: number;
   entryCount: number;
   createdAt: string;
+  /**
+   * When this pot was retired, or null while it is active.
+   *
+   * A pot with entries can never be deleted — its saving rows are dated cash movements
+   * Finance has already counted, so removing them would rewrite a settled day. An
+   * EMPTIED pot is closed instead: it leaves the list and the "file into" picker, and
+   * its history stays exactly where it is. Reversible.
+   */
+  closedAt: string | null;
   /**
    * Set when the viewer may only see TODAY's activity (the add-only permission).
    * `total` then carries today's net contribution and `openingAmount` is 0 —

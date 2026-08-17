@@ -28,6 +28,11 @@ export type RestaurantSummary = {
     stock_moves: number;
     room_stays: number;
     notifications: number;
+    /** Rent, electricity, fuel… — savings excluded, they are counted separately. */
+    extra_expenses: number;
+    extra_expenses_total: number;
+    /** Deposits and withdrawals. Same table, but money set ASIDE rather than spent. */
+    saving_entries: number;
     has_opening: boolean;
   };
   carried: {
@@ -35,6 +40,13 @@ export type RestaurantSummary = {
     debtors: number;
     vendor_payable: number;
     creditors: number;
+    /**
+     * What the savings pots hold. Survives a reset — the pots are accounts, and their
+     * balances are folded onto `saving_titles.opening_amount` exactly as a vendor's
+     * payable and a customer's debt are. A full DELETE destroys it.
+     */
+    savings_held: number;
+    saving_pots: number;
   };
   setup: {
     staff: number;

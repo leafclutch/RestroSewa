@@ -6,6 +6,212 @@ changes in `changelog.md`, and reset this file to the template below.
 ---
 
 ## Current Feature
+**Unit-wise order item cancellation (2026-08-17) — CODE COMPLETE, all 5 migrations applied and
+verified on DEV. Production migrations PENDING.**
+
+A guest who ordered `Momo × 3` and wanted one taken off got all three cancelled, or none.
+
+⚠️ **The root cause was not the cancel path — it was that a partial cancellation had no
+representation anywhere.** `session_order_items.quantity` is written once at insert and updated by
+no code path in the repo; cancellation is a whole-row `cancelled_at` stamp. So every consumer — bill,
+stock, COGS, folio, kitchen queue, guest screen, push — asked one binary question and then took the
+FULL quantity. "Cancel 1 of 3" could only ever execute as "cancel the line".
+
+**The model: counters on the line + an append-only event log.**
+`cancelled_quantity`, `served_quantity`, and `active_quantity` (generated, `quantity −
+cancelled_quantity`), plus `session_order_item_cancellations` — one row per cancellation EVENT.
+Both are needed and neither alone is enough:
+- The COUNTER exists because PostgREST cannot aggregate a child table into an embed; `active_quantity`
+  being a real selectable column is what made ~10 reader changes mechanical.
+- The EVENT LOG exists because **`stock_report` dates a release by `cancelled_at`, and one timestamp
+  cannot date two partial cancels.** Cancel 1 today and 2 tomorrow ⇒ the shelf must gain 1 today and
+  2 tomorrow. A single column has to pick one day and be silently wrong about the other.
+
+⚠️ **`cancelled_at` keeps its EXACT old meaning** — stamped only when `cancelled_quantity = quantity`.
+That is what let every existing `cancelled_at is null` reader stay correct while readers were
+migrated one at a time, and it keeps `trg_release_ticket_numbers_on_item_cancel` releasing the bill
+number on the last unit. **Do NOT redefine "fully done" as `cancelled + served = quantity`** or bill
+numbers stop being released.
+
+**`item_status` is now derived from `served_quantity`** by a BEFORE UPDATE trigger that syncs in
+*whichever direction was written* — the deployed build writes the flag, the new one writes units.
+That two-way sync is what made these migrations safe to apply BEFORE the app deploy. A partly-served
+line reads `'pending'` and stays cancellable, which is what makes "serve 2 of 3, cancel the last 1"
+work at all.
+
+⚠️ **Idempotency stopped being free and had to be rebuilt.** The old model got it structurally
+(`where cancelled_at is null` ⇒ a row can only be cancelled once). With per-unit events a retry
+cancels MORE. Replaced by **compare-and-swap on the remaining count** (`p_expected_remaining`), chosen
+over an idempotency key because it needs no client state and also covers two cashiers cancelling the
+same line concurrently — the same idiom `reject_table_activation` already used. `request_id` ships as
+belt-and-braces. Over-cancellation is **refused, never clamped**: "cancel 4" and "cancel 3" are
+different amounts of money.
+
+⚠️ **`order_item_consumption` was deliberately NOT changed.** Emitting release legs from it looked
+obvious and breaks three readers quietly: `stock_report.usage` and `dashboard_stats.cost` have no
+cancellation predicate so releases would count as CONSUMPTION, and `product_history`'s sale leg would
+fan out N times and corrupt its running `balance`. Releases got their own view, `order_item_release`,
+which JOINS the consumption view so the variant-recipe rule is not copied. It carries **both**
+timestamps because `stock_report` splits a release three ways on `released_at` AND `item_created_at`.
+
+**Two pre-existing defects closed on the way:**
+1. **Cancelling after payment was never blocked**, and `getPaidBill` re-queries items live — so a
+   post-payment cancel silently changed a printed bill's lines while `payments.total_amount` stayed
+   frozen. Now refused by `assert_session_unpaid`, called by all four cancel paths. (`force_close_session`
+   skips the release instead of raising — closing a session is its job and must always work.)
+2. **The bulk paths over-restored SERVED food.** `item_status <> 'served'` is a LINE test; under the
+   new model a 2-of-5-served line reads `'pending'`, so they now cancel `quantity − cancelled − served`.
+3. A cancelled item vanished from its own ticket's reprint. `SessionDetail` gained `allItems`;
+   `itemsOfTicket` reads that. **The money guard the removed filter provided is now STRONGER** — totals
+   multiply by `active_quantity`, so a cancelled line contributes zero by arithmetic rather than by
+   being absent.
+
+**Void tickets** finally use `order_tickets.kind`, reserved since day one for exactly this. A void
+ticket is a DELTA naming only the cancelled units (an item belongs to one ticket for life), it burns
+an OT number (it is paper), and `void_ticket_id` on the event makes it reprintable. Units cancelled
+*before* their KOT went out produce no paper at all.
+
+**Verified on DEV, measured not assumed:** `tsc` clean, `npm run build` clean, `node --test`
+**110/110** (12 new in `lib/order-quantities.test.ts`). End-to-end **69/69** across all 12 stated edge
+cases with real stock: cancel 1 of 3 restores **exactly 1**, never 3; a cross-day cancel lands in
+`added` and contributes **0** to `reversed`; CAS refuses a stale expectation; a replayed `request_id`
+is a no-op; over-cancel refused at the RPC and again by the CHECK; a paid session refuses. All test
+data removed and **stock, COGS, tracked revenue and sales all back to baseline**. The `20260821000100`
+no-op proof passed **215 comparisons, 0 differences** against the pre-event logic. The
+`getPendingVoids` PostgREST embed verified against the real API, including that it scopes by session
+and excludes unprinted cancellations.
+
+⚠️ **DEV DRIFT FOUND AND FIXED.** DEV's `stock_report` had been hand-replaced with a
+partial-cancellation-aware body referencing `cancelled_quantity` **without the column and without a
+migration** — so `stock_report` and `dashboard_stats` were raising `42703` on DEV, breaking the Stock
+screen, dashboard and analytics. Production was unaffected (byte-matching the repo). This is why
+`20260821000100` **drops before creating** `stock_report`: the installed return type differed between
+environments (dev had no `reversed`). Re-measure signatures before trusting the repo file.
+
+**Also in this batch — emptied saving pots could never be retired (`20260822000000`).**
+Removal was gated on the ENTRY COUNT, not the BALANCE (`expenses-client.tsx` `entryCount === 0`, and
+`deleteSavingTitle`'s `count > 0` refusal), so a pot deposited into and then fully withdrawn held
+nothing and was stuck on screen forever — with the message "This saving has money in it", false in
+exactly the case that reached it. **Reproduced on PRODUCTION**: "Hotel GlasGow In & Restaurant" has a
+pot with opening 50,000, entries netting −50,000, balance 0.00, undeletable.
+⚠️ **Deleting it is genuinely impossible, not merely blocked.** A saving row IS an `extra_expenses`
+row — a dated cash movement Finance has already counted — so removing the rows would rewrite a
+settled day's closing cash. So an emptied pot is **CLOSED** (reversible), a pot with no history is
+still hard-deleted, and the name index became partial (`where closed_at is null`) so a closed pot's
+name is reusable — which in turn means REOPEN can collide and is refused explicitly.
+Verified on DEV **14/14**: balance 0 with history, hard delete blocked by the FK (`23503`), close
+leaves history untouched, Finance moves by exactly the withdrawal and returns to baseline, name reuse
+allowed while two OPEN pots still collide (`23505`), fresh pot still deletes outright.
+
+**Also — the reset never cleared Extra Expenses or Savings (`20260823000000`).**
+`reset_restaurant_finance` deletes 15 tables by name and `extra_expenses` was not one of them. Its
+only other route is `restaurant_id → restaurants on delete cascade`, and **the reset deliberately
+keeps the restaurant row, so that cascade never fires** — the table was added a month after the
+function and the delete list was never revisited. Rent, electricity, fuel and every saving movement
+survived a reset that claims to clear the books. ⚠️ **Lesson: a table added after this function is
+covered by nothing. Check the delete list, not the FK.** `extra_expenses` was the ONLY trading table
+with neither an explicit delete nor a covering cascade (`room_advances`, `order_tickets`,
+`session_transfers`, `session_order_item_cancellations` are all cascaded from tables the reset does
+delete).
+**The pots are KEPT and their balances folded onto `opening_amount`** — the function's own pattern for
+`products`/`vendors`/`credit_customers`. ⚠️ The fold is clamped with `greatest(…, 0)` because
+`saving_titles_opening_amount_check` forbids a negative opening and a pot CAN go negative (the guard
+in `security.ts` runs only `if (wasWithdrawal)`, so editing a deposit downward is unchecked) — one
+such row would abort the whole reset.
+**Second, latent bug fixed in the same file:** `delete_restaurant_cascade` never named
+`extra_expenses`/`saving_titles`, and `saving_title_id` is `ON DELETE RESTRICT`, so deleting a
+restaurant with savings depended on Postgres's cascade order. It works today only because RI trigger
+names sort as strings over constraint OIDs — it would break on a database rebuilt from scratch, which
+is what `clone-db.mjs` produces.
+Verified on DEV **25/25** on a throwaway restaurant: expenses cleared, **each pot's balance identical
+across the reset**, idempotent on a second run, a negative pot clamped rather than fatal, a
+savings-holding restaurant deletes cleanly (in a rolled-back transaction), and **no other restaurant
+moved**.
+
+**Remaining:**
+1. **Production migrations pending** — all five for cancellation plus `20260822000000` and
+   `20260823000000`, in order.
+   DB before app; each is independently applyable and leaves the deployed build correct.
+2. **In-app QA on DEV**: cancel 1 of 3 from the session screen and from a room folio; confirm the
+   line reads "Ordered 3 · Cancelled 1 · Remaining 2"; print a KOT then cancel and print the void;
+   confirm the reprint of the original still shows what the kitchen was handed.
+3. **Open, NOT closed by this work:** `session-client.tsx:111-118` computes the payable client-side
+   and `closeSessionWithPayment` accepts it verbatim without re-deriving, so a cancel landing between
+   render and submit overcharges. The room path already rebuilds server-side; the table path does not.
+4. Nothing committed — user drives git.
+
+---
+
+## Previous feature
+**Review fixes on the last three commits (2026-08-17) — shipped in `438192b`.**
+
+⚠️ **`finance_report`'s advance split had lost its period filter, and it is only caught because
+production has not been migrated yet.** The hand-written rewrite in
+`20260820000000_credit_payment_discount.sql` dropped
+`filter (where x.paid_at >= p_from and x.paid_at < p_to)` from **both** legs of `advsold`, so
+`sales_advance_cash` / `sales_advance_online` returned the **all-time** figure for every period.
+Measured on DEV: a 1-day window read `sales_advance = 0` against a split of **3,500**. That breaks
+`cash + online + card + advance_cash + advance_online + credit = total` on the Finance Sales block,
+the CSV and the emailed daily PDF — the identical defect this file records as fixed on 2026-08-12
+("a new way to settle a bill needs a Sales LINE"). ⚠️ **The ledger still reconciles 0.0000 through
+it**, because `finance_transactions` was untouched, so the project's usual proof does NOT catch this
+class. Verified read-only that **production still has the correct body** — both `20260819000000` and
+`20260820000000` are pending there.
+
+**Both finance functions were rebuilt from the PREVIOUS body plus only the deliberate deltas**,
+rather than patching the rewrite. The rewrite had also stripped ~25 comment blocks, including the
+warning that `finance_transactions`'s room test must stay identical to `finance_report`'s `paysrc`.
+Diffing the two revealed the logic was otherwise byte-identical — which is what made a
+rebuild-from-old safe and is the technique to reuse next time a 300-line function is "rewritten".
+
+**Other fixes in the same pass:**
+- **A live database password was committed** in `scratch/apply_discount_migration.mjs` — and
+  `.env.production` uses the **same** password, so it leaked production too. File deleted, `scratch/`
+  added to `.gitignore` beside the env-file rule it was routing around. ⚠️ **It is still in git
+  history (`007aa80`); the password must be ROTATED on both projects.** That script also bypassed
+  the ledger — use `scripts/migrate.mjs`, which writes `supabase_migrations.schema_migrations`.
+- **`gas` → `fuel` inverted the DB-before-app rule.** Dropping `'gas'` from the CHECK would have made
+  every gas expense insert fail for the deployed build during the window. `'gas'` is now retained as
+  a transitional key (nothing writes it; `expenseCategoryLabel` maps it to "Fuel" on read).
+- The credit-clearance discount field + PIN were rendered for **everyone**; now gated on
+  `apply_discounts` via a `canDiscount` prop off the dashboard, matching the till discount. The
+  server always re-checked, so this is UX, not the boundary.
+- Removed the no-op `revalidatePath("/admin/credits")` — that route does not exist; corrected the
+  `completed.md` claim that said it did.
+- `lib/finance.ts`: `salesTotal + discountsTotal` no longer reconstructs gross sales and the doc
+  comment said it did. A till discount never entered `salesTotal`; a credit write-off forgives a
+  bill booked at FULL value on an earlier day, so adding both back double-counts the credit half.
+
+**Verified:** `tsc` clean, `npm run build` clean, `node --test` **98/98**, and a structural check of
+the rebuilt SQL — 60 declared columns == 60 projected, all 65 CTE references resolve, both advance
+legs filtered and clamped, and the two credit legs move together across the two functions.
+
+**Remaining:**
+1. ⚠️ **DEV still holds the BROKEN `finance_report`** — `20260820000000` is already in its ledger, so
+   `migrate up` will skip it. Re-apply that one file directly (it is idempotent:
+   `add column if not exists`, `drop … if exists` + create), then re-measure that a narrow window's
+   `sales_advance` equals `sales_advance_cash + sales_advance_online`.
+2. Then migrate production: `20260819000000` and `20260820000000` are both still pending.
+3. **Open design question, not a defect:** a credit write-off never reaches profit. The bill was
+   booked as a sale in full when it closed on credit; forgiving it drops the receivable but nothing
+   subtracts it from `sales − purchases − salaries − extra expenses`, so estimated profit is
+   overstated by every discount given. The balances all reconcile — compare the cancellation design,
+   which deliberately recognised a retained deposit as a SALE rather than let a balance reconcile to
+   a lie. Decide whether this wants a bad-debt line.
+4. Nothing committed — user drives git.
+
+---
+
+## Previous Feature
+**Mixed Menu + Customized Items Order Submission Fix (2026-08-16) — CODE COMPLETE & VERIFIED.**
+1. **Root Cause Resolved**: Fixed bulk insert key structure mismatch between `resolveOrderItems` and `resolveCustomItems`. `ResolvedOrderItem` in `lib/order-items.ts` now explicitly includes `is_custom: false`.
+2. **Single-Submission Ordering**: Staff can add any combination of menu items and customized/manual items to the cart and submit them together in a single order submission without errors.
+3. **Pipeline Integrity**: Workstation routing, docket generation, stock deduction, billing, and cancellation remain fully preserved for both item types.
+4. **Verification**: `tsc` clean (0 errors), `node --test` 98/98 passing (including `lib/mixed-order.test.ts`).
+
+---
+
+## Earlier feature
 **Cancel a checked-in stay (2026-08-13) — CODE COMPLETE on DEV, not yet exercised in a browser.**
 A stay could only ever end via `check_out_room`. Now it can be CANCELLED: ended without being
 billed, with the deposit settled in the same step.
@@ -55,14 +261,28 @@ is now the single labeller for the screen AND the CSV (they had drifted to "Room
 Measured on the real DEV ledger: **4 of 4** negative rows were mislabelled, all now correct.
 `lib/finance.ts` also switched to a relative `./business-day.ts` import so it is node-testable.
 
+**✅ PRODUCTION MIGRATED 2026-08-14.** All three (`20260817000000`, `20260818000000`,
+`20260818000100`) applied 3/3. Production and DEV are both at 94/94, `pending: 0`.
+Verified: enum now `active, checked_out, cancelled`; **one** `cancel_room_stay` overload whose body
+is **byte-identical to DEV** (`06f7526e…`); all 4 cancellation columns, both new CHECKs and the
+`service_role` grant present; the opening-amount column defaulting to 0. **Nothing moved** —
+8 restaurants × 7 figures identical before/after — and the **ledger reconciles 0.0000** on both
+legs for all 8. Prod had **12 active stays** at the time, untouched, and **0 saving pots**, so the
+opening column affected no existing row.
+
+📘 **The manual procedure is now written down**: `docs/runbooks/migrating-to-production.md` —
+targets and interlocks, `npm run` swallowing flags, what to look for when reading a migration
+(drop-before-create, the enum-in-one-transaction rule), the read-only pre-flight, the money
+snapshot, apply, then the four verification tiers (function hashes → nothing moved → ledger
+reconciles → PostgREST + deploy-window). Point future sessions at it rather than re-deriving.
+
 **Remaining:**
-1. **In-app QA on DEV**: cancel from Admin → Rooms and from a staff folio; confirm a staffer
-   without the permission sees no Cancel control on either; wrong PIN refused and visible as a
-   **failure** in Settings → Security activity; the freed room accepts a new check-in once cleaned.
-2. **Reprint parity**: a cancelled stay's bill in Sales must show the cancellation charge, not the
+1. **Deploy the app** — the DB is ready and waiting for all three features.
+2. **In-app QA**: cancel from Admin → Rooms and from a staff folio; confirm a staffer without the
+   permission sees no Cancel control on either; wrong PIN refused and visible as a **failure** in
+   Settings → Security activity; the freed room accepts a new check-in once cleaned.
+3. **Reprint parity**: a cancelled stay's bill in Sales must show the cancellation charge, not the
    nights it would have cost.
-3. **Production migrations `20260817000000`, `20260818000000`, `20260818000100` are PENDING** —
-   three, in that order. **DB before app.**
 4. Nothing committed — user drives git.
 
 ---

@@ -42,3 +42,9 @@ next-env.d.ts
 
 # browser-test scratch (Playwright MCP snapshots/console logs)
 .playwright-mcp/
+
+# one-off throwaway scripts. These are where a connection string gets pasted inline
+# "just to run this once" — which puts the database password in the history and
+# defeats the env-file rule above. Keep them out of the repo entirely; a script
+# worth keeping belongs in scripts/ and reads its credentials from an env file.
+scratch/

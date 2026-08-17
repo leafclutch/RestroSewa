@@ -87,6 +87,7 @@ export type DailySummaryModel = {
 
   vendorPayments: number;          // paid against vendor credit
   customerCreditCollected: number; // repayments received
+  customerCreditDiscounted: number; // debt written off as discount
   customerCreditCreated: number;
   vendorCreditCreated: number;
   customerCreditOutstanding: number;
@@ -278,6 +279,7 @@ export async function buildDailySummary(
 
     vendorPayments: num(f?.vendor_credit_paid),
     customerCreditCollected: num(f?.customer_credit_collected),
+    customerCreditDiscounted: num(f?.customer_credit_discounted),
     customerCreditCreated: num(f?.customer_credit_created),
     vendorCreditCreated: num(f?.vendor_credit_created),
     customerCreditOutstanding: num(f?.customer_credit_outstanding),

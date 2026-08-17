@@ -398,8 +398,7 @@ export async function recordPurchase(
   }
 
   // On a credit purchase the admin may part-pay now; the rest goes on the
-  // vendor's account. Cash/online purchases are settled in full by the RPC, so
-  // these are ignored there.
+  // vendor's account. Cash/online/mixed immediate payment is recorded.
   let cash = 0;
   let online = 0;
   if (method === "credit") {
@@ -407,8 +406,24 @@ export async function recordPurchase(
     if (isNaN(paidNow) || paidNow < 0) {
       return { error: "The amount paid now must be zero or more." };
     }
-    if (paidTender === "online") online = paidNow;
-    else cash = paidNow;
+    if (paidNow > 0) {
+      if (paidTender === "online") {
+        online = paidNow;
+      } else if (paidTender === "mixed") {
+        const c = parseFloat((formData.get("cash_amount") as string) || "");
+        const o = parseFloat((formData.get("online_amount") as string) || "");
+        if (isNaN(c) || isNaN(o) || c < 0 || o < 0) {
+          return { error: "Enter both the cash and the online amount paid now." };
+        }
+        if (Math.abs(c + o - paidNow) > 0.01) {
+          return { error: "Cash and Online paid now must equal the total paid now." };
+        }
+        cash = c;
+        online = o;
+      } else {
+        cash = paidNow;
+      }
+    }
   } else if (method === "mixed") {
     // A fully-paid bill settled partly in cash and partly online. The RPC
     // re-checks that the two halves equal the line total it computes itself —
@@ -447,6 +462,9 @@ export async function recordPurchase(
   revalidatePath("/admin/purchases");
   revalidatePath("/admin/stock");
   revalidatePath("/admin/vendors");
+  revalidatePath("/admin/finance");
+  revalidatePath("/admin/dashboard");
+  revalidatePath("/employee/purchases");
   return null;
 }
 

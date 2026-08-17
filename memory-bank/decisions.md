@@ -3,6 +3,92 @@
 Append-only log of architectural decisions and **why**. Never delete an entry — refine or add a
 follow-up. This exists so future work doesn't re-propose things already chosen or rejected.
 
+- **A finance reset KEEPS the saving pots and folds their balances onto `opening_amount`.**
+  *Reason:* `reset_restaurant_finance`'s established shape is "keep the ACCOUNT, delete its
+  TRANSACTIONS, carry the balance onto an opening term" — `products.opening_stock ← closing`,
+  `vendors.opening_credit ← credit_balance`, `credit_customers.opening_balance ← balance`. A saving
+  pot is an account of the same kind and `saving_titles.opening_amount` was created with exactly that
+  meaning, so wiping the pots would make money still physically in the safe vanish from the books.
+  ⚠️ The fold MUST be clamped with `greatest(…, 0)`: `saving_titles_opening_amount_check` forbids a
+  negative opening and a pot can be driven negative today (the balance guard in `security.ts` runs
+  only `if (wasWithdrawal)`, so editing a DEPOSIT downward is unchecked), and one such row would
+  abort the entire reset with a constraint violation no super admin can see or fix.
+  ⚠️ The root bug: `extra_expenses` reaches `restaurants` only by `on delete cascade`, and the reset
+  deliberately does not delete the restaurant row — so that cascade never fired and the table was
+  never cleared. **A table added after this function was written is not covered by anything; check
+  the delete list, not the FK.** `security_audit_log` and `report_deliveries` are deliberately kept
+  (audit trail; the exactly-once guard that stops the cron re-emailing days already sent), and
+  `bill_number_next` / `ot_next` are deliberately not rewound so no number is ever reused.
+
+- **`delete_restaurant_cascade` names `extra_expenses` and `saving_titles` explicitly.**
+  *Reason:* `extra_expenses.saving_title_id → saving_titles` is `ON DELETE RESTRICT`, and both tables
+  reach `restaurants` only by cascade — so `delete from restaurants` fires two cascades whose relative
+  order Postgres does not promise, and the wrong order aborts the whole delete. It worked only because
+  RI trigger names sort as STRINGS over constraint OIDs and `extra_expenses`' FK happened to be
+  created first; that breaks as soon as the OIDs straddle a digit-length boundary, i.e. on any
+  database rebuilt from scratch — which is what `scripts/clone-db.mjs` produces. This is the tenth
+  `ON DELETE RESTRICT` in the schema and was the only one not already covered by an ordered delete.
+
+- **An emptied saving pot is CLOSED, not deleted; deletion stays only for a pot with no history.**
+  *Reason:* A saving row IS an `extra_expenses` row — filing 5,000 into a pot moved 5,000 of cash on
+  that day and withdrawing it moved it back on another. Both are dated events `finance_report`, the
+  ledger and the daily PDF have already counted, and one of those days may already have been emailed
+  to an owner. Deleting them so the pot could go would silently rewrite a settled day's closing cash,
+  which is exactly what `on delete restrict` on `saving_title_id` exists to prevent. Detaching them is
+  not representable either: `extra_expenses_saving_title_check` makes `category = 'saving'` and
+  `saving_title_id is not null` an equivalence.
+  ⚠️ The original bug was gating removal on the ENTRY COUNT rather than the BALANCE, so a pot
+  deposited into and fully withdrawn held nothing and was still permanently undeletable — with the
+  message "This saving has money in it", which was false precisely in the case that hit it.
+  Name uniqueness is now partial (`where closed_at is null`) so closing frees the name; consequently
+  REOPENING can collide, and is refused rather than silently allowed.
+
+- **Unit-wise cancellation is counters on the line PLUS an append-only event log — both, not either.**
+  *Reason:* The counter (`cancelled_quantity`, and the generated `active_quantity`) exists because
+  PostgREST cannot aggregate a child table into an embed, so without a real selectable column every
+  reader would need a second query. The event log (`session_order_item_cancellations`) exists because
+  `stock_report` dates a stock release by its timestamp, and **one `cancelled_at` cannot date two
+  partial cancellations** — cancel 1 today and 2 tomorrow and the shelf must gain 1 today and 2
+  tomorrow, so a single column would have to pick one day and be silently wrong about the other.
+  Rejected: splitting a line into two rows on cancellation (mutates the ordered quantity, and makes
+  "Ordered 3 / Cancelled 1 / Remaining 2" a fragile grouping heuristic).
+
+- **`session_order_items.cancelled_at` still means "the WHOLE line is gone", and must keep meaning it.**
+  *Reason:* It is stamped only when `cancelled_quantity = quantity`. That is what let every existing
+  `cancelled_at is null` reader stay correct while readers were migrated one at a time, and it is what
+  keeps `trg_release_ticket_numbers_on_item_cancel` releasing the session's bill number on the last
+  unit. Redefining "fully done" as `cancelled + served = quantity` would silently stop bill numbers
+  being released — a fully served line is not a cancelled one.
+
+- **Releases got their OWN view (`order_item_release`); `order_item_consumption` was left alone.**
+  *Reason:* Emitting release legs from the consumption view is the obvious move and breaks three
+  readers quietly. `stock_report.usage` and `dashboard_stats.cost` carry no cancellation predicate, so
+  release rows would be counted as CONSUMPTION; `product_history`'s 'sale' leg is one row per
+  (item × product) and would fan out N times, corrupting its running `balance` for every later row.
+  The new view JOINS the old one rather than re-deriving the variant-recipe rule, and carries **both**
+  `item_created_at` and `released_at` because `stock_report` splits a release three ways on the pair.
+
+- **Partial cancellation is refused, never clamped; idempotency is compare-and-swap, not a key.**
+  *Reason:* The old model was idempotent by construction (`where cancelled_at is null` ⇒ a row can only
+  be cancelled once). Per-unit events destroy that proof: a retry of "cancel 2" cancels two MORE, and
+  the `served + cancelled <= quantity` CHECK cannot tell a retry from a second genuine request. CAS on
+  the remaining count needs no client state and additionally covers two cashiers cancelling the same
+  line concurrently — and it is the idiom `reject_table_activation` already used. Clamping an
+  over-cancel was rejected because "cancel 4" and "cancel 3" are different amounts of money.
+
+- **Cancelling an item on a PAID bill is refused rather than compensated.**
+  *Reason:* No refund or item-adjustment concept exists in this app — only the tender split is editable
+  after payment, with total and discount frozen. Meanwhile `getPaidBill` re-queries items live, so a
+  post-payment cancel silently changed a printed bill's lines while `payments.total_amount` stayed
+  put, and the two could never reconcile. Building an adjustment flow would have meant new finance and
+  ledger concepts; refusing keeps historical financial records honest, which is the actual requirement.
+
+- **Customer credit repayment discounts gate behind Discount PIN and clear debt via FIFO.**
+  *Reason:* Settling customer credit with a discount write-off (e.g. ₹310 debt cleared with ₹300 cash and ₹10 discount) reduces customer debt without generating fake cash flow or leaving unpaid credit balances. Requiring the restaurant's Discount PIN via `verify_discount_pin` RPC ensures staff cannot forgive customer debt without authorization. The total cleared amount (`amount + discount`) settles open bills FIFO and reduces `credit_customers.balance`, while `credit_payments` records `amount`, `discount_amount`, tender split, receiver staff, and PIN authorizer staff.
+
+- **Finance discounts block is net-focused and omits gross before/after discount calculations.**
+  *Reason:* Everywhere in RestroSewa, the NET amount IS the sale (no gross/net split). Rendering "Sales before discount" and "Sales after discount" caused confusion and risked double-deduction misunderstandings. The Discounts section on `/admin/finance`, CSV exports, and daily PDF reports present a clean, net-focused breakdown: "Transactions discounted", "Till / sales discounts", "Credit clearance discounts", and "Discount given (Total)".
+
 - **Derived stock, not cached.** No `current_stock` column; `stock_report` computes it from
   source rows. *Reason:* a cache drifts from the POS; a derived figure can't. Corollary: no
   nightly rollover job (today's opening = yesterday's closing by construction).
@@ -178,6 +264,20 @@ follow-up. This exists so future work doesn't re-propose things already chosen o
   `restaurant_user_table_groups`) had also never been RLS-enabled — the repo could not reproduce
   what production had set by hand. Since **the anon key ships inside the client bundle**, those two
   together meant a public key could read and rewrite staff-to-table assignment. `20260801000001`
+
+- **Purchase Credit + Mixed Payment Architecture (2026-08-16):**
+  When a product is purchased on credit with an immediate down payment (`paidNow > 0`), the down payment may be tendered via Cash, Online, or Mixed (Cash + Online).
+  The server action `recordPurchase` (`app/actions/purchases.ts`) re-derives `p_cash` and `p_online` from `formData` and passes them to `record_purchase` RPC.
+  Database RPCs (`record_purchase`, `edit_purchase`, `finance_report`, `finance_transactions`) already handle multi-tender splits and vendor debt without DB changes.
+  Revalidations expand to `/admin/finance`, `/admin/dashboard`, `/admin/purchases`, `/admin/vendors`, `/employee/purchases`.
+
+- **Room Advance Payment Methods Standardization (2026-08-16):**
+  `AdvanceFields` (`app/(employee)/employee/_components/advance-fields.tsx`) was refactored to reuse the application-wide `PaymentMethodPicker` (`components/ui/payment-method-picker.tsx`).
+  Ensures Cash, Online, Card, and Mixed (Cash + Online) advance payments behave identically across Check-in and Folio advance forms, with `splitIsValid` enforcing cash+online complement totals before submit.
+
+- **Extra Expenses Fuel Category Migration (2026-08-16):**
+  Renamed the `'gas'` spending category to `'fuel'` across Extra Expenses UI, reports, and filters.
+  Migration `20260819000000_rename_gas_to_fuel.sql` updates historical records (`category = 'gas'` -> `'fuel'`) and replaces `extra_expenses_category_check` CHECK constraint. `lib/expenses.ts` includes fallback mapping for backward compatibility.
   enables RLS on the three and revokes anon/authenticated, iterating `pg_default_acl` under
   `pg_has_role` so it also works where the migration runs as `postgres` (which is not a member of
   `supabase_admin`). Safe to revoke because there is **no client-side table access anywhere** —

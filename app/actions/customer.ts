@@ -591,7 +591,7 @@ export async function getCustomerOrderFeed(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: orderRows } = await (service as any)
     .from("session_orders")
-    .select("id, created_at, session_order_items ( id, item_name, quantity, item_price, item_status, cancelled_at )")
+    .select("id, created_at, session_order_items ( id, item_name, quantity, active_quantity, item_price, item_status, cancelled_at )")
     .eq("session_id", sessionId)
     .order("created_at", { ascending: false });
 
@@ -602,12 +602,14 @@ export async function getCustomerOrderFeed(
     // charged for. An order whose items were all cancelled drops out below.
     const items: CustomerOrderItem[] = ((o.session_order_items ?? []) as any[])
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .filter((it: any) => !it.cancelled_at)
+      .filter((it: any) => !it.cancelled_at && Number(it.active_quantity ?? it.quantity) > 0)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .map((it: any) => ({
         id: it.id,
         name: it.item_name,
-        quantity: it.quantity,
+        // What the guest is actually being charged for. Showing the ordered count
+        // after part of it was cancelled is how a guest disputes a correct bill.
+        quantity: Number(it.active_quantity ?? it.quantity),
         price: Number(it.item_price ?? 0),
         status: it.item_status,
       }));

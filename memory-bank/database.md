@@ -45,9 +45,25 @@ almost everything is reached through the **service_role** client or **RPCs** (RL
 
 ## Orders & tickets
 - **session_orders / session_order_items** — order batches + lines under a session.
-  `created_at` = the stock **reservation**; `cancelled_at`/`cancel_reason`/`cancelled_by` = the
-  **release** (rejects/force-close/cancel). Rule: a served item is never released; the row is
+  `created_at` = the stock **reservation**. Rule: a served item is never released; the row is
   the deduction, so never "simplify" cancellation into compensating adjustments (double-release).
+  ⚠️ **FOUR quantities, and they are not interchangeable** (2026-08-17):
+  `quantity` = ordered, immutable, and what an already-printed ticket's REPRINT must show;
+  `cancelled_quantity` = units taken off (maintained by trigger from the event log);
+  `served_quantity` = units that reached the guest; `active_quantity` = generated
+  `quantity − cancelled_quantity` and **the only one any money figure may use**. Cancellable =
+  `active − served`. Derivations live in `lib/order-quantities.ts` — do not re-spell them inline.
+  `served + cancelled <= quantity` is a CHECK, and the stock arithmetic depends on it.
+  ⚠️ **`cancelled_at`/`cancel_reason`/`cancelled_by` now mean "the WHOLE line is gone"** — stamped
+  only when `cancelled_quantity = quantity`. Every `cancelled_at is null` reader is still correct at
+  the extremes because of that. Do NOT redefine it as `cancelled + served = quantity` or
+  `trg_release_ticket_numbers_on_item_cancel` stops releasing the bill number.
+  `item_status` is DERIVED from `served_quantity` by a two-way sync trigger (the flag and the count
+  each derive the other, depending which was written) — never write `item_status` directly.
+- **session_order_item_cancellations** — one row per cancellation EVENT: `qty`, `reason`,
+  `cancelled_by`, `cancelled_at`, `request_id`, `void_ticket_id`. Append-only; it is the **release**
+  leg of stock, and the reason it exists is that a single `cancelled_at` cannot date two partial
+  cancels. Written only by `cancel_order_item_units` and the three bulk cancel RPCs.
   **`is_custom`** flags a manual off-menu line (staff-typed name/price, `menu_item_id` NULL) — it
   bills/discounts/reports like any item but moves no stock (no `menu_item_id` to join
   `menu_item_products`). See `modules/custom-items.md`.
@@ -72,10 +88,13 @@ almost everything is reached through the **service_role** client or **RPCs** (RL
   which is what keeps `finance_report`'s customer-credit leg (`bill_amount − down_payment`) correct
   with no change.
 - **credits / credit_payments / credit_customers** — customer **receivables** (money owed TO
-  us), accrual: the sale counts at billing; repayments move cash later. Gated on
+  us), accrual: the sale counts at billing; repayments move cash later. `credit_payments` supports
+  `discount_amount` and `discount_by` (migration `20260820000000_credit_payment_discount.sql`),
+  populated via `record_credit_payment` RPC with Discount PIN verification (`verify_discount_pin`).
+  Settles open bills FIFO and reduces `credit_customers.balance` by `amount + discount_amount`. Gated on
   process_payments + close_bills.
-- **extra_expenses** — overheads (rent/electricity/water/gas/internet/maintenance/marketing/
-  licenses/transport/other). The shape of `purchases` **minus the credit leg**: CHECK enforces
+- **extra_expenses** — overheads (rent/electricity/water/fuel/internet/maintenance/marketing/
+  licenses/transport/other — updated from 'gas' via `20260819000000_rename_gas_to_fuel.sql`). The shape of `purchases` **minus the credit leg**: CHECK enforces
   `cash_amount + online_amount = amount` and `amount > 0`; `payment_method` in (cash|online|mixed)
   — `credit` is excluded because "we didn't pay" is the absence of an expense, not a kind of one.
   **No status column and no RPCs**: the row IS the payment, written by a plain insert through

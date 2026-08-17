@@ -5,6 +5,63 @@ Versioning is informal (the app ships continuously); dates anchor the entries.
 
 ## [Unreleased] — 2026-08
 
+### Fixed — Reset Finance & Sales Data now clears expenses and savings (2026-08-17)
+- **Extra expenses and savings survived a reset entirely.** Rent, electricity, fuel, internet,
+  marketing — and every saving deposit and withdrawal — stayed on the books after a reset that says
+  it clears them, so the finance report kept counting money from before the reset. They are now
+  cleared like every other transaction.
+- **The money in your savings pots is not lost.** The pots themselves are kept and each one's
+  balance becomes its opening amount — exactly how stock on hand, customer debt and vendor payables
+  already carry across a reset. Cash physically set aside stays on the books.
+- **The confirmation dialog now tells you the truth.** It never mentioned expenses or savings at all;
+  it now shows how many expenses (and their total) will go, how many saving movements, how much is
+  held in savings and which pots are kept. The reset also now says not to include savings in the
+  opening cash figure you type afterwards.
+- **Deleting a restaurant that had savings could have failed outright.** The delete relied on the
+  database picking a lucky order for two related tables; on a rebuilt database it would have aborted
+  halfway. Now spelled out explicitly.
+
+### Fixed — an emptied saving can finally be retired (2026-08-17)
+- **A saving you deposited into and then fully withdrew was stuck on the screen forever.** Removal
+  was offered only while a saving had *no entries at all*, so once anything had ever been filed into
+  it — even if every rupee was later taken back out — it could never be removed. The refusal read
+  "This saving has money in it", which was simply untrue: the balance was zero.
+- An **empty** saving that has history can now be **Closed**: it leaves the list and the "file into"
+  picker, and can be **Reopened** if that was a mistake. Its past entries stay in Finance exactly as
+  they were — they are real cash movements on real days, and deleting them would change the cash
+  balance of a day that has already been reported. A saving that never held anything is still
+  deleted outright.
+- Closing frees the name, so next year's "Festival Fund" can be called that again.
+- A saving with money still in it now says how much (`This saving still holds ₹X`) instead of
+  refusing without explanation.
+
+### Added — Cancel individual units of an order line (2026-08-17)
+- **A quantity can now be cancelled in part.** Ordered `Momo × 3` and the guest only wants two?
+  Cancel one. Previously the whole line went, so staff either overcharged for the two still wanted
+  or wrote off all three. The cancel button opens a small stepper when more than one unit can go.
+- **The line says what happened**: "Ordered 3 · Cancelled 1 · Remaining 2", instead of showing the
+  original count as though all of it were still coming.
+- **Stock comes back one unit at a time.** Cancel 1 of 3 and exactly one unit returns to the shelf;
+  cancel the other two later and two more return — never the whole line twice. A cancellation made
+  on a later day is credited to that day, so a closed day's stock balance never changes after the fact.
+- **Serving is per-unit too**, so "two arrived, cancel the one that didn't" now works. A served unit
+  was genuinely eaten: it stays on the bill, its stock stays deducted, and it can never be cancelled.
+- **Void tickets.** Cancelling units that were already sent to a station prints a cancellation ticket
+  naming just those units ("CANCEL 1 × Chicken Momo"). Units cancelled before the KOT went out
+  produce no paper, because nothing reached the kitchen.
+- **The bill, the kitchen queue, the room folio, the guest's screen and the daily figures all follow
+  the remaining quantity.** Only what the guest is keeping is charged for or cooked.
+
+### Fixed — a paid bill can no longer be altered (2026-08-17)
+- Cancelling an item on an **already-paid** bill was possible and silently changed what a reprint
+  showed, while the recorded sale stayed at the original amount — the two could never be reconciled.
+  It is now refused with a message pointing at a manager. Correcting a paid bill still needs one.
+- **Force-closing a session no longer returns served food to stock.** It used to release every unit
+  of a part-served line.
+- **A cancelled item no longer disappears from its own kitchen ticket's reprint.** A ticket now
+  reprints what the kitchen was actually handed, whatever happened to the food afterwards.
+
+
 > **Database migrated to production 2026-08-13.** All thirteen migrations behind room advances,
 > the sales split, Extra Expenses, Savings, withdrawals, discounts and the ledger sale detail are
 > now live on the production database — 13/13 applied, no failures. **The app itself is not
@@ -17,6 +74,14 @@ Versioning is informal (the app ships continuously); dates anchor the entries.
 > additive, also ahead of the app. All nine guests currently checked in were priced under both the
 > old and the new rule first: **every one bills the same number of nights**, so nobody's folio
 > moves when the app deploys.
+
+### Added
+- **Mixed Menu + Customized Items Order Submission Fix**: Fixed bug where ordering menu items and customized/manual items together in the same order submission failed. Explicitly added `is_custom: false` to menu items resolved via `resolveOrderItems`, ensuring uniform key structures across all elements passed to Supabase PostgREST bulk insert. Staff can now add any combination of menu and custom items into one cart and submit as a single order.
+- **Discount While Clearing Customer Credit & Finance Integration**: Staff and Admin credit payment flows (`/employee/credits` and `/admin/credits`) now support applying a discount when settling customer credit. Requires the restaurant's **Discount PIN** (`verify_discount_pin` RPC) for authorization. Total credit debt cleared (`amount_received + discount_amount`) settles open customer bills FIFO and reduces customer balance to 0 without leaving unpaid credit. Fully integrated with Finance (`finance_report` & `finance_transactions`), displaying "Discount written off" under Customer credits and breaking down "Till / sales discounts" vs "Credit clearance discounts" under Discounts on `/admin/finance`. Removed redundant "Sales before discount" and "Sales after discount" rows across the Finance UI, CSV exports, and daily summary PDF reports.
+- **Room Advance Payment Methods**: Staff Dashboard → Rooms (Check-in modal and Room Folio advance forms) now features standard payment method selection for advances: Cash, Online, Card, and Mixed (Cash + Online) with auto-complement logic and split validation matching the rest of the system.
+- **Purchase Credit + Partial/Mixed Payment**: Support for partial and mixed (Cash + Online) immediate payments when purchasing products on credit. Correctly tracks immediate cash/online movement and remaining vendor credit debt in Finance and ledger.
+- **Room Assignment Assign All / Unassign All**: Added "Assign all" and "Clear all" (Unassign All) one-tap toggle buttons to Room Types and individual Rooms in Admin Dashboard → Rooms, matching Table Group assignments.
+- **Extra Expenses Category Fuel**: Renamed "Gas" category to "Fuel" across Extra Expenses UI, filters, reports, and database schema constraints, updating historical records seamlessly.
 
 ### Added
 - **You can now cancel a checked-in guest.** Under Admin → Rooms there is a **Checked-in guests**
