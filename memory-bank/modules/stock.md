@@ -76,6 +76,32 @@ purchase, or a manual deduction all move stock). See `modules/realtime.md`.
 `view_stock` (read), `manage_stock` (products/adjustments/recipes), `manage_purchases` (record
 purchases), `manage_vendors` (vendor CRUD + pay). Write-implies-read. See `modules/permissions.md`.
 
+# Reservation and release — the two legs, and where they now come from
+Stock is DERIVED, never stored. An order row's existence IS the deduction; a cancellation IS the
+restore. Since 2026-08-17 those two legs read from **different relations**, and that separation is
+load-bearing:
+
+- **Reservation** — `order_item_consumption`, one row per (item × product), `qty = quantity ×
+  qty_per_unit`. Read by `stock_report.usage`, `product_history`'s 'sale' leg and
+  `dashboard_stats.cost`. ⚠️ **None of those filters on cancellation**, deliberately: the reservation
+  genuinely happened, and netting it retroactively would rewrite closed days.
+- **Release** — `order_item_release`, one row per CANCELLATION EVENT. Read by `stock_report.release`
+  and `product_history`'s 'restore' leg.
+
+⚠️ **Do not merge them.** Emitting release legs from the consumption view makes `usage` and `cost`
+count releases as consumption (both silently, both in the money direction) and fans out
+`product_history`'s sale leg, corrupting its running `balance` for every later row.
+
+⚠️ `order_item_release` carries **both** `item_created_at` and `released_at`. `stock_report` splits a
+release three ways — `before` / `reversed` (released in-window, ordered in-window) / `returned`
+(released in-window, ordered earlier) — keyed on the pair. Collapsing them reclassifies a cross-day
+partial cancel out of `added` into a reduction of `used_pos`, which changes a settled day's closing.
+
+`used_pos` can never go negative because the released quantity is a subset of the reserved quantity.
+That used to hold because a row could only be cancelled once; it now holds because
+`session_order_items_unit_counts_check` caps `Σ events` at the ordered quantity. **That constraint is
+part of the stock arithmetic, not just data hygiene.**
+
 # Known Limitations
 - 1 unit per product; recipe is per (item/variant, product) pair — no nested sub-recipes.
 - COGS/profit only for linked items (see `modules/finance.md`).

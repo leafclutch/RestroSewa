@@ -200,7 +200,7 @@ export async function getRoomsOverview(): Promise<RoomOverview[]> {
       sessionIds.length > 0
         ? svc
             .from("session_order_items")
-            .select("item_price, quantity, item_status, session_orders!inner(session_id)")
+            .select("item_price, quantity, active_quantity, item_status, session_orders!inner(session_id)")
             .in("session_orders.session_id", sessionIds)
             .is("cancelled_at", null)
         : Promise.resolve({ data: [] }),
@@ -210,6 +210,7 @@ export async function getRoomsOverview(): Promise<RoomOverview[]> {
     for (const i of (itemsRes.data ?? []) as {
       item_price: number;
       quantity: number;
+      active_quantity: number;
       item_status: string;
       session_orders: { session_id: string } | { session_id: string }[];
     }[]) {
@@ -219,7 +220,13 @@ export async function getRoomsOverview(): Promise<RoomOverview[]> {
       const stayId = so && stayOfSession.get(so.session_id);
       if (!stayId) continue;
 
-      foodByStay.set(stayId, (foodByStay.get(stayId) ?? 0) + Number(i.item_price) * i.quantity);
+      // ⚠️ active_quantity. This figure feeds the folio, and the folio is what
+      // `check_out_room` charges — reading `quantity` here overcharges a guest for
+      // food they had cancelled.
+      foodByStay.set(
+        stayId,
+        (foodByStay.get(stayId) ?? 0) + Number(i.item_price) * Number(i.active_quantity)
+      );
 
       const c = countByStay.get(stayId) ?? { total: 0, pending: 0 };
       c.total += 1;
@@ -651,11 +658,21 @@ async function loadFolioInputs(stayId: string) {
     if (orderIds.length > 0) {
       const { data: items } = await svc
         .from("session_order_items")
-        .select("id, item_name, item_price, quantity")
+        .select("id, item_name, item_price, quantity, active_quantity")
         .in("order_id", orderIds)
         .is("cancelled_at", null)
         .order("created_at");
-      food = ((items ?? []) as typeof food).map((i) => ({ ...i, item_price: Number(i.item_price) }));
+      // The guest's food lines. `quantity` is replaced by the ACTIVE count so a
+      // partly-cancelled line bills — and prints — only what they are keeping; a
+      // line cancelled down to nothing drops off the folio entirely.
+      food = ((items ?? []) as (typeof food[number] & { active_quantity: number })[])
+        .filter((i) => Number(i.active_quantity) > 0)
+        .map((i) => ({
+          id: i.id,
+          item_name: i.item_name,
+          item_price: Number(i.item_price),
+          quantity: Number(i.active_quantity),
+        }));
     }
   }
 

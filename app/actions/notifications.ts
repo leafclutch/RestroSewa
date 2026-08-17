@@ -99,7 +99,7 @@ export async function getActiveNotifications(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: sumItems } = await (service as any)
       .from("session_order_items")
-      .select("order_id, item_name, quantity, item_price")
+      .select("order_id, item_name, quantity, active_quantity, item_price")
       .in("order_id", activationOrderIds)
       .is("cancelled_at", null);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -107,7 +107,8 @@ export async function getActiveNotifications(
       if (!summaryByOrder.has(it.order_id)) summaryByOrder.set(it.order_id, []);
       summaryByOrder.get(it.order_id)!.push({
         name: it.item_name,
-        quantity: it.quantity,
+        // Staff approve this total — it has to be what will actually be charged.
+        quantity: Number(it.active_quantity ?? it.quantity),
         price: Number(it.item_price ?? 0),
       });
     }

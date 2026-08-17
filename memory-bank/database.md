@@ -45,9 +45,25 @@ almost everything is reached through the **service_role** client or **RPCs** (RL
 
 ## Orders & tickets
 - **session_orders / session_order_items** — order batches + lines under a session.
-  `created_at` = the stock **reservation**; `cancelled_at`/`cancel_reason`/`cancelled_by` = the
-  **release** (rejects/force-close/cancel). Rule: a served item is never released; the row is
+  `created_at` = the stock **reservation**. Rule: a served item is never released; the row is
   the deduction, so never "simplify" cancellation into compensating adjustments (double-release).
+  ⚠️ **FOUR quantities, and they are not interchangeable** (2026-08-17):
+  `quantity` = ordered, immutable, and what an already-printed ticket's REPRINT must show;
+  `cancelled_quantity` = units taken off (maintained by trigger from the event log);
+  `served_quantity` = units that reached the guest; `active_quantity` = generated
+  `quantity − cancelled_quantity` and **the only one any money figure may use**. Cancellable =
+  `active − served`. Derivations live in `lib/order-quantities.ts` — do not re-spell them inline.
+  `served + cancelled <= quantity` is a CHECK, and the stock arithmetic depends on it.
+  ⚠️ **`cancelled_at`/`cancel_reason`/`cancelled_by` now mean "the WHOLE line is gone"** — stamped
+  only when `cancelled_quantity = quantity`. Every `cancelled_at is null` reader is still correct at
+  the extremes because of that. Do NOT redefine it as `cancelled + served = quantity` or
+  `trg_release_ticket_numbers_on_item_cancel` stops releasing the bill number.
+  `item_status` is DERIVED from `served_quantity` by a two-way sync trigger (the flag and the count
+  each derive the other, depending which was written) — never write `item_status` directly.
+- **session_order_item_cancellations** — one row per cancellation EVENT: `qty`, `reason`,
+  `cancelled_by`, `cancelled_at`, `request_id`, `void_ticket_id`. Append-only; it is the **release**
+  leg of stock, and the reason it exists is that a single `cancelled_at` cannot date two partial
+  cancels. Written only by `cancel_order_item_units` and the three bulk cancel RPCs.
   **`is_custom`** flags a manual off-menu line (staff-typed name/price, `menu_item_id` NULL) — it
   bills/discounts/reports like any item but moves no stock (no `menu_item_id` to join
   `menu_item_products`). See `modules/custom-items.md`.

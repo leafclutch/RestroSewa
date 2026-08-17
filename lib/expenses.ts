@@ -135,6 +135,15 @@ export type SavingTitle = {
   entryCount: number;
   createdAt: string;
   /**
+   * When this pot was retired, or null while it is active.
+   *
+   * A pot with entries can never be deleted — its saving rows are dated cash movements
+   * Finance has already counted, so removing them would rewrite a settled day. An
+   * EMPTIED pot is closed instead: it leaves the list and the "file into" picker, and
+   * its history stays exactly where it is. Reversible.
+   */
+  closedAt: string | null;
+  /**
    * Set when the viewer may only see TODAY's activity (the add-only permission).
    * `total` then carries today's net contribution and `openingAmount` is 0 —
    * the running balance is never computed for them, let alone sent.

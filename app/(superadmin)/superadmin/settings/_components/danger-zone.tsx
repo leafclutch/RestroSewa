@@ -239,12 +239,24 @@ function ResetDialog({
             ...(c.vendor_payable > 0
               ? ([[`Owed to ${c.creditors} vendor${c.creditors === 1 ? "" : "s"}`, money(c.vendor_payable)]] as [string, string][])
               : []),
+            ...(c.savings_held > 0
+              ? ([["Held in savings", `${money(c.savings_held)} — now each pot's opening amount`]] as [string, string][])
+              : []),
           ]}
         />
 
         <p className="text-sm mb-3" style={{ color: "var(--color-ink)" }}>
           Set the opening balance — the cash and online money on hand as of now. This is the one
           figure the system cannot work out for itself.
+          {/* Savings are deliberately outside the cash balance, so an owner who has just
+              read "₹45,000 held in savings" above needs telling not to add it back in. */}
+          {c.savings_held > 0 && (
+            <>
+              {" "}
+              Money set aside in savings is tracked separately on each pot — don&apos;t include it here
+              unless it is physically in the till.
+            </>
+          )}
         </p>
 
         <div className="grid grid-cols-2 gap-3 mb-4">
@@ -319,6 +331,8 @@ function ResetDialog({
           ["Salary payments", count(f.salary_payments)],
           ["Stock movements", count(f.stock_moves)],
           ["Room stays", count(f.room_stays)],
+          ["Extra expenses", `${count(f.extra_expenses)} · ${money(f.extra_expenses_total)}`],
+          ["Saving deposits & withdrawals", count(f.saving_entries)],
           ["Alerts", count(f.notifications)],
           ["Opening balance", f.has_opening ? "Cleared — you'll set a new one" : "Not set"],
         ]}
@@ -341,6 +355,12 @@ function ResetDialog({
               ? `${money(c.vendor_payable)} across ${c.creditors}`
               : "Nothing outstanding",
           ],
+          [
+            "Held in savings",
+            c.savings_held > 0
+              ? `${money(c.savings_held)} — becomes each pot's opening amount`
+              : "Nothing set aside",
+          ],
         ]}
       />
 
@@ -353,6 +373,7 @@ function ResetDialog({
           ["Tables & rooms", `${count(s.setup.tables)} · ${count(s.setup.rooms)}`],
           ["Products & vendors", `${count(s.setup.products)} · ${count(s.setup.vendors)}`],
           ["Credit accounts", count(s.setup.credit_customers)],
+          ["Saving pots", count(c.saving_pots)],
         ]}
       />
 
@@ -465,11 +486,15 @@ function DeleteDialog({
           ["Payments taken", `${count(f.payments)} · ${money(f.revenue)}`],
           ["Purchases & vendor payments", `${count(f.purchases)} · ${count(f.vendor_payments)}`],
           ["Salary payments", count(f.salary_payments)],
+          [
+            "Expenses & savings",
+            `${count(f.extra_expenses)} expenses · ${count(c.saving_pots)} pots`,
+          ],
           ["QR codes & logo", "Deleted"],
         ]}
       />
 
-      {(c.customer_debt > 0 || c.vendor_payable > 0) && (
+      {(c.customer_debt > 0 || c.vendor_payable > 0 || c.savings_held > 0) && (
         <Ledger
           heading="Money that will never be recorded again"
           tone={RUBY}
@@ -479,6 +504,11 @@ function DeleteDialog({
               : []),
             ...(c.vendor_payable > 0
               ? ([[`Owed to ${c.creditors} vendor${c.creditors === 1 ? "" : "s"}`, money(c.vendor_payable)]] as [string, string][])
+              : []),
+            // Unlike a reset, a full delete really does destroy this — the pots go with
+            // the restaurant, and the money in the safe stops being recorded anywhere.
+            ...(c.savings_held > 0
+              ? ([["Held in savings", money(c.savings_held)]] as [string, string][])
               : []),
           ]}
         />
@@ -597,7 +627,7 @@ export function DangerZone({
               tone: AMBER,
               icon: <RotateCcw size={13} />,
               title: "Reset Finance & Sales Data",
-              body: "Clears sales, billing, payments, credits, purchases, salary payments and the finance reports. Keeps the menu, staff, tables, products, vendors and credit accounts. Stock on hand and outstanding balances carry forward.",
+              body: "Clears sales, billing, payments, credits, purchases, salary payments, extra expenses, saving entries and the finance reports. Keeps the menu, staff, tables, products, vendors, credit accounts and saving pots. Stock on hand, outstanding balances and money held in savings carry forward.",
               cta: "Reset",
             },
             {

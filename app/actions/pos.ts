@@ -64,8 +64,28 @@ export type OrderItemRow = {
   // if the station was later deleted (FK nulled) or renamed.
   workstation_id: string | null;
   workstation_name: string | null;
+  /**
+   * ⚠️ THREE QUANTITIES, AND THEY MEAN DIFFERENT THINGS.
+   *
+   * `quantity`         what was ORDERED. Immutable. This is what an already-printed
+   *                    ticket says, so it is what a REPRINT must show.
+   * `cancelled_quantity` units taken back off. Sum of the line's cancellation events.
+   * `active_quantity`  `quantity - cancelled_quantity` — what is BILLED, what still
+   *                    has to be cooked, and what every money figure must use.
+   * `served_quantity`  units that reached the customer. Only unserved units can be
+   *                    cancelled, so `active - served` is what is still cancellable.
+   *
+   * Reaching for `quantity` where you meant `active_quantity` overcharges the guest;
+   * reaching for it on a reprint is correct. Say which you mean at each call site.
+   */
   quantity: number;
+  cancelled_quantity: number;
+  served_quantity: number;
+  active_quantity: number;
+  /** Derived from `served_quantity`; 'served' only once every ACTIVE unit is served. */
   item_status: "pending" | "served";
+  /** Set only when the WHOLE line is cancelled. A partly-cancelled line is still null. */
+  cancelled_at: string | null;
   notes: string | null;
   created_at: string;
   order_id: string;
@@ -86,6 +106,12 @@ export type OrderTicketRow = {
   id: string;
   workstation_id: string | null;
   workstation_name: string | null;
+  /**
+   * 'order' for a normal KOT/BOT, 'void' for a cancellation ticket. A void ticket
+   * names only the units that came off; it never replaces the original, because an
+   * item belongs to one ticket for life.
+   */
+  kind: "order" | "void";
   /** Null when that station's OT numbering is switched off. */
   ot_number: number | null;
   prefix: string | null;
@@ -141,7 +167,20 @@ export type SessionDetail = {
   tickets: OrderTicketRow[];
   /** Every table shift / room move this session has been through, oldest first. */
   transfers: SessionTransferRow[];
+  /**
+   * The live lines: everything not FULLY cancelled. A partly-cancelled line is
+   * here, carrying its `active_quantity`. This is what the bill and the screen use.
+   */
   items: OrderItemRow[];
+  /**
+   * Every line ever ordered on this session, cancelled ones included.
+   *
+   * Only for rendering an already-issued ticket. An item keeps its ticket for life,
+   * so a reprint has to show what the kitchen was handed even if the food was
+   * cancelled afterwards — reading `items` there printed "No items".
+   * ⚠️ Never total money from this. Use `items` and `active_quantity`.
+   */
+  allItems: OrderItemRow[];
   total: number;
 };
 
@@ -681,10 +720,16 @@ export async function getSessionDetail(
   // a flat join, so nesting items under orders does NOT multiply rows on the wire; the
   // response is smaller than the three separate ones because the ids aren't repeated.
   //
-  // `cancelled_at` is BOTH filtered here and re-checked when flattening. A cancelled item
-  // is off the bill and back on the shelf, so if this embedded filter ever silently
-  // stopped applying — a PostgREST version difference, a typo in the deep path — the
-  // failure would be cancelled food being charged for. Belt and braces on money.
+  // Cancelled items are NO LONGER filtered out in the query, and the reason is the
+  // ticket reprint: an item keeps its ticket for life, so a ticket whose items were
+  // later cancelled has to be able to render what the kitchen was actually handed.
+  // Filtering here made `itemsOfTicket` print "No items" for exactly those tickets.
+  //
+  // The money guard that filter used to provide is now STRONGER, not weaker. Totals
+  // multiply by `active_quantity` (= quantity − cancelled_quantity), so a cancelled
+  // line contributes ZERO by arithmetic rather than by being absent — and a partly
+  // cancelled line contributes exactly its live part, which no filter could express.
+  // A cancelled row leaking into the list can no longer put money on a bill.
   const [sessionRes, ticketsRes, transfersRes] = await Promise.all([
     span("db.session+orders+items", async () =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -696,11 +741,11 @@ export async function getSessionDetail(
            restaurant_tables ( number ), rooms ( number ),
            session_orders ( id,
              session_order_items ( id, item_name, item_price, workstation_id,
-               workstation_name, quantity, item_status, notes, created_at, order_id,
+               workstation_name, quantity, cancelled_quantity, served_quantity,
+               active_quantity, item_status, notes, created_at, order_id,
                ticket_id, is_custom, cancelled_at ) )`
         )
         .eq("id", sessionId)
-        .is("session_orders.session_order_items.cancelled_at", null)
         .maybeSingle()
     ),
     // Independent of the items — no reason for these to wait their turn.
@@ -708,7 +753,7 @@ export async function getSessionDetail(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (service as any)
         .from("order_tickets")
-        .select("id, workstation_id, workstation_name, ot_number, prefix, printed_at, location_label")
+        .select("id, workstation_id, workstation_name, kind, ot_number, prefix, printed_at, location_label")
         .eq("session_id", sessionId)
         .order("printed_at")
     ),
@@ -731,15 +776,20 @@ export async function getSessionDetail(
   // order-1's items then order-2's — not chronological across the session, which is what
   // the screen shows and what the old global `.order("created_at")` produced. Sorting
   // here restores it; do not rely on the embed for cross-parent ordering.
-  const items: OrderItemRow[] = (
+  const allItems: OrderItemRow[] = (
     ((session.session_orders ?? []) as { session_order_items?: OrderItemRow[] }[])
       .flatMap((o) => o.session_order_items ?? [])
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .filter((i) => (i as any).cancelled_at == null)
   ).sort(byCreatedThenId);
 
+  // What the screen and the bill work from: everything still live, INCLUDING lines
+  // that are only partly cancelled (their `cancelled_at` is null until the last unit
+  // goes). Fully-cancelled lines drop out here so they don't clutter the bill —
+  // they survive on `allItems` for the ticket reprint.
+  const items = allItems.filter((i) => i.cancelled_at == null);
+
+  // ⚠️ active_quantity, never quantity. This is the bill.
   const total = items.reduce(
-    (sum, i) => sum + Number(i.item_price) * i.quantity,
+    (sum, i) => sum + Number(i.item_price) * Number(i.active_quantity),
     0
   );
 
@@ -791,6 +841,7 @@ export async function getSessionDetail(
     tickets,
     transfers,
     items,
+    allItems,
     total,
   };
 }
@@ -930,8 +981,13 @@ export async function updateOrderItemStatus(
     }
   }
 
-  // One state change, one write. An item is pending until it reaches the guest,
-  // and then it is served.
+  // Serving is counted in UNITS now, but this entry point keeps its old meaning:
+  // "served" = every unit still on the line, "pending" = none of them. That is what
+  // the one-tap check in the queue does, and it must not change — the per-unit form
+  // is `serveOrderItemUnits` below.
+  //
+  // Routed through the RPCs rather than writing `item_status` directly so the count
+  // and the flag can never disagree; the DB derives the flag from the count.
   //
   // This used to also fan out: when the last item on an order turned `ready` it
   // re-read every item on the order, checked for an existing alert, re-read the
@@ -939,10 +995,13 @@ export async function updateOrderItemStatus(
   // the hot path of a kitchen tapping through a rush. With `ready` gone there is
   // no moment left to announce, and the whole block goes with it.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (service as any)
-    .from("session_order_items")
-    .update({ item_status: status })
-    .eq("id", itemId);
+  const { error: serveErr } = await (service as any).rpc(
+    status === "served" ? "serve_order_item_units" : "unserve_order_item_units",
+    status === "served"
+      ? { p_restaurant_id: ru.restaurant_id, p_item_id: itemId, p_qty: null, p_by: ru.id }
+      : { p_restaurant_id: ru.restaurant_id, p_item_id: itemId, p_qty: null }
+  );
+  if (serveErr) return { error: "Failed to update the item." };
 
   revalidatePath("/employee/queue");
   revalidatePath(`/employee/session/${order.session_id}`);
@@ -1032,7 +1091,10 @@ export async function generateOrderTicket(
   const { data: items } = await (service as any)
     .from("session_order_items")
     .select(
-      "id, item_name, item_price, workstation_id, workstation_name, quantity, item_status, notes, created_at, order_id, ticket_id, is_custom"
+      // This ticket is being printed NOW, so "what was ordered" and "what is live"
+      // coincide — the station must be handed `active_quantity`. Cancelling 2 of 5
+      // before the KOT went out and then printing 5 is a real kitchen bug.
+      "id, item_name, item_price, workstation_id, workstation_name, quantity, cancelled_quantity, served_quantity, active_quantity, item_status, cancelled_at, notes, created_at, order_id, ticket_id, is_custom"
     )
     .eq("ticket_id", ticket.id)
     .order("created_at");
@@ -1046,6 +1108,7 @@ export async function generateOrderTicket(
       id: ticket.id,
       workstation_id: ticket.workstation_id ?? null,
       workstation_name: ticket.workstation_name ?? null,
+      kind: (ticket.kind ?? "order") as "order" | "void",
       ot_number: ticket.ot_number ?? null,
       prefix: ticket.prefix ?? null,
       printed_at: ticket.printed_at,
@@ -1054,6 +1117,120 @@ export async function generateOrderTicket(
       location_label: ticket.location_label ?? null,
     },
     items: (items as OrderItemRow[]) ?? [],
+  };
+}
+
+// ─── Generate a VOID ticket ───────────────────────────────────────────────────
+
+/** One cancellation event, as the void-ticket preview needs it. */
+export type VoidTicketLine = {
+  cancellation_id: string;
+  item_id: string;
+  item_name: string;
+  qty: number;
+  is_custom: boolean;
+  workstation_id: string | null;
+  workstation_name: string | null;
+};
+
+/**
+ * Cancellation events on this session that were PRINTED but not yet voided.
+ *
+ * The `ticket_id is not null` test is the whole point: units cancelled before their
+ * KOT went out never reached the kitchen, so there is nothing to un-print and no
+ * paper is offered.
+ */
+export async function getPendingVoids(sessionId: string): Promise<VoidTicketLine[]> {
+  const ru = await getRestaurantUser();
+  const service = createServiceClient();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("session_order_item_cancellations")
+    .select(
+      `id, qty, cancelled_at, order_item_id,
+       session_order_items!inner ( id, item_name, is_custom, ticket_id, workstation_id,
+         workstation_name, session_orders!inner ( session_id ) )`
+    )
+    .eq("restaurant_id", ru.restaurant_id)
+    .is("void_ticket_id", null)
+    .eq("session_order_items.session_orders.session_id", sessionId)
+    .not("session_order_items.ticket_id", "is", null)
+    .order("cancelled_at");
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((data ?? []) as any[]).map((r) => ({
+    cancellation_id: r.id,
+    item_id: r.order_item_id,
+    item_name: r.session_order_items?.item_name ?? "",
+    qty: Number(r.qty),
+    is_custom: !!r.session_order_items?.is_custom,
+    workstation_id: r.session_order_items?.workstation_id ?? null,
+    workstation_name: r.session_order_items?.workstation_name ?? null,
+  }));
+}
+
+/**
+ * Issue a VOID ticket for cancelled units that were already printed.
+ *
+ * Deliberately a DELTA, not a replacement: an item belongs to one ticket for life, so
+ * the original KOT is never reissued. This names only what came off, and it burns an
+ * OT number for the same reason cancellation never rewinds one — it is paper, and it
+ * exists.
+ */
+export async function generateVoidTicket(
+  sessionId: string,
+  workstationId: string | null,
+  cancellationIds: string[]
+): Promise<TicketResult | { ok: true; ticket: OrderTicketRow; lines: VoidTicketLine[] } | { error: string }> {
+  const ru = await getRestaurantUser();
+
+  // Same gate as printing an order ticket: this is the billing surface.
+  if (
+    !hasPermission(ru, PERMISSIONS.PROCESS_PAYMENTS) &&
+    !hasPermission(ru, PERMISSIONS.CLOSE_BILLS)
+  ) {
+    return { error: "Permission denied." };
+  }
+  if (cancellationIds.length === 0) return { error: "Nothing to void." };
+
+  const service = createServiceClient();
+
+  // Snapshot the lines BEFORE the RPC stamps them — afterwards they no longer come
+  // back from getPendingVoids, and the paper still has to name them.
+  const pending = await getPendingVoids(sessionId);
+  const lines = pending.filter((l) => cancellationIds.includes(l.cancellation_id));
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: ticket, error } = await (service as any).rpc("generate_void_ticket", {
+    p_session_id: sessionId,
+    p_workstation_id: workstationId,
+    p_cancellation_ids: cancellationIds,
+    p_printed_by: ru.id,
+  });
+
+  if (error) {
+    if (String(error.message ?? "").includes("NO_VOID_ITEMS")) {
+      return { error: "Those cancellations have already been sent to this station." };
+    }
+    return { error: "Could not generate the void ticket. Please try again." };
+  }
+
+  revalidatePath(`/employee/session/${sessionId}`);
+
+  return {
+    ok: true,
+    ticket: {
+      id: ticket.id,
+      workstation_id: ticket.workstation_id ?? null,
+      workstation_name: ticket.workstation_name ?? null,
+      kind: (ticket.kind ?? "order") as "order" | "void",
+      ot_number: ticket.ot_number ?? null,
+      prefix: ticket.prefix ?? null,
+      printed_at: ticket.printed_at,
+      location_label: ticket.location_label ?? null,
+    },
+    lines,
   };
 }
 
@@ -1480,7 +1657,16 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
     p_by: ru.id,
   });
 
-  if (error) return { error: "Failed to cancel the order." };
+  if (error) {
+    if (String(error.message ?? "").includes("SESSION_ALREADY_PAID")) {
+      return {
+        error:
+          "This bill has already been paid, so its orders can't be cancelled. " +
+          "Correcting a paid bill needs a manager.",
+      };
+    }
+    return { error: "Failed to cancel the order." };
+  }
 
   // Only now — the cancellation is real. Something may already be on the heat, and
   // every second it stays there is food in the bin.
@@ -1491,11 +1677,30 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
   return null;
 }
 
-export async function cancelOrderItem(itemId: string): Promise<ActionResult> {
+/**
+ * Cancel some or all of an item's units.
+ *
+ * @param qty              how many units to cancel; null/undefined = everything still
+ *                         cancellable (the old whole-line behaviour).
+ * @param expectedRemaining what the caller's screen believed was still cancellable.
+ *                         The RPC refuses if the line has moved since — a
+ *                         compare-and-swap, because with unit quantities a blind retry
+ *                         would cancel MORE rather than being a no-op. Pass it whenever
+ *                         the number came off a rendered screen.
+ */
+export async function cancelOrderItem(
+  itemId: string,
+  qty?: number | null,
+  expectedRemaining?: number | null
+): Promise<ActionResult> {
   const ru = await getRestaurantUser();
 
   if (!hasPermission(ru, PERMISSIONS.CANCEL_ORDERS)) {
     return { error: "You don't have permission to cancel orders." };
+  }
+
+  if (qty != null && (!Number.isInteger(qty) || qty < 1)) {
+    return { error: "Choose how many units to cancel." };
   }
 
   const service = createServiceClient();
@@ -1526,21 +1731,59 @@ export async function cancelOrderItem(itemId: string): Promise<ActionResult> {
     ? await loadOrderContext(service, ru.restaurant_id, item.order_id)
     : null;
   // Scoped to this ONE item — the rest of the order is still being cooked, and telling
-  // the kitchen to stop the whole ticket would be a lie.
+  // the kitchen to stop the whole ticket would be a lie. The quantity map narrows it
+  // further: on a partial cancel the station is told to stop the units coming off, not
+  // the whole line, because two of the three are still wanted.
   const captured = item?.order_id
-    ? await captureStations(service, item.order_id, [itemId])
+    ? await captureStations(
+        service,
+        item.order_id,
+        [itemId],
+        qty != null ? new Map([[itemId, qty]]) : undefined
+      )
     : null;
 
-  // Returns 0 when the item was already served or already cancelled — the RPC
-  // refuses rather than silently releasing stock that was actually consumed.
+  // Returns the number of units actually cancelled, or 0 when nothing was left to
+  // cancel — the RPC refuses rather than silently releasing stock that was consumed.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (service as any).rpc("cancel_order_item", {
+  const { data, error } = await (service as any).rpc("cancel_order_item_units", {
     p_restaurant_id: ru.restaurant_id,
     p_item_id: itemId,
+    p_qty: qty ?? null,
     p_by: ru.id,
+    p_reason: "item_cancelled",
+    p_expected_remaining: expectedRemaining ?? null,
+    p_request_id: null,
   });
 
-  if (error) return { error: "Failed to cancel the item." };
+  if (error) {
+    // The RPC's sentinels carry the real number after a colon, so the cashier is
+    // told what IS possible instead of just being refused.
+    const msg = String(error.message ?? "");
+    if (msg.includes("SESSION_ALREADY_PAID")) {
+      return {
+        error:
+          "This bill has already been paid, so its items can't be changed. " +
+          "Correcting a paid bill needs a manager.",
+      };
+    }
+    if (msg.includes("ONLY_N_UNSERVED")) {
+      const n = msg.match(/ONLY_N_UNSERVED:(\d+)/)?.[1];
+      return {
+        error:
+          n === "0"
+            ? "Every unit of this item has already been served, so none can be cancelled."
+            : `Only ${n} unit${n === "1" ? "" : "s"} can still be cancelled — the rest have been served.`,
+      };
+    }
+    if (msg.includes("STALE_REMAINING")) {
+      const n = msg.match(/STALE_REMAINING:(\d+)/)?.[1];
+      return {
+        error: `This item changed while you were looking at it — ${n} unit${n === "1" ? "" : "s"} can be cancelled now. Try again.`,
+      };
+    }
+    return { error: "Failed to cancel the item." };
+  }
   if (Number(data ?? 0) === 0) {
     return { error: "That item has already been served or cancelled." };
   }
@@ -1561,7 +1804,10 @@ export async function cancelOrderItem(itemId: string): Promise<ActionResult> {
 export type QueueOrderItem = {
   id: string;
   item_name: string;
+  /** ACTIVE units — what still has to be cooked, net of anything cancelled. */
   quantity: number;
+  /** How many of those have already gone out; the rest are still cancellable. */
+  served_quantity: number;
   item_status: "pending" | "served";
   notes: string | null;
   workstation_name: string | null;
@@ -1611,7 +1857,8 @@ export async function getMyOrderQueue(): Promise<QueueOrder[]> {
           `id, type, table_id, room_id, credit_customer_id,
            restaurant_tables ( number ), rooms ( number ), credit_customers ( name, phone ),
            session_orders ( id, session_id, created_at,
-             session_order_items ( id, order_id, item_name, quantity, item_status, notes,
+             session_order_items ( id, order_id, item_name, quantity, active_quantity,
+               served_quantity, cancelled_quantity, item_status, notes,
                workstation_id, workstation_name, item_price, is_custom, created_at, cancelled_at ) )`
         )
         .eq("restaurant_id", restaurantId)
@@ -1704,7 +1951,10 @@ export async function getMyOrderQueue(): Promise<QueueOrder[]> {
     const orderItems: QueueOrderItem[] = rawItems.map((it) => ({
       id: it.id,
       item_name: it.item_name,
-      quantity: it.quantity,
+      // What still has to be cooked. Handing the kitchen the ORDERED quantity after
+      // part of it was cancelled is how three momos get made when two were wanted.
+      quantity: Number(it.active_quantity),
+      served_quantity: Number(it.served_quantity ?? 0),
       item_status: it.item_status,
       notes: it.notes,
       workstation_name: it.workstation_name,
@@ -2353,19 +2603,24 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: its } = await (service as any)
         .from("session_order_items")
-        .select("id, item_name, item_price, quantity, is_custom, created_at")
+        .select("id, item_name, item_price, quantity, active_quantity, is_custom, created_at")
         .in("order_id", order_ids)
         // Never print a cancelled item on the bill.
         .is("cancelled_at", null)
         .order("created_at");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      items = ((its ?? []) as any[]).map((it) => ({
-        id: it.id,
-        item_name: it.item_name,
-        item_price: Number(it.item_price),
-        quantity: it.quantity,
-        is_custom: !!it.is_custom,
-      }));
+      items = ((its ?? []) as any[])
+        // A line cancelled down to nothing that somehow kept `cancelled_at` null
+        // still prints nothing.
+        .filter((it) => Number(it.active_quantity) > 0)
+        .map((it) => ({
+          id: it.id,
+          item_name: it.item_name,
+          item_price: Number(it.item_price),
+          // The billed quantity, so the reprint's line total matches what was paid.
+          quantity: Number(it.active_quantity),
+          is_custom: !!it.is_custom,
+        }));
     }
   }
 
