@@ -7,7 +7,7 @@
  * server goes wrong quietly. This asks both databases the same questions and
  * diffs the answers.
  *
- *   node scripts/verify-parity.mjs --env .env.production001 --http
+ *   node scripts/verify-parity.mjs --env .env.hrestrosewa --http
  *
  * Structure checks always run. Data checks (row counts, then derived financial
  * values) run once the destination has rows — a derived-value check is the only
@@ -88,14 +88,23 @@ let failures = 0;
 const ok = (label, detail = "") => console.log(`  PASS  ${label.padEnd(46)} ${detail}`);
 const bad = (label, detail = "") => { failures++; console.log(`  FAIL  ${label.padEnd(46)} ${detail}`); };
 
-/** Runs `sql` on both sides and diffs the rows as sorted key strings. */
-async function diff(label, sql, src, dst, key) {
+/**
+ * Runs `sql` on both sides and diffs the rows as sorted key strings.
+ *
+ * `allowMissing` waives keys the SOURCE has and the destination deliberately
+ * does not. It is never applied to `extra`: something the destination has and
+ * production does not is always a finding, whatever it is.
+ */
+async function diff(label, sql, src, dst, key, allowMissing = null) {
   const a = await src.query(sql); const b = await dst.query(sql);
   const norm = (rows) => new Set(rows.map(key));
   const A = norm(a.rows), B = norm(b.rows);
-  const missing = [...A].filter((x) => !B.has(x));
+  let missing = [...A].filter((x) => !B.has(x));
   const extra = [...B].filter((x) => !A.has(x));
-  if (!missing.length && !extra.length) return ok(label, `${A.size} matched`);
+  const waived = allowMissing ? missing.filter(allowMissing).length : 0;
+  if (waived) missing = missing.filter((x) => !allowMissing(x));
+  if (!missing.length && !extra.length)
+    return ok(label, `${A.size - waived} matched` + (waived ? `, ${waived} waived` : ""));
   bad(label, `${missing.length} missing, ${extra.length} unexpected`);
   for (const x of missing.slice(0, 12)) console.log(`          missing from destination: ${x}`);
   for (const x of extra.slice(0, 12)) console.log(`          only in destination:       ${x}`);
@@ -122,6 +131,24 @@ const Q = {
             where table_schema='public' and grantee in ('service_role','anon','authenticated')`,
 };
 
+/**
+ * The ONLY grant difference that is not a defect.
+ *
+ * Hosted Supabase ships `alter default privileges … grant ALL … to service_role`,
+ * so on the hosted projects service_role also holds TRUNCATE, REFERENCES and
+ * TRIGGER on every relation. `20260801000000_service_role_grants.sql` grants
+ * select/insert/update/delete and nothing else, on purpose — so a database built
+ * from the migrations is deliberately TIGHTER than the one built by the platform.
+ * Nothing needs the other three: there is no SQL `TRUNCATE` anywhere in the app or
+ * the migrations, and PostgREST never issues one. REFERENCES and TRIGGER are DDL
+ * privileges, and all DDL runs as the owner.
+ *
+ * Deliberately narrow — service_role only, those three privileges only. A missing
+ * SELECT, or ANY grant at all to `anon`/`authenticated`, still fails.
+ */
+const LEGACY_SERVICE_ROLE_GRANT = (k) =>
+  /^service_role (TRUNCATE|REFERENCES|TRIGGER) /.test(k);
+
 async function main() {
   const src = open(sourceEnv);
   const dst = open(targetEnv, { http: useHttp, ssl: !noSsl });
@@ -140,7 +167,7 @@ async function main() {
   await diff("constraints", Q.constraints, src, dst, (r) => `${r.k} (${r.contype})`);
   await diff("indexes", Q.indexes, src, dst, (r) => r.k);
   await diff("triggers", Q.triggers, src, dst, (r) => r.k);
-  await diff("grants", Q.grants, src, dst, (r) => r.k);
+  await diff("grants", Q.grants, src, dst, (r) => r.k, LEGACY_SERVICE_ROLE_GRANT);
 
   // ── data ────────────────────────────────────────────────────────────────────
   const tablesRes = await dst.query(

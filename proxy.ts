@@ -1,6 +1,25 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+/**
+ * Redirect WITHOUT throwing away the cookies the auth adapter just wrote.
+ *
+ * `NextResponse.redirect()` builds a brand-new response, so every `Set-Cookie` accumulated
+ * on `supabaseResponse` by the `setAll` closure above — including a token that was just
+ * REFRESHED on this very request — is discarded. That happened on exactly the hop that
+ * sends someone to /login, i.e. the one request where losing the refreshed token turns a
+ * recoverable session into a sign-out. Carry them across.
+ */
+function redirectKeepingCookies(
+  target: string,
+  request: NextRequest,
+  carrying: NextResponse
+) {
+  const response = NextResponse.redirect(new URL(target, request.url));
+  carrying.cookies.getAll().forEach((cookie) => response.cookies.set(cookie));
+  return response;
+}
+
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
@@ -71,10 +90,10 @@ export async function proxy(request: NextRequest) {
       const target = slug
         ? `/login?mode=staff&slug=${encodeURIComponent(slug)}`
         : "/login";
-      return NextResponse.redirect(new URL(target, request.url));
+      return redirectKeepingCookies(target, request, supabaseResponse);
     }
     if (isSuperAdminProtected) {
-      return NextResponse.redirect(new URL("/superadmin/login", request.url));
+      return redirectKeepingCookies("/superadmin/login", request, supabaseResponse);
     }
   }
 
@@ -113,7 +132,12 @@ export async function proxy(request: NextRequest) {
   return supabaseResponse;
 }
 
-export const proxyConfig = {
+// MUST be named exactly `config`. Next reads `extractExportedConstValue(ast, "config")` and
+// nothing else — an export called `proxyConfig` typechecks, ships, and is silently ignored,
+// which is what it did until 2026-08-18: the built matcher was `^.*$`, so every static chunk,
+// every RSC payload and every /api call paid a Supabase auth check. Confirm after a build with
+// `.next/server/functions-config-manifest.json` — `/_middleware` must NOT read `^.*$`.
+export const config = {
   // The PWA's static surface is excluded alongside _next/static for the same
   // reason: every path that reaches this proxy costs an auth round-trip to
   // Supabase. The service worker precaches the icon set and 28 splash images on

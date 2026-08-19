@@ -88,7 +88,7 @@ export const getStaffRow = cache(async (authUserId: string): Promise<StaffRow | 
   // ONLY live check that an employee still works here. Caching this would mean
   // "deactivate that cashier right now" stops being immediate, on a system where that
   // request usually means money has gone missing.
-  const { data } = await span("db.staffRow", async () =>
+  const { data, error } = await span("db.staffRow", async () =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("restaurant_users")
@@ -98,6 +98,20 @@ export const getStaffRow = cache(async (authUserId: string): Promise<StaffRow | 
       .is("deleted_at", null)
       .maybeSingle()
   );
+
+  // A FAILED QUERY IS NOT AN ANSWER OF "NOT STAFF" — same rule as getAuthUser above.
+  //
+  // This is the whole reason the self-hosted deployment sat in an unbreakable redirect loop:
+  // the error was destructured away, so a PostgREST failure (a stale schema cache after
+  // migrations, a missing service_role grant, a column that migration never reached) came
+  // back as `null` and every guard read that as "you don't work here" and bounced to /login,
+  // which bounced straight back. Throwing surfaces the real code (PGRST200 / 42703 / 42501)
+  // in the logs and on screen instead of an infinite bounce with nothing to debug.
+  if (error) {
+    throw new Error(
+      `Could not resolve the staff row for ${authUserId}: ${error.code ?? "?"} ${error.message}`
+    );
+  }
 
   if (!data) return null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

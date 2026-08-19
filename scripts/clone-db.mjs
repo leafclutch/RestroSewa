@@ -13,7 +13,7 @@
  * `migrate.mjs up`, so the destination's migration ledger stays truthful rather
  * than inheriting a dump's idea of history.
  *
- *   node scripts/clone-db.mjs --env .env.production001 --http --yes
+ *   node scripts/clone-db.mjs --env .env.hrestrosewa --http --yes
  *   node scripts/clone-db.mjs --env … --dry-run          plan + row counts, no writes
  *   node scripts/clone-db.mjs --env … --reset --yes      empty it first, then copy
  *

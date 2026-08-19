@@ -159,7 +159,7 @@ There are three, and they are NOT interchangeable — pick deliberately and say 
 |---|---|
 | DEV (`ojqomyunjmaivsyvnvbv`) | `.env.local` |
 | Hosted PRODUCTION (`qsccnzgrhrnjggyymefr`) | `.env.production` — **live customers** |
-| Self-hosted DO droplet | `.env.production001`, via Kong `POST {url}/pg/query` |
+| Self-hosted DO droplet | `.env.hrestrosewa`, via Kong `POST {url}/pg/query` |
 
 For the droplet, `/pg/query` takes a **SQL string with no bind parameters**, and one request is one
 connection — so a transaction cannot span requests. Put `begin … commit` inside a single request.

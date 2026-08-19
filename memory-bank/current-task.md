@@ -128,9 +128,41 @@ across the reset**, idempotent on a second run, a negative pot clamped rather th
 savings-holding restaurant deletes cleanly (in a rolled-back transaction), and **no other restaurant
 moved**.
 
+**✅ PRODUCTION MIGRATED 2026-08-17 — all 9 applied, 9/9, no failures.**
+`20260819000000` (gas→fuel), `20260820000000` (credit discount), `20260821000000`–`20260821000400`
+(unit cancellation), `20260822000000` (close saving), `20260823000000` (reset expenses).
+Production and DEV are both at **103/103, pending 0**.
+
+**How it was verified (measured, not assumed):**
+- **All 21 touched functions and both views are byte-identical to DEV** (`md5(pg_get_functiondef)`).
+  The strongest convergence proof available, and it also proves no DEV drift escaped a migration file.
+- **Nothing moved.** 8 restaurants × (14 finance figures + 4 dashboard figures + every product's
+  closing stock + every pot balance) + 13 table row counts, snapshotted before and after:
+  **0 differences.**
+- **Ledger reconciles 0.0000** on cash, bank and both credit legs for all 8, before and after.
+- **Deploy-window safe**: exactly ONE overload for all 10 RPCs the deployed build calls, and every
+  one still binds — notably `record_credit_payment` is now 10 params / 6 required, so the deployed
+  build's 8-arg call resolves.
+- Backfill correct: **315 cancelled rows → 315 event rows**, 0 rows where
+  `cancelled_quantity <> quantity`, 0 where `served_quantity <> quantity`, 0 `'gas'` rows left.
+- **PostgREST 200** on all five new relations/columns, so the schema cache picked them up.
+
+⚠️ **DEV was the stale side, not production.** The 7a check initially failed on `finance_report` /
+`finance_transactions`: DEV still held the DEFECTIVE `20260820000000` (its `advsold` CTE missing the
+period filter) because that file was corrected *after* DEV's ledger row existed, so `migrate up`
+skipped it forever. Production received the corrected file and was right all along. DEV was repaired
+by applying that one file directly (it is idempotent) and both now match.
+**Lesson: a corrected migration whose ledger row already exists will never be re-applied by the
+runner. `status` will say "up to date" while the database holds the old body.**
+
+📄 The pre-migration `pg_get_functiondef` capture for all 14 replaced functions is in the session
+scratchpad as `prod-functions-before-2026-08-17.sql` — the rollback path if a body needs reverting.
+Safe to discard once the app is deployed and exercised.
+
 **Remaining:**
-1. **Production migrations pending** — all five for cancellation plus `20260822000000` and
-   `20260823000000`, in order.
+1. **DEPLOY THE APP.** The database is ahead, which is the safe direction, but the new features
+   (unit cancellation, void tickets, credit-clearance discount, close-saving, expense reset) are not
+   reachable until the build ships.
    DB before app; each is independently applyable and leaves the deployed build correct.
 2. **In-app QA on DEV**: cancel 1 of 3 from the session screen and from a room folio; confirm the
    line reads "Ordered 3 · Cancelled 1 · Remaining 2"; print a KOT then cancel and print the void;
@@ -1059,3 +1091,116 @@ rather than restoring a dump, so the new server's ledger is truthful from day on
 ## Risks
 ## Notes
 ```
+
+---
+
+## Droplet resource audit + duplicate cleanup — 2026-08-19
+
+Full sweep of `139.59.237.233` (4 vCPU / 7.8 GB / 154 GB, 34 containers, 8 Coolify apps).
+
+**No duplicate deployments.** All 8 Coolify apps are distinct (PragyaOS ×4, Gantabya ×3,
+Hrestrosewa Web ×1). Disk is a non-issue at 21%.
+
+**RAM is the constraint, and the school's Supabase stack is the hog** — `dv5eg4…` uses
+**1448 MiB across 14 containers**, more than half of all container memory, vs 517 MiB for our
+whole `hrs` stack. Its optional services alone are ~590 MiB (logflare 268, studio 160,
+supavisor 86, minio 75). **33 of 34 containers have no memory limit** and swap is ~1.8 GB and
+creeping — that is the real stability risk, not disk.
+
+**Three copies of RestroSewa data existed:**
+1. `hrestrosewa` — the correct rebuilt one. Kept.
+2. 42 keyless tables in the school's live `postgres` DB — several loaded **literally twice**
+   (`menu_items` 1450 = 2×725, `menu_item_variants` 596 = 2×298, `menu_categories` 222 = 2×111,
+   `credits` 114 = 2×57). **NOT deleted — still needs the PragyaOS owner's sign-off.**
+3. The orphaned `lvs0ylfrwhzhnrsinuobbqt8` Supabase cluster — Coolify had already forgotten the
+   service but left 3 volumes, `/data/coolify/services/lvs0…/` and a **stale Traefik router**.
+   Its DB was an Aug-10 snapshot proven to be a **strict subset** of `hrestrosewa`. **Deleted**
+   after dumping to `/data/backups/lvs0-orphan-cluster-final-20260819.sql.gz` and archiving the
+   service dir. `tm_verify_091244` looked like a dupe of `travel_management` but is not — same
+   schema, genuinely different data; left alone.
+
+**Reclaimed ~750 MB**: orphan volumes, dead service dir + stale router, a byte-identical duplicate
+backup (`…142341` = same md5 as `…142308`), the broken 112-byte storage tar (`./undefined/` — the
+pre-fix volume-prefix bug), unused build cache (225 MB), journal 343→180 MB. Six uncompressed
+pre-rebuild dumps were gzipped rather than deleted. Verified after: all 34 containers Up, Traefik
+healthy, 8 restaurants / 6 storage objects / 60 users unchanged, both sites 200.
+
+**⚠️ Open — Traefik ACME failure loop.** 53 failures in 24h for
+`supabase.hrestrosewa.leafclutch.com.np`. `hrs-kong` still carries
+`traefik.http.routers.https-hrs-kong.tls.certresolver=letsencrypt`, but the **no-DNS decision**
+means that name has no A record → NXDOMAIN forever, burning Let's Encrypt quota on the shared
+account. Fix: drop the three `traefik.*` labels from `hrs-kong` and recreate it (free — not cut
+over yet), or add the DNS record.
+
+**Also left alone deliberately:** 622 MB of older app images (Coolify's rollback targets); the
+journal still has no `SystemMaxUse` cap so it will regrow (setting it needs a journald restart).
+
+### ⚠️ `.env.production001` targets PragyaOS's live DB — 2026-08-19
+
+`SUPABASE_DB_URL` there is `…@supabase-db-dv5eg4tzjaj4nhimc315gypj:5432/postgres`. That database is
+**PragyaOS's production database**, not a RestroSewa one — the "PragyaOS api" container runs the
+same `DATABASE_URL`, and pg_cron/pg_net/realtime/storage all hold connections. It must never be
+dropped. Confirmed with the user 2026-08-19: **the database stays.**
+
+The RestroSewa footprint inside it (42 keyless tables + the `order_item_consumption` view, 1.6 MB)
+was verified as a self-contained island — all 42 names exist in `hrestrosewa`, **zero** FKs point
+into the set from outside, last write 2026-08-09. Dumped to
+`/data/backups/pragyaos-restrosewa-leftovers-20260819.sql.gz`. **Decision: left in place** pending
+the PragyaOS owner's sign-off; nothing reads them, so there is no urgency.
+
+Method note: an earlier count of "2 dependent FKs" was a query bug — matching `pg_class.relname`
+without the schema caught GoTrue's `auth.refresh_tokens → auth.sessions`. Match dependency queries
+on OID/`regclass`.
+
+### DO deployment verified end-to-end — 2026-08-19
+
+Public hostname is live: **`supabase.testhrestrosewa.leafclutch.com.np`**. No DNS record was added —
+the zone already had a wildcard `*.testhrestrosewa.leafclutch.com.np` → 139.59.237.233. Switching
+`SUPABASE_DOMAIN` in `/data/hrestrosewa/.env` (it drives both Traefik router rules AND GoTrue's
+`API_EXTERNAL_URL`) + `docker compose up -d` recreated only hrs-kong and hrs-auth.
+
+Verified after the app rebuild:
+- **Logos render.** `/_next/image` returns 200 (`image/png` 6,394 b at w=256; `image/jpeg` 85,718 b
+  at w=640). The old failure was Next 16's private-IP guard, not `remotePatterns` — confirmed
+  `isPrivateIp("139.59.237.233")` false vs `isPrivateIp("10.0.1.17")` true. No
+  `dangerouslyAllowLocalIP` needed. All 6 `logo_url` rows repointed.
+- **Realtime bus connects.** SSE `ready` → `{"listening":true}`, and a full round trip works:
+  `pg_notify('rs_events', {"r":…,"t":"orders"})` → `event: change {"topic":"orders"}` on the stream.
+  Payload keys are **`r`/`t`**, not `restaurant_id`/`topic`.
+- **Security from the public internet**: no key 401 · anon on tables 401 · anon `/pg/query` 403 ·
+  signup 422 · public logo object 200 · http→https 302.
+- **ACME loop is dead** — 0 failures in the last 5 min; the cert is in `acme.json`.
+- 34/34 containers up, 8 restaurants / 6 logos / 60 users, memory down to 2.8 GB used.
+
+Still gated on the user: the freeze + `clone-db --reset` (Cloud is ~119 sessions / 229 orders /
+108 payments ahead; DO holds 12 test sessions that a reset would wipe).
+
+### Repo cleanup — 2026-08-20
+
+**Removed as dead:**
+- `@playwright/test` — no config, no `.spec.ts` anywhere, zero imports.
+- `tsx` — in no npm script and never imported. Verified all **110 tests in 10 files pass under
+  plain `node --test`**, so nothing needed it.
+- `components/ui/card.tsx` — nothing imported it; `stock-finance-overview.tsx:26` and
+  `mock-bill-editor.tsx:64` each define their own local `Card`.
+- `components/pwa/push-toggle.tsx` — the only reference was its own export.
+- `.env.production001` — it pointed at **PragyaOS's live database** (backed up to the session
+  scratchpad before deletion).
+
+**Repointed the dangerous references.** `scripts/migrate.mjs`, `clone-db.mjs`, `copy-storage.mjs`,
+`verify-parity.mjs`, `docs/menu-import.md` and `docs/runbooks/migrating-to-production.md` all still
+named `.env.production001` as the DO target — following them would have run migrations against the
+school's production DB. All now say `.env.hrestrosewa`. `copy-storage.mjs`'s "still name the
+tunnelled env file" note is also gone: `--http` works end to end now, no SSH tunnel anywhere.
+
+**Added** `npm test` → `node --test "lib/**/*.test.ts"`. The quoted glob matters — Node expands it
+internally, so it works on Windows where the shell would not.
+
+Verified after: `npm test` 110/110 pass · `npx tsc --noEmit` clean · `npm run build` exit 0.
+
+**Known and NOT actioned (user's call):**
+- ⚠️ `scripts/deep-structure.mjs` (untracked) has the DO Postgres **password hardcoded at line 36**.
+  Safe only while it stays untracked — a `git add .` puts it in history permanently.
+- 13 dependencies are pinned to `"latest"` (including `next`, `react`, `@supabase/ssr`) — builds are
+  not reproducible and a breaking release lands silently on the next install.
+- `memory-bank/current-task.md` is ~86 KB; completed sections belong in `completed.md`.

@@ -12,7 +12,8 @@
     "migrate": "node scripts/migrate.mjs status",
     "migrate:up": "node scripts/migrate.mjs up",
     "migrate:prod": "node scripts/migrate.mjs status --prod",
-    "migrate:prod:up": "node scripts/migrate.mjs up --prod"
+    "migrate:prod:up": "node scripts/migrate.mjs up --prod",
+    "test": "node --test \"lib/**/*.test.ts\""
   },
   "dependencies": {
     "@supabase/ssr": "latest",
@@ -36,7 +37,6 @@
   },
   "devDependencies": {
     "@next/eslint-plugin-next": "latest",
-    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "latest",
     "@types/node": "latest",
     "@types/nodemailer": "^8.0.1",
@@ -44,7 +44,6 @@
     "@types/react-dom": "latest",
     "eslint": "latest",
     "tailwindcss": "latest",
-    "tsx": "^4.23.1",
     "typescript": "latest"
   }
 }

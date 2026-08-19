@@ -18,7 +18,7 @@
  *   node scripts/migrate.mjs baseline          record every file as already applied
  *   node scripts/migrate.mjs status --prod
  *
- *   node scripts/migrate.mjs up --env .env.production001 --http --yes
+ *   node scripts/migrate.mjs up --env .env.hrestrosewa --http --yes
  *                                              …to any other target (see below)
  *
  * Safety rules, in order of importance:
@@ -67,7 +67,7 @@ const useHttp = args.includes("--http");
 // `--env <file>` takes a value, so the value must not also be read as the command.
 const envIdx = args.indexOf("--env");
 const envArg = envIdx !== -1 ? args[envIdx + 1] : null;
-if (envIdx !== -1 && !envArg) throw new Error("--env needs a file, e.g. --env .env.production001.local");
+if (envIdx !== -1 && !envArg) throw new Error("--env needs a file, e.g. --env .env.hrestrosewa");
 // The `i !== envIdx + 1` guard must not fire when there is no --env: envIdx is
 // then -1, and envIdx + 1 is 0 — which would swallow the command itself.
 const cmd = args.find((a, i) => !a.startsWith("-") && !(envIdx !== -1 && i === envIdx + 1)) ?? "status";
