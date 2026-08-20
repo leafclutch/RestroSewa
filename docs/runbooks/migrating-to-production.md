@@ -261,5 +261,5 @@ node scripts/migrate.mjs up --prod --yes     # PRODUCTION, apply
 The self-hosted DigitalOcean stack uses the same script over Kong instead of a direct connection:
 
 ```bash
-node scripts/migrate.mjs up --env .env.production001 --http --yes
+node scripts/migrate.mjs up --env .env.hrestrosewa --http --yes
 ```

@@ -1,11 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
 import { AdminLoginForm } from "./_components/admin-form";
 import { StaffLogin } from "./_components/staff-login";
 import { RestaurantSearch } from "./_components/restaurant-search";
-import { getRestaurantStaff, lastRestaurantSlug } from "@/app/actions/auth";
+import {
+  getRestaurantStaff,
+  lastRestaurantSlug,
+  signOutStrandedSession,
+} from "@/app/actions/auth";
+import { getAuthUser, getCurrentStaff, isSuperAdmin } from "@/lib/auth/current-user";
 import { PlatformLogo, PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
 import { InstallPrompt } from "@/components/pwa/install-prompt";
 
@@ -14,30 +17,31 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ mode?: string; slug?: string; returnTo?: string }>;
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
+
+  // Signed in, but this device is neither a super admin nor staff anywhere. See below —
+  // this is the state that used to bounce forever instead of saying anything.
+  let strandedSession = false;
 
   if (user) {
-    const service = createServiceClient();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: sa } = await (service as any)
-      .from("super_admins")
-      .select("id")
-      .eq("auth_user_id", user.id)
-      .maybeSingle();
-    if (sa) redirect("/superadmin/dashboard");
+    if (await isSuperAdmin(user.id)) redirect("/superadmin/dashboard");
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: ru } = await (service as any)
-      .from("restaurant_users")
-      .select("role")
-      .eq("auth_user_id", user.id)
-      .eq("is_active", true)
-      .maybeSingle();
-    if (ru?.role === "restaurant_admin") redirect("/admin/dashboard");
-    if (ru?.role === "restaurant_employee") redirect("/employee/dashboard");
+    // THE SAME LOOKUP THE PAGE GUARDS USE, deliberately — not a second query that can
+    // disagree with them.
+    //
+    // This page and `requireRestaurantStaff` both answer "is this auth user staff?", and
+    // they redirect AT EACH OTHER: a `null` here sends you to /employee/dashboard, and a
+    // `null` there sends you back to /login. When the two queries were written separately
+    // they drifted (this one had no `deleted_at` filter, no `permissions` column and no
+    // `restaurants` embed), so on the self-hosted deployment one succeeded while the other
+    // failed and staff ping-ponged between the two URLs with no error anywhere. One
+    // predicate, one verdict — they can no longer disagree. Do not re-inline this query.
+    const staff = await getCurrentStaff();
+    if (staff) {
+      redirect(staff.role === "restaurant_admin" ? "/admin/dashboard" : "/employee/dashboard");
+    }
+
+    strandedSession = true;
   }
 
   const { mode, slug } = await searchParams;
@@ -79,7 +83,33 @@ export default async function LoginPage({
           boxShadow: "0 4px 24px 0 rgba(28,30,84,0.07)",
         }}
       >
-        {isStaffMode && staff ? (
+        {strandedSession ? (
+          /* A valid session that resolves to nobody — the state that used to loop.
+             Say so, and offer the one action that fixes it. Signing out has to be a
+             button, not something this render does: a Server Component cannot write
+             cookies (see lib/supabase/server.ts), so the clear must come from an action. */
+          <div className="text-center py-4">
+            <h1
+              className="text-lg mb-2"
+              style={{ color: "var(--color-ink)", fontWeight: 400, letterSpacing: "-0.3px" }}
+            >
+              You&apos;re signed in, but this account has no access
+            </h1>
+            <p className="text-sm mb-5" style={{ color: "var(--color-ink-mute)" }}>
+              It may have been deactivated or removed from this restaurant. Sign out and sign
+              back in with your PIN, or ask your manager to check your account.
+            </p>
+            <form action={signOutStrandedSession}>
+              <button
+                type="submit"
+                className="w-full rounded-lg py-3 text-sm"
+                style={{ background: "var(--color-primary)", color: "#fff" }}
+              >
+                Sign out
+              </button>
+            </form>
+          </div>
+        ) : isStaffMode && staff ? (
           <>
             <h1
               className="text-lg mb-6 text-center"

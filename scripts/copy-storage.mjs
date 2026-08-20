@@ -11,11 +11,11 @@
  * 20260712300000_restaurant_logo_storage.sql) and after clone-db.mjs has put the
  * `restaurants` rows in place to repoint.
  *
- *   node scripts/copy-storage.mjs --env .env.production001.local --no-ssl --yes
+ *   node scripts/copy-storage.mjs --env .env.hrestrosewa --http --yes
  *
  * The destination Storage API is reached over its PUBLIC Kong URL, so this part
- * needs no tunnel — but the logo_url rewrite is a database write, so --env should
- * still name the tunnelled env file.
+ * needs no tunnel. The logo_url rewrite is a database write, so pass --http too and it
+ * goes through Kong as well — no SSH tunnel anywhere in this script.
  */
 import fs from "node:fs";
 import path from "node:path";

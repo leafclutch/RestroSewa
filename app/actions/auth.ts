@@ -183,12 +183,21 @@ export async function loginWithPin(
   // The restaurant's slug comes back on the same query as the role — it costs nothing here
   // and is what lets this device find its way back to the right till screen next time.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: ru } = await (service as any)
+  const { data: ru, error: ruError } = await (service as any)
     .from("restaurant_users")
     .select("role, restaurants ( slug )")
     .eq("id", restaurantUserId)
     .eq("is_active", true)
     .maybeSingle();
+
+  // Don't route on a query that FAILED. This lookup uses the same `restaurants` embed the
+  // page guards depend on, so when the embed breaks (a stale PostgREST schema cache is the
+  // usual cause self-hosted) `ru` is null and the branch below cheerfully sends the person
+  // to /employee/dashboard — which then cannot find them either and bounces them back here.
+  // Saying so is the difference between a diagnosable error and an infinite redirect.
+  if (ruError) {
+    return { error: "Signed in, but your account could not be loaded. Please try again." };
+  }
 
   // PostgREST returns a to-one embed as an object, but tolerate an array so a
   // relationship-shape change cannot break signing in.
@@ -244,6 +253,22 @@ export async function logout() {
 
   await signOutThisDevice(supabase);
   redirect(slug ? `/login?mode=staff&slug=${encodeURIComponent(slug)}` : "/login");
+}
+
+/**
+ * Clear a session that resolves to nobody.
+ *
+ * `/login` reaches this state when there is a valid token but no super-admin row and no
+ * staff row. Before, that combination silently fell through to the admin email form while
+ * the guards kept redirecting back here — an unbreakable loop with no message, and inside
+ * an installed PWA there is no URL bar to escape it with. Local scope only, for the reason
+ * documented on `signOutThisDevice`. Lands back on /login, where `rs_last_slug` still puts
+ * the right restaurant's PIN pad on screen.
+ */
+export async function signOutStrandedSession() {
+  const supabase = await createClient();
+  await signOutThisDevice(supabase);
+  redirect("/login");
 }
 
 export async function logoutSuperAdmin() {

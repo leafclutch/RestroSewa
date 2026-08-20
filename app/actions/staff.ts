@@ -228,7 +228,17 @@ export async function toggleStaffStatus(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any)
     .from("restaurant_users")
-    .update({ is_active: isActive })
+    .update(
+      // Re-activating MUST clear the soft-delete stamp as well.
+      //
+      // `softDeleteStaffMember` sets `is_active = false` AND `deleted_at`; flipping only
+      // `is_active` back on left the row in a state no query in the app agrees about —
+      // `/login` matched it (it filters on is_active alone) while `getStaffRow` did not
+      // (it also filters `deleted_at is null`), and the two redirected at each other
+      // forever. Deactivate-then-reactivate is a routine thing a manager does, so this was
+      // a permanent login loop waiting to be triggered on any deployment.
+      isActive ? { is_active: true, deleted_at: null } : { is_active: false }
+    )
     .eq("id", staffId);
 
   if (error) return { error: "Failed to update staff status." };

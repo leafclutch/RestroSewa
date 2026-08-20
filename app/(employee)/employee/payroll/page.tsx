@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { PAYROLL_ACCESS } from "@/lib/permissions";
-import { getPayrollSheet } from "@/app/actions/payroll";
+import { getPayrollCycleSheet } from "@/app/actions/payroll";
 import { PayrollClient } from "@/app/(admin)/admin/staff/_components/payroll-client";
 
 // The staff-surface Payroll page. Same PayrollClient the admin Staff screen uses.
@@ -19,7 +19,7 @@ export default async function EmployeePayrollPage() {
     redirect("/employee/dashboard");
   }
 
-  const sheet = await getPayrollSheet();
+  const sheet = await getPayrollCycleSheet();
 
   return (
     <div className="p-4 sm:p-5 max-w-3xl mx-auto">
