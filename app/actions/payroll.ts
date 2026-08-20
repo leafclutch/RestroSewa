@@ -8,12 +8,17 @@ import { resolveSplit } from "@/lib/payment-split";
 import { periodBounds } from "@/lib/finance";
 import type { FinancePeriod } from "@/lib/finance";
 import {
+  ATTENDANCE_FRACTION,
   EMPTY_PAYROLL_SUMMARY,
   monthKey,
   payrollError,
   payrollStatus,
 } from "@/lib/payroll";
 import type {
+  AttendanceDay,
+  AttendanceStatus,
+  PayrollCycleRow,
+  PayrollCycleSheet,
   PayrollHistoryMonth,
   PayrollRow,
   PayrollSheet,
@@ -401,4 +406,259 @@ export async function getPayrollSummary(params?: {
     outstandingLiability: num(row.outstanding_liability),
     staffOnPayroll: Number(row.staff_on_payroll ?? 0),
   };
+}
+
+// ─── The cycle sheet ──────────────────────────────────────────────────────────
+// `payroll_cycle_sheet` is the cycle-aware replacement for `payroll_month`. It is
+// VOLATILE on purpose: it materialises any missing cycle for anchored staff, so
+// the outstanding-liability walk never finds a hole because nobody happened to
+// open this screen that month.
+//
+// A staff member with no anchor still gets a row — their window is simply the
+// calendar month, which is exactly what they did before cycles existed.
+
+const EMPTY_CYCLE_SHEET = (asOf: string): PayrollCycleSheet => ({
+  asOf,
+  rows: [],
+  notOnPayroll: [],
+  totalPayable: 0,
+  totalAdvance: 0,
+  totalPaid: 0,
+  totalRemaining: 0,
+});
+
+/** `YYYY-MM-DD` for today, in the server's own calendar — never via toISOString(). */
+function todayKey(): string {
+  const d = new Date();
+  return (
+    `${d.getFullYear()}-` +
+    `${String(d.getMonth() + 1).padStart(2, "0")}-` +
+    `${String(d.getDate()).padStart(2, "0")}`
+  );
+}
+
+function normaliseDay(raw: string | null | undefined): string {
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec((raw ?? "").trim());
+  return m ? m[1] : todayKey();
+}
+
+export async function getPayrollCycleSheet(
+  asOf?: string | null
+): Promise<PayrollCycleSheet> {
+  const ru = await getRestaurantUser();
+  const day = normaliseDay(asOf);
+  if (!PAYROLL_ACCESS.canViewPayroll(ru)) return EMPTY_CYCLE_SHEET(day);
+
+  const service = createServiceClient();
+
+  const [sheetRes, staffRes] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any).rpc("payroll_cycle_sheet", {
+      p_restaurant_id: ru.restaurant_id,
+      p_as_of: day,
+    }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("restaurant_users")
+      .select("id, display_name, title")
+      .eq("restaurant_id", ru.restaurant_id)
+      .is("deleted_at", null)
+      .order("display_name"),
+  ]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: PayrollCycleRow[] = ((sheetRes.data ?? []) as any[]).map((r) => {
+    const payable = num(r.payable_amount);
+    const totalPaid = num(r.total_paid);
+    return {
+      staff_id: r.restaurant_user_id,
+      display_name: r.display_name,
+      title: r.title ?? null,
+      is_active: !!r.is_active,
+      joining_date: r.joining_date,
+      cycle_id: r.cycle_id ?? null,
+      cycle_kind: r.cycle_kind,
+      cycle_start: r.cycle_start,
+      cycle_end: r.cycle_end,
+      totalDays: Number(r.total_days ?? 0),
+      monthly_salary: r.monthly_salary == null ? null : num(r.monthly_salary),
+      payableDays: num(r.payable_days),
+      absentDays: num(r.absent_days),
+      payableAmount: payable,
+      advancePaid: num(r.advance_paid),
+      salaryPaid: num(r.salary_paid),
+      totalPaid,
+      remaining: num(r.remaining),
+      paymentCount: Number(r.payment_count ?? 0),
+      attendanceVerified: !!r.attendance_verified,
+      // Status is read against what the cycle OWES, not the headline salary —
+      // otherwise a cycle with ten absences could never read as fully paid.
+      status: payrollStatus(payable, totalPaid),
+    };
+  });
+
+  const onPayroll = new Set(rows.map((r) => r.staff_id));
+
+  return {
+    asOf: day,
+    rows,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    notOnPayroll: ((staffRes.data ?? []) as any[])
+      .filter((s) => !onPayroll.has(s.id))
+      .map((s) => ({ id: s.id, display_name: s.display_name, title: s.title ?? null })),
+    totalPayable: rows.reduce((n, r) => n + r.payableAmount, 0),
+    totalAdvance: rows.reduce((n, r) => n + r.advancePaid, 0),
+    totalPaid: rows.reduce((n, r) => n + r.totalPaid, 0),
+    totalRemaining: rows.reduce((n, r) => n + r.remaining, 0),
+  };
+}
+
+// ─── Attendance ───────────────────────────────────────────────────────────────
+// Only exceptions are stored, so this returns the days that are NOT plain
+// present days. Everything else in the window is present by omission.
+
+export async function getCycleAttendance(
+  staffId: string,
+  from: string,
+  to: string
+): Promise<AttendanceDay[]> {
+  const ru = await getRestaurantUser();
+  if (!PAYROLL_ACCESS.canViewPayroll(ru)) return [];
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("staff_attendance_days")
+    .select("work_date, status, day_fraction, notes")
+    .eq("restaurant_id", ru.restaurant_id)
+    .eq("restaurant_user_id", staffId)
+    .gte("work_date", normaliseDay(from))
+    .lte("work_date", normaliseDay(to))
+    .order("work_date");
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((data ?? []) as any[]).map((d) => ({
+    work_date: d.work_date,
+    status: d.status,
+    day_fraction: num(d.day_fraction),
+    notes: d.notes ?? null,
+  }));
+}
+
+/**
+ * Mark one day. Passing `present` clears the row rather than storing it, so the
+ * table keeps holding exceptions only — which is what lets a future attendance
+ * module write every day without changing any total.
+ */
+export async function setAttendanceDay(
+  staffId: string,
+  workDate: string,
+  status: AttendanceStatus
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!PAYROLL_ACCESS.canManagePayroll(ru)) {
+    return { error: "You don't have permission to change attendance." };
+  }
+  if (!staffId) return { error: "Choose a staff member." };
+
+  const fraction = ATTENDANCE_FRACTION[status];
+  if (fraction === undefined) return { error: "That is not a valid attendance status." };
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).rpc("set_attendance_day", {
+    p_restaurant_id: ru.restaurant_id,
+    p_staff_id: staffId,
+    p_date: normaliseDay(workDate),
+    p_status: status,
+    p_fraction: fraction,
+    p_notes: null,
+    p_by: ru.id,
+  });
+
+  if (error) {
+    return {
+      error: payrollError(error.message ?? "", "Could not save that day. Please try again."),
+    };
+  }
+
+  revalidatePath("/admin/staff");
+  revalidatePath("/admin/finance");
+  return null;
+}
+
+/** Sign off (or reopen) a cycle's attendance. A verified cycle refuses day edits. */
+export async function verifyCycleAttendance(
+  cycleId: string,
+  verified: boolean
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!PAYROLL_ACCESS.canManagePayroll(ru)) {
+    return { error: "You don't have permission to verify attendance." };
+  }
+  if (!cycleId) return { error: "That salary cycle no longer exists." };
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).rpc("verify_cycle_attendance", {
+    p_restaurant_id: ru.restaurant_id,
+    p_cycle_id: cycleId,
+    p_verified: verified,
+    p_by: ru.id,
+  });
+
+  if (error) {
+    return {
+      error: payrollError(error.message ?? "", "Could not update the cycle. Please try again."),
+    };
+  }
+
+  revalidatePath("/admin/staff");
+  revalidatePath("/admin/finance");
+  return null;
+}
+
+// ─── The cycle anchor ─────────────────────────────────────────────────────────
+// Moving an anchor only ever affects the FUTURE: `set_cycle_anchor` pushes the
+// new start past any cycle that already exists, so history cannot be reshaped
+// under a payment that has already been made.
+
+export async function setCycleAnchor(
+  _prevState: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!PAYROLL_ACCESS.canManagePayroll(ru)) {
+    return { error: "You don't have permission to set salary cycles." };
+  }
+
+  const staffId = (formData.get("staff_id") as string) || "";
+  const anchor = ((formData.get("cycle_start") as string) || "").trim();
+  const lengthRaw = ((formData.get("cycle_length") as string) || "30").trim();
+  const length = parseInt(lengthRaw, 10);
+
+  if (!staffId) return { error: "Choose a staff member." };
+  if (!anchor) return { error: "Choose the date this staff member's salary cycle starts." };
+  if (isNaN(length) || length < 1 || length > 366) {
+    return { error: "A salary cycle must be between 1 and 366 days long." };
+  }
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).rpc("set_cycle_anchor", {
+    p_restaurant_id: ru.restaurant_id,
+    p_staff_id: staffId,
+    p_anchor: normaliseDay(anchor),
+    p_length: length,
+  });
+
+  if (error) {
+    return {
+      error: payrollError(error.message ?? "", "Could not save the salary cycle. Please try again."),
+    };
+  }
+
+  revalidatePath("/admin/staff");
+  revalidatePath("/admin/finance");
+  return null;
 }

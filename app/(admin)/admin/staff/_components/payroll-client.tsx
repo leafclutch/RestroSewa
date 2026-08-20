@@ -9,8 +9,8 @@ import {
   useTransition,
 } from "react";
 import {
+  getPayrollCycleSheet,
   getPayrollHistory,
-  getPayrollSheet,
   recordSalaryPayment,
   setStaffSalary,
 } from "@/app/actions/payroll";
@@ -20,17 +20,18 @@ import {
   PAYROLL_STATUS_COLOR,
   PAYROLL_STATUS_LABEL,
   PAY_METHOD_LABEL,
-  isCurrentMonth,
+  addDays,
+  dayLabel,
   monthLabel,
-  shiftMonth,
 } from "@/lib/payroll";
 import type {
   PayMethod,
   PaymentKind,
+  PayrollCycleRow,
+  PayrollCycleSheet,
   PayrollHistoryMonth,
-  PayrollRow,
-  PayrollSheet,
 } from "@/lib/payroll";
+import { CycleStartForm, SalaryCyclePanel } from "./salary-cycle-panel";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,7 +57,7 @@ const day = (d: string) =>
 
 // ── Status pill ───────────────────────────────────────────────────────────────
 
-function StatusPill({ status }: { status: PayrollRow["status"] }) {
+function StatusPill({ status }: { status: PayrollCycleRow["status"] }) {
   const tone = PAYROLL_STATUS_COLOR[status];
   return (
     <span
@@ -205,7 +206,7 @@ function PaymentForm({
   kind,
   onDone,
 }: {
-  row: PayrollRow;
+  row: PayrollCycleRow;
   month: string;
   kind: PaymentKind;
   onDone: () => void;
@@ -238,7 +239,10 @@ function PaymentForm({
         style={{ borderColor: "var(--color-hairline)" }}
       >
         {[
-          { label: `Salary · ${monthLabel(month)}`, value: money2(row.monthly_salary ?? 0) },
+          {
+            label: `Payable · ${dayLabel(row.cycle_start)} → ${dayLabel(row.cycle_end)}`,
+            value: money2(row.payableAmount),
+          },
           ...(row.advancePaid > 0
             ? [{ label: "Advance already paid", value: `− ${money2(row.advancePaid)}` }]
             : []),
@@ -475,14 +479,18 @@ function PayrollLine({
   onToggle,
   onPay,
   onSetSalary,
+  onSetCycle,
+  onChanged,
 }: {
-  row: PayrollRow;
+  row: PayrollCycleRow;
   month: string;
   canManage: boolean;
   expanded: boolean;
   onToggle: () => void;
   onPay: (kind: PaymentKind) => void;
   onSetSalary: () => void;
+  onSetCycle: () => void;
+  onChanged: () => void;
 }) {
   const noSalary = row.monthly_salary == null;
   const settled = row.remaining <= 0.005;
@@ -532,7 +540,7 @@ function PayrollLine({
         <div className="flex items-center gap-4 sm:gap-6 shrink-0 ml-6 sm:ml-0">
           {noSalary ? (
             <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-              No salary set for {monthLabel(month)}
+              No salary set for this cycle
             </span>
           ) : (
             <>
@@ -623,6 +631,24 @@ function PayrollLine({
 
       {expanded && (
         <div style={{ background: "var(--color-canvas-soft)" }}>
+          {/* The cycle comes first: it is what the money above is actually
+              settled against. History sits under it, unchanged. */}
+          <div className="px-4 py-4" style={{ borderBottom: "1px solid var(--color-hairline)" }}>
+            <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
+              <p
+                className="text-xs uppercase tracking-wide font-medium"
+                style={{ color: "var(--color-ink)", letterSpacing: "0.06em" }}
+              >
+                Salary cycle
+              </p>
+              {canManage && (
+                <Button variant="secondary" size="sm" onClick={onSetCycle}>
+                  {row.cycle_kind === "calendar_month" ? "Set salary cycle" : "Change cycle"}
+                </Button>
+              )}
+            </div>
+            <SalaryCyclePanel row={row} onChanged={onChanged} />
+          </div>
           <History staffId={row.staff_id} />
         </div>
       )}
@@ -636,27 +662,36 @@ export function PayrollClient({
   initial,
   canManage,
 }: {
-  initial: PayrollSheet;
+  initial: PayrollCycleSheet;
   canManage: boolean;
 }) {
   const [sheet, setSheet] = useState(initial);
-  const [month, setMonth] = useState(initial.month);
+  // The sheet is now keyed to a DAY, not a month: each staff member can be on
+  // their own cycle, so there is no single month that describes everybody. This
+  // date asks "which cycle was each person in on this day".
+  const [asOf, setAsOf] = useState(initial.asOf);
   const [loading, startTransition] = useTransition();
   const [expanded, setExpanded] = useState<string | null>(null);
 
   // Which modal is open, and for whom.
-  const [paying, setPaying] = useState<{ row: PayrollRow; kind: PaymentKind } | null>(null);
+  const [paying, setPaying] = useState<{ row: PayrollCycleRow; kind: PaymentKind } | null>(null);
   const [editing, setEditing] = useState<{
     staffId: string;
     name: string;
     salary: number | null;
     joining: string | null;
   } | null>(null);
+  const [cycling, setCycling] = useState<{
+    staffId: string;
+    name: string;
+    start: string | null;
+    length: number;
+  } | null>(null);
 
-  const load = useCallback((m: string) => {
+  const load = useCallback((d: string) => {
     startTransition(async () => {
       try {
-        setSheet(await getPayrollSheet(m));
+        setSheet(await getPayrollCycleSheet(d));
       } catch {
         // keep the last known sheet on a transient failure
       }
@@ -664,18 +699,26 @@ export function PayrollClient({
   }, []);
 
   const go = (by: number) => {
-    // Never past the month we're in: you cannot pay a salary that hasn't accrued.
-    const next = shiftMonth(month, by);
-    if (by > 0 && next > initial.month && isCurrentMonth(month)) return;
-    setMonth(next);
+    // Step a whole cycle at a time. Never past today: you cannot pay a salary
+    // that has not accrued yet.
+    const next = addDays(asOf, by * 30);
+    if (by > 0 && next > initial.asOf) return;
+    setAsOf(next);
     setExpanded(null);
     load(next);
   };
 
-  const refresh = useCallback(() => load(month), [load, month]);
+  const pick = (d: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d > initial.asOf) return;
+    setAsOf(d);
+    setExpanded(null);
+    load(d);
+  };
+
+  const refresh = useCallback(() => load(asOf), [load, asOf]);
   useRealtime(["payroll"], refresh);
 
-  const atCurrentMonth = isCurrentMonth(month);
+  const atToday = asOf >= initial.asOf;
 
   return (
     <section className="mt-10">
@@ -694,7 +737,9 @@ export function PayrollClient({
           </p>
         </div>
 
-        {/* Month stepper. Forward stops at the current month. */}
+        {/* Cycle stepper. Each person may be on their own window, so this picks a
+            DAY and every row shows the cycle that was running on it. Forward
+            stops at today — a salary cannot be paid before it has accrued. */}
         <div
           className="flex items-center gap-1 rounded-full border px-1 py-0.5 shrink-0"
           style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
@@ -702,23 +747,26 @@ export function PayrollClient({
           <button
             type="button"
             onClick={() => go(-1)}
-            aria-label="Previous month"
+            aria-label="Previous cycle"
             className="w-7 h-7 rounded-full flex items-center justify-center"
             style={{ color: "var(--color-ink-mute)" }}
           >
             <ChevronLeft size={15} />
           </button>
-          <span
-            className="text-sm px-2 min-w-[104px] text-center"
-            style={{ color: "var(--color-ink)" }}
-          >
-            {monthLabel(month)}
-          </span>
+          <input
+            type="date"
+            value={asOf}
+            max={initial.asOf}
+            onChange={(e) => pick(e.target.value)}
+            aria-label="Show cycles active on"
+            className="text-sm px-2 min-w-[132px] text-center bg-transparent"
+            style={{ color: "var(--color-ink)", border: "none", outline: "none" }}
+          />
           <button
             type="button"
             onClick={() => go(1)}
-            disabled={atCurrentMonth}
-            aria-label="Next month"
+            disabled={atToday}
+            aria-label="Next cycle"
             className="w-7 h-7 rounded-full flex items-center justify-center disabled:opacity-30"
             style={{ color: "var(--color-ink-mute)" }}
           >
@@ -733,7 +781,7 @@ export function PayrollClient({
         style={{ gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))" }}
       >
         {[
-          { label: "Total salary", value: sheet.totalSalary, tone: "var(--color-ink)" },
+          { label: "Total payable", value: sheet.totalPayable, tone: "var(--color-ink)" },
           { label: "Advances", value: sheet.totalAdvance, tone: PAYROLL_STATUS_COLOR.partial },
           { label: "Total paid", value: sheet.totalPaid, tone: PAYROLL_STATUS_COLOR.paid },
           { label: "Remaining", value: sheet.totalRemaining, tone: PAYROLL_STATUS_COLOR.unpaid },
@@ -763,16 +811,16 @@ export function PayrollClient({
             className="text-xs uppercase tracking-wide font-medium"
             style={{ color: "var(--color-ink)", letterSpacing: "0.06em" }}
           >
-            {monthLabel(month)}
+            Cycles active on {dayLabel(asOf)}
           </p>
           <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
-            Select a staff member to see their payroll history
+            Select a staff member to see their cycle, attendance and history
           </p>
         </div>
 
         {sheet.rows.length === 0 ? (
           <p className="px-4 py-6 text-sm" style={{ color: "var(--color-ink-mute)" }}>
-            Nobody is on payroll for {monthLabel(month)} yet.
+            Nobody is on payroll on {dayLabel(asOf)} yet.
             {canManage && " Set a salary below to start."}
           </p>
         ) : (
@@ -780,7 +828,7 @@ export function PayrollClient({
             <PayrollLine
               key={r.staff_id}
               row={r}
-              month={month}
+              month={asOf}
               canManage={canManage}
               expanded={expanded === r.staff_id}
               onToggle={() => setExpanded(expanded === r.staff_id ? null : r.staff_id)}
@@ -793,6 +841,17 @@ export function PayrollClient({
                   joining: r.joining_date,
                 })
               }
+              onSetCycle={() =>
+                setCycling({
+                  staffId: r.staff_id,
+                  name: r.display_name,
+                  // A calendar-month row has no anchor yet, so offer nothing
+                  // rather than pre-filling a date that was never chosen.
+                  start: r.cycle_kind === "rolling_30" ? r.cycle_start : null,
+                  length: r.cycle_kind === "rolling_30" ? r.totalDays : 30,
+                })
+              }
+              onChanged={refresh}
             />
           ))
         )}
@@ -855,12 +914,12 @@ export function PayrollClient({
         open={!!paying}
         onClose={() => setPaying(null)}
         title={paying?.kind === "advance" ? "Pay a salary advance" : "Pay salary"}
-        subtitle={paying ? `${paying.row.display_name} · ${monthLabel(month)}` : undefined}
+        subtitle={paying ? `${paying.row.display_name} · ${dayLabel(asOf)}` : undefined}
       >
         {paying && (
           <PaymentForm
             row={paying.row}
-            month={month}
+            month={asOf}
             kind={paying.kind}
             onDone={() => { setPaying(null); refresh(); }}
           />
@@ -879,8 +938,25 @@ export function PayrollClient({
             staffName={editing.name}
             currentSalary={editing.salary}
             joiningDate={editing.joining}
-            month={month}
+            month={asOf}
             onDone={() => { setEditing(null); refresh(); }}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        open={!!cycling}
+        onClose={() => setCycling(null)}
+        title={cycling?.start ? "Change salary cycle" : "Set salary cycle"}
+        subtitle={cycling?.name}
+      >
+        {cycling && (
+          <CycleStartForm
+            staffId={cycling.staffId}
+            staffName={cycling.name}
+            currentStart={cycling.start}
+            currentLength={cycling.length}
+            onDone={() => { setCycling(null); refresh(); }}
           />
         )}
       </Modal>

@@ -2,7 +2,7 @@
 import { PAYROLL_ACCESS, PERMISSIONS } from "@/lib/permissions";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getWorkstations } from "@/app/actions/workstations";
-import { getPayrollSheet } from "@/app/actions/payroll";
+import { getPayrollCycleSheet } from "@/app/actions/payroll";
 import { WorkstationAssign } from "./_components/workstation-assign";
 import { PayrollClient } from "./_components/payroll-client";
 
@@ -60,10 +60,10 @@ export default async function AdminStaffPage() {
   const canAssignWorkstations = restaurantUser.role === "restaurant_admin";
 
   // Payroll is gated separately from `view_staff`: seeing the roster is not the
-  // same as seeing what everyone earns. `getPayrollSheet` re-checks this itself,
+  // same as seeing what everyone earns. `getPayrollCycleSheet` re-checks this itself,
   // so a caller who slipped past here would still get an empty sheet.
   const canViewPayroll = PAYROLL_ACCESS.canViewPayroll(restaurantUser);
-  const payroll = canViewPayroll ? await getPayrollSheet() : null;
+  const payroll = canViewPayroll ? await getPayrollCycleSheet() : null;
 
   return (
     <div className="p-4 md:p-8 max-w-3xl">

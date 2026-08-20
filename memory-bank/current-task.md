@@ -1204,3 +1204,61 @@ Verified after: `npm test` 110/110 pass · `npx tsc --noEmit` clean · `npm run 
 - 13 dependencies are pinned to `"latest"` (including `next`, `react`, `@supabase/ssr`) — builds are
   not reproducible and a breaking release lands silently on the next install.
 - `memory-bank/current-task.md` is ~86 KB; completed sections belong in `completed.md`.
+
+---
+
+## Individual 30-day salary cycles + attendance-ready foundation — 2026-08-20
+
+Payroll was calendar-month only: `staff_salaries.effective_from` and
+`salary_payments.salary_month` were CHECK-pinned to the 1st, everyone got a full month's salary the
+moment the month ended, and attendance did not exist. Each staff member can now have their own
+fixed-length cycle, and salary is payable-days × daily-rate.
+
+**Migration `20260824000000_salary_cycles.sql`.** New tables `salary_cycles` and
+`staff_attendance_days`; `staff_payroll` gains `cycle_anchor_date` + `cycle_length_days`;
+`salary_payments` gains `cycle_id`; the `staff_salaries_month_start` CHECK is dropped so a revision
+can start on any day.
+
+**Why a cycle is STORED when everything else here is derived.** "July 2026" means the same thing
+forever, so month-keyed state can be derived safely. A per-staff cycle cannot: move the anchor and
+every past boundary moves with it, stranding payments in periods that no longer exist. The *period*
+is therefore a stored fact; payable/paid/remaining/status inside it stay derived.
+
+**The attendance seam.** `staff_attendance_days` stores **exceptions only** — a day with no row is
+fully present, so ten absences are ten rows. `payable_days = Σ coalesce(day_fraction, 1)`. A future
+attendance module writing explicit `present` rows at fraction 1.0 changes no total, which is the
+whole forward-compatibility claim. `status` is text-with-a-check, not an enum, so the list can grow.
+
+**finance_report was NOT touched** — deliberately. It calls `payroll_summary()` for
+`salary_outstanding` and reads `sp.salary_month` as a ledger label, so keeping `salary_month`
+populated and `payroll_summary`'s signature stable meant zero changes there. Only `payroll_summary`'s
+`owed` CTE moved: cycles first, plus any calendar month **no cycle covers**, so nothing is
+double-counted and an uncycled month still shows as owed.
+
+**`record_salary_payment`'s overpay ceiling now reads the cycle's payable amount**, not the headline
+salary — otherwise a cycle with 10 absences would accept a full month's pay and report a negative
+remaining. Mixed cash/online split logic is unchanged.
+
+**Neutrality proven on real data.** DO (a full copy of production payroll) before and after:
+Bhairahawa owed 22,800.00 / paid 21,200.00, Sanjib owed 30,000.00 / paid 50,000.00 — identical.
+Backfill created 8 `calendar_month` cycles at real month lengths (31d for Jul/Aug) and linked
+**10 of 10** payments. DEV likewise 80,000.00 → 80,000.00.
+
+**App layer.** `lib/payroll.ts` gained pure cycle maths (`addDays`, `daysBetween`, `cycleFor`,
+`cycleContaining`, `payableDays`, `dailyRate`, `payableAmount`, `dayLabel`, `cycleLabel`) — all UTC
+epoch arithmetic, never a local `Date`, or a boundary shifts for anyone east of UTC.
+`lib/payroll.test.ts` covers it (23 tests; suite now 133). New actions: `getPayrollCycleSheet`,
+`getCycleAttendance`, `setAttendanceDay`, `verifyCycleAttendance`, `setCycleAnchor`. New component
+`_components/salary-cycle-panel.tsx` (grid + cycle-start form) kept out of the 900-line
+payroll-client. **The payroll screen is now keyed to a DAY, not a month** — each person may be on
+their own window, so the stepper picks a date and every row shows the cycle running on it.
+
+⚠️ **`dailyRate` is deliberately unrounded**; money is always `round(snapshot × payable ÷ total, 2)`.
+Rounding the rate would make a fully-worked ₹25,000 cycle pay ₹24,999.90 forever.
+
+⚠️ **`set_staff_salary` also overwrites `joining_date`** (`on conflict … do update set joining_date`).
+Passing a wrong joining date silently changes the liability walk — it cost 25,000 of phantom
+liability on DEV during testing before it was spotted and restored.
+
+**Applied to DEV and DO. NOT applied to hosted PRODUCTION** — that is the user's deploy call:
+`node scripts/migrate.mjs up --prod --yes`.
