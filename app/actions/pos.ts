@@ -2180,8 +2180,10 @@ export async function getSalesReport(params?: {
       .from("payments")
       // table_id / room_id (+ room_stays.room_id for a room folio) come along so the
       // report can be scoped to the viewer's assigned tables/rooms — see the filter below.
+      // sessions.room_stay_id rides along too, so a room bill settled by a deposit can
+      // look up how that deposit was tendered — see advanceStayCash below.
       .select(
-        "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, sessions ( type, table_id, room_id, customer_name, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), room_stays ( room_id ), credits ( id, credit_number, customer_name, down_payment )"
+        "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, advance_amount, payment_method, created_at, sessions ( type, table_id, room_id, customer_name, room_stay_id, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), room_stays ( room_id ), credits ( id, credit_number, customer_name, down_payment )"
       )
       .eq("restaurant_id", ru.restaurant_id)
       .order("created_at", { ascending: false }),
@@ -2245,6 +2247,34 @@ export async function getSalesReport(params?: {
 
   const { fromMs, toMs } = resolveSalesRange(period, ru.closingHour, params?.from, params?.to);
 
+  // Which stays this call actually needs a deposit split for: only bills landing in
+  // the selected period that were settled (in full or in part) by an advance taken
+  // earlier — a plain cash/online/card bill never touches room_advances at all.
+  const neededStayIds = new Set<string>();
+  for (const p of rows) {
+    const ts = new Date(p.created_at).getTime();
+    if (ts < fromMs || ts >= toMs) continue;
+    if (Number(p.advance_amount ?? 0) <= 0.005) continue;
+    const stayId = oneEmbed(p.sessions)?.room_stay_id as string | null;
+    if (stayId) neededStayIds.add(stayId);
+  }
+
+  // Net cash actually retained per stay — a refund is a negative room_advances row,
+  // so summing cash_amount across ALL of a stay's rows nets it off automatically.
+  // Mirrors `finance_report`'s `advsold` CTE; keep the two identical, or Sales and
+  // Finance disagree about how the same deposit was tendered.
+  const stayCash = new Map<string, number>();
+  if (neededStayIds.size > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: advRows } = await (service as any)
+      .from("room_advances")
+      .select("stay_id, cash_amount")
+      .in("stay_id", Array.from(neededStayIds));
+    for (const a of (advRows ?? []) as { stay_id: string; cash_amount: number }[]) {
+      stayCash.set(a.stay_id, (stayCash.get(a.stay_id) ?? 0) + Number(a.cash_amount ?? 0));
+    }
+  }
+
   const overview = { today: 0, week: 0, month: 0, year: 0, total: 0 };
   const breakdown = { cash: 0, online: 0, card: 0, credit: 0, other: 0 };
   let periodTotal = 0;
@@ -2285,9 +2315,23 @@ export async function getSalesReport(params?: {
       breakdown.online += online;
       breakdown.card += card;
 
+      // A room bill settled (in full or in part) by a deposit taken earlier never
+      // shows that money here as cash/online/card — checkout only tenders what's
+      // left AFTER the deposit. Without this, a fully-prepaid room's whole value
+      // still lands in periodTotal but vanishes from every breakdown tile.
+      const advanceApplied = Number(p.advance_amount ?? 0);
+      if (advanceApplied > 0.005) {
+        const stayId = oneEmbed(p.sessions)?.room_stay_id as string | null;
+        const heldCash = stayId ? stayCash.get(stayId) ?? 0 : 0;
+        const advCash = Math.min(Math.max(heldCash, 0), advanceApplied);
+        breakdown.cash += advCash;
+        breakdown.online += advanceApplied - advCash;
+      }
+
       if (p.payment_method === "credit") {
-        // The gap between the bill and what was tendered went on credit.
-        breakdown.credit += Math.max(0, value - (cash + online + card));
+        // The gap between the bill and what was tendered OR already settled by a
+        // deposit is the only part actually left on credit.
+        breakdown.credit += Math.max(0, value - (cash + online + card + advanceApplied));
       } else if (p.payment_method === "card" && card === 0) {
         // Legacy card rows, written before card_amount existed, carry the whole
         // value under amount only.
@@ -2561,6 +2605,16 @@ export type PaidBill = {
   total: number;
   /** Knocked off at payment. Shown on the bill so `total` reconciles with the items above it. */
   discount: number;
+  /**
+   * A room bill only: how much of `total` was already settled by a deposit taken
+   * earlier, split by how that deposit itself was tendered. 0 for a table/walk-in
+   * bill, or a room bill with no advance — `cash_amount`/`online_amount` above only
+   * ever cover what was collected AT checkout, so without these the reprint prints
+   * a total the payment lines underneath don't add up to.
+   */
+  advancePaid: number;
+  advanceCash: number;
+  advanceOnline: number;
   cashier_name: string | null;
   order_ids: string[];
   location: string;
@@ -2634,7 +2688,7 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
   const { data: p } = await (service as any)
     .from("payments")
     .select(
-      "id, bill_number, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, session_id, restaurant_id, sessions ( type, bill_number, room_stay_id, customer_name, customer_phone, customer_address, restaurant_tables ( number ), rooms ( number, room_type_id ) ), credits ( credit_number, customer_name, customer_phone, paid_amount, balance )"
+      "id, bill_number, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, advance_amount, payment_method, created_at, created_by, session_id, restaurant_id, sessions ( type, bill_number, room_stay_id, customer_name, customer_phone, customer_address, restaurant_tables ( number ), rooms ( number, room_type_id ) ), credits ( credit_number, customer_name, customer_phone, paid_amount, balance )"
     )
     .eq("id", paymentId)
     .maybeSingle();
@@ -2708,6 +2762,7 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
   const online = Number(p.online_amount ?? 0);
   const card = Number(p.card_amount ?? 0);
   const discount = Number(p.discount_amount ?? 0);
+  const advanceApplied = Number(p.advance_amount ?? 0);
   const credit = Array.isArray(p.credits) ? p.credits[0] ?? null : p.credits ?? null;
 
   // ── A room bill, rebuilt from the FROZEN stay ────────────────────────────────
@@ -2722,9 +2777,11 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
   let sections: BillSection[] | undefined;
   let stayBlock: BillStay | undefined;
   let roomGuest: PaidBill["customer"] = null;
+  let advanceCash = 0;
+  let advanceOnline = 0;
   const stayId: string | null = p.sessions?.room_stay_id ?? null;
   if (stayId) {
-    const [stayRes, chargesRes, typeRes] = await Promise.all([
+    const [stayRes, chargesRes, typeRes, advancesRes] = await Promise.all([
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (service as any)
         .from("room_stays")
@@ -2747,6 +2804,13 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
             .eq("id", p.sessions.rooms.room_type_id)
             .maybeSingle()
         : Promise.resolve({ data: null }),
+      // Only needed when this bill was actually settled (in part or in full) by a
+      // deposit — see the clamp below, which mirrors `finance_report`'s `advsold`
+      // CTE and `check_out_room`'s own method derivation. Keep all three identical.
+      advanceApplied > 0.005
+        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (service as any).from("room_advances").select("cash_amount").eq("stay_id", stayId)
+        : Promise.resolve({ data: [] }),
     ]);
 
     const stayRow = stayRes.data;
@@ -2770,6 +2834,10 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
           servicePercent:
             settingsNumber(rest?.settings, "service_charge_percent", "service_charge") ?? 0,
           discount,
+          // Without this the reprint's own balance math never learns a deposit
+          // covered any of the bill — it used to always read 0, so `folioToBill`
+          // never had an advance to show at all.
+          advancePaid: advanceApplied,
           // The SAME rule the checkout charged under. The stay's snapshot is what
           // makes that true: change the restaurant's boundary hours tomorrow and
           // this reprint still shows the nights the guest actually paid for.
@@ -2782,7 +2850,22 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
           }),
         }
       );
-      const view = folioToBill({ folio, roomType: (typeRes.data?.name as string) ?? "—" });
+
+      // Net cash this stay's deposits hold (refunds are negative rows, already
+      // netted), clamped to what was actually applied to THIS bill.
+      const netAdvanceCash = ((advancesRes.data ?? []) as { cash_amount: number }[]).reduce(
+        (s, a) => s + Number(a.cash_amount ?? 0),
+        0
+      );
+      advanceCash = Math.min(Math.max(netAdvanceCash, 0), advanceApplied);
+      advanceOnline = advanceApplied - advanceCash;
+
+      const view = folioToBill({
+        folio,
+        roomType: (typeRes.data?.name as string) ?? "—",
+        advanceCash,
+        advanceOnline,
+      });
       sections = view.sections;
       stayBlock = view.stay;
       roomGuest = {
@@ -2804,6 +2887,9 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
     card_amount: card,
     total,
     discount,
+    advancePaid: advanceApplied,
+    advanceCash,
+    advanceOnline,
     cashier_name,
     order_ids,
     location,
