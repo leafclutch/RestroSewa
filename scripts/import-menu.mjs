@@ -1,8 +1,8 @@
 /**
  * Bulk-load a restaurant's menu from a JSON file (see docs/menu-import.md).
  *
- *   node scripts/import-menu.mjs --file docs/menu-data/<name>.json --env .env.production --dry-run
- *   node scripts/import-menu.mjs --file docs/menu-data/<name>.json --env .env.production --yes
+ *   node scripts/import-menu.mjs --file docs/menu-data/<name>.json --env .env.hrestrosewa --dry-run
+ *   node scripts/import-menu.mjs --file docs/menu-data/<name>.json --env .env.hrestrosewa --yes
  *
  * WHY A SCRIPT: the admin UI is one form submit per item and one per variant. A real menu
  * is ~200 items and ~60 variants; that is an afternoon by hand and a minute here.

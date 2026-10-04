@@ -17,12 +17,12 @@ import {
 //   RESEND (HTTPS, port 443)  — used whenever RESEND_API_KEY is set.
 //   GMAIL  (SMTP,  port 465)  — the original, used when it is not.
 //
-// WHY: DigitalOcean silently DROPS outbound packets on every SMTP port to every
-// provider — 25, 465 and 587, to Gmail, SendGrid and Brevo alike. Proven by
-// socket test from the droplet; `ufw` is not the cause (default outgoing is
-// allow). So from 2026-08-21, when sending moved off Vercel, every report failed
-// with "Connection timeout" and no owner received one. Port 443 is open, so mail
-// has to leave over HTTPS.
+// WHY: the self-hosted VPS silently DROPS outbound packets on every SMTP port
+// to every provider — 25, 465 and 587, to Gmail, SendGrid and Brevo alike.
+// Proven by socket test from the VPS; `ufw` is not the cause (default outgoing
+// is allow). So from 2026-08-21, when sending moved off Vercel, every report
+// failed with "Connection timeout" and no owner received one. Port 443 is
+// open, so mail has to leave over HTTPS.
 //
 // Gmail SMTP is KEPT rather than replaced: it still works from a local machine
 // and from any host that does not block SMTP, so leaving it in place means dev

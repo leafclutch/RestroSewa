@@ -4,7 +4,7 @@
  *
  * WHY THIS EXISTS: the self-hosted stack runs under Coolify, and its Postgres is
  * on a Docker-internal network — the host `supabase-db-<id>` does not resolve off
- * the droplet, and 5432 is not published. The usual answers are an SSH tunnel or
+ * the VPS, and 5432 is not published. The usual answers are an SSH tunnel or
  * exposing the port publicly; this is neither. Kong is already reachable over
  * TLS, already authenticates with the service-role key, and `postgres-meta`
  * connects as `supabase_admin` (a superuser), so it can do everything the

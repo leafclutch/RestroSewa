@@ -15,14 +15,16 @@ never do it the other way round.
 | target | env file | how you reach it |
 | --- | --- | --- |
 | DEV | `.env.local` | the default — no flag needed |
-| PRODUCTION | `.env.production` | needs **both** `--prod` and `--yes` |
+| PRODUCTION | `.env.hrestrosewa` (self-hosted, Coolify on an OVHcloud VPS) | needs **both** `--prod` and `--yes` — `--prod` targets this file and implies `--http` automatically |
 
 Three interlocks stop you writing to production by accident:
 
 1. `--prod` is required to even look at it.
 2. `--yes` is required on top of that to write.
-3. The project ref inside the env file must actually be the production one
-   (`qsccnzgrhrnjggyymefr`), or the run is refused — a mislabelled env file cannot smuggle itself in.
+3. The env file's `NEXT_PUBLIC_SUPABASE_URL` hostname must actually match production
+   (`*.hrestrosewa.leafclutch.com.np`), or the run is refused — a mislabelled env file cannot smuggle
+   itself in. (There is no hosted Supabase project anymore — the old `.env.production`
+   / `qsccnzgrhrnjggyymefr` was retired 2026-08-27 and the file deleted 2026-10-04.)
 
 ⚠️ `npm run` **swallows flags**. `npm run migrate --prod` silently drops `--prod` and targets DEV.
 Call the script directly, as below, or use `--` (`npm run migrate -- --prod`).
@@ -38,7 +40,7 @@ node scripts/migrate.mjs status --prod
 Read-only. Expect something like:
 
 ```
-target: PRODUCTION (qsccnzgrhrnjggyymefr)
+target: PRODUCTION (supabase.hrestrosewa.leafclutch.com.np)
 migrations on disk: 94   applied: 91   pending: 3
 
   PENDING  20260817000000_saving_opening_amount.sql
@@ -258,7 +260,9 @@ node scripts/migrate.mjs up --prod           # PRODUCTION, dry run
 node scripts/migrate.mjs up --prod --yes     # PRODUCTION, apply
 ```
 
-The self-hosted DigitalOcean stack uses the same script over Kong instead of a direct connection:
+`--prod` above already targets `.env.hrestrosewa` over Kong (`--http` implied) — the explicit form
+below is equivalent and only needed if you're naming a *different* env file (e.g. a second
+self-hosted stack):
 
 ```bash
 node scripts/migrate.mjs up --env .env.hrestrosewa --http --yes

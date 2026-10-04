@@ -11,11 +11,16 @@
  * 20260712300000_restaurant_logo_storage.sql) and after clone-db.mjs has put the
  * `restaurants` rows in place to repoint.
  *
- *   node scripts/copy-storage.mjs --env .env.hrestrosewa --http --yes
+ *   node scripts/copy-storage.mjs --from <source env> --env .env.hrestrosewa --http --yes
  *
  * The destination Storage API is reached over its PUBLIC Kong URL, so this part
  * needs no tunnel. The logo_url rewrite is a database write, so pass --http too and it
  * goes through Kong as well — no SSH tunnel anywhere in this script.
+ *
+ * --from has no default and must name a database reachable by DIRECT Postgres
+ * connection (the source side never speaks HTTP here) — written originally for
+ * the one-time hosted-Supabase-Cloud → self-hosted cutover (2026-08), whose
+ * source project is now retired.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -24,7 +29,14 @@ import pg from "pg";
 import { HttpClient } from "./lib/pg-http.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PROD_REF = "qsccnzgrhrnjggyymefr";
+// No production write-guard here, unlike clone-db.mjs: this script's ENTIRE
+// job is writing into production (`.env.hrestrosewa`) — that used to be safe
+// to assert by ref, because the old guard checked against the HOSTED project
+// (`qsccnzgrhrnjggyymefr`), which was always the source, never this script's
+// destination. That hosted project is retired; there is no longer a "the
+// other database" to guard the destination against, so the check is dropped
+// rather than repointed at the self-hosted host (which WOULD break this
+// script's one real use case). Naming `--env` explicitly is the only guard.
 const BUCKET = "restaurant-logos";
 
 const args = process.argv.slice(2);
@@ -38,8 +50,9 @@ const flag = (name, fallback) => {
   return args[i + 1];
 };
 const targetEnv = flag("--env", null);
-const sourceEnv = flag("--from", ".env.production");
+const sourceEnv = flag("--from", null);
 if (!targetEnv) throw new Error("--env <file> is required (the DESTINATION env file)");
+if (!sourceEnv) throw new Error("--from <file> is required (the SOURCE env file, read-only)");
 
 function readEnv(envFile) {
   const file = path.join(ROOT, envFile);
@@ -55,7 +68,7 @@ function readEnv(envFile) {
   return {
     url: url.replace(/\/$/, ""),
     key,
-    ref: url.match(/https:\/\/([a-z0-9]+)\./)?.[1] ?? "unknown",
+    host: (() => { try { return new URL(url).hostname; } catch { return "unknown"; } })(),
     db: { user: m[1], password: m[2], host: m[3], port: Number(m[4]), database: m[5] },
   };
 }
@@ -63,7 +76,7 @@ function readEnv(envFile) {
 async function main() {
   const source = readEnv(sourceEnv);
   const target = readEnv(targetEnv);
-  if (target.ref === PROD_REF) throw new Error(`${targetEnv} points at PRODUCTION — refusing to write there`);
+  if (source.host === target.host) throw new Error(`source and destination are the same database (${source.host})`);
 
   console.log(`source:      ${source.url}   READ ONLY`);
   console.log(`destination: ${target.url}\n`);

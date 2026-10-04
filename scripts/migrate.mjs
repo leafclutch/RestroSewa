@@ -18,8 +18,8 @@
  *   node scripts/migrate.mjs baseline          record every file as already applied
  *   node scripts/migrate.mjs status --prod
  *
- *   node scripts/migrate.mjs up --env .env.hrestrosewa --http --yes
- *                                              …to any other target (see below)
+ *   node scripts/migrate.mjs up --env <file> --http --yes
+ *                                              …to any OTHER target (see below)
  *
  * Safety rules, in order of importance:
  *   1. DEV is the default target. Production needs BOTH --prod and --yes.
@@ -28,7 +28,15 @@
  *   3. A failure stops the run. Later migrations almost always depend on earlier
  *      ones, and continuing past a break produces a schema matching nothing.
  *
- * --env / --http / --no-ssl exist for the self-hosted Supabase on DigitalOcean:
+ * --prod targets `.env.hrestrosewa` — the self-hosted Supabase stack (Coolify,
+ * currently on an OVHcloud VPS; was a DigitalOcean droplet until 2026-10-04) —
+ * and implies --http automatically, since that database has no reachable direct
+ * port. There is no other production target: the old hosted Supabase project
+ * (formerly `.env.production`, ref `qsccnzgrhrnjggyymefr`) was retired
+ * 2026-08-27 and the file itself deleted 2026-10-04. Do not recreate a file
+ * named `.env.production` expecting it to do anything here.
+ *
+ * --env / --http / --no-ssl exist for targeting anything else explicitly:
  *
  *   • --env <file> targets an env file that is not one of the two known names.
  *   • --http sends SQL through Kong's `/pg/query` instead of connecting to
@@ -45,8 +53,9 @@
  * a direct connection would give us does not span the file plus its ledger row.
  *
  * --env carries the SAME production interlock as everything else: whatever file
- * is named, if it resolves to the production project ref the run is refused
- * unless --prod was also given. A mislabelled env file cannot smuggle itself in.
+ * is named, if its URL's hostname matches the production host, the run is
+ * refused unless --prod was also given. A mislabelled env file cannot smuggle
+ * itself in.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -56,13 +65,19 @@ import { HttpClient, toLiteral } from "./lib/pg-http.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIR = path.join(ROOT, "supabase", "migrations");
-const PROD_REF = "qsccnzgrhrnjggyymefr";
+// The one true production host — self-hosted Supabase, reached through Kong.
+// A hostname check, not a hosted-project ref: there is no hosted project
+// anymore (the old `qsccnzgrhrnjggyymefr` / `.env.production` was retired
+// 2026-08-27, file deleted 2026-10-04).
+const PROD_HOST = "hrestrosewa.leafclutch.com.np";
 
 const args = process.argv.slice(2);
 const useProd = args.includes("--prod");
 const confirmed = args.includes("--yes");
 const noSsl = args.includes("--no-ssl");
-const useHttp = args.includes("--http");
+// --prod always means the self-hosted stack, which has no published Postgres
+// port — --http is therefore implied, not merely allowed.
+const useHttp = args.includes("--http") || useProd;
 
 // `--env <file>` takes a value, so the value must not also be read as the command.
 const envIdx = args.indexOf("--env");
@@ -79,14 +94,17 @@ function connect(envFile) {
   const env = fs.readFileSync(file, "utf8");
   const get = (k) => env.match(new RegExp(`^${k}=(.*)$`, "m"))?.[1]?.trim().replace(/^["']|["']$/g, "") ?? "";
   const url = get("NEXT_PUBLIC_SUPABASE_URL");
-  // Only a hosted project HAS a ref. A self-hosted URL yields "unknown", which
-  // can never equal PROD_REF — so the interlock stays safe by default.
-  const ref = url.match(/https:\/\/([a-z0-9]+)\./)?.[1] ?? "unknown";
+  // Matched against the URL's hostname, not a hosted-project ref: the
+  // self-hosted stack's hostname IS what identifies it as production, and
+  // "unknown" (no parseable URL) can never match PROD_HOST, so the interlock
+  // stays safe by default.
+  const host = (() => { try { return new URL(url).hostname; } catch { return "unknown"; } })();
+  const isProd = host === PROD_HOST || host.endsWith(`.${PROD_HOST}`);
 
   if (useHttp) {
     const key = get("SUPABASE_SERVICE_ROLE_KEY");
     if (!key) throw new Error(`SUPABASE_SERVICE_ROLE_KEY missing from ${envFile}`);
-    return { client: new HttpClient({ url, key }), ref };
+    return { client: new HttpClient({ url, key }), host, isProd };
   }
 
   const raw = get("SUPABASE_DB_URL");
@@ -98,7 +116,8 @@ function connect(envFile) {
       user: m[1], password: m[2], host: m[3], port: Number(m[4]), database: m[5],
       ssl: noSsl ? false : { rejectUnauthorized: false }, connectionTimeoutMillis: 20000,
     }),
-    ref,
+    host,
+    isProd,
   };
 }
 
@@ -123,14 +142,14 @@ const applied = async (c) =>
 async function main() {
   if (envArg && useProd) throw new Error("--env and --prod name two different targets — pick one");
 
-  const envFile = envArg ?? (useProd ? ".env.production" : ".env.local");
-  const { client: c, ref } = connect(envFile);
+  const envFile = envArg ?? (useProd ? ".env.hrestrosewa" : ".env.local");
+  const { client: c, host, isProd } = connect(envFile);
   const target = envArg ? `CUSTOM ${envArg}` : useProd ? "PRODUCTION" : "DEV";
 
-  // Belt and braces: the flag says prod, the project ref must agree.
-  if (useProd && ref !== PROD_REF) throw new Error(`--prod given but ${envFile} points at ${ref}`);
+  // Belt and braces: the flag says prod, the host must agree.
+  if (useProd && !isProd) throw new Error(`--prod given but ${envFile} points at ${host}`);
   // Applies to --env too: naming a file is not a licence to write to production.
-  if (!useProd && ref === PROD_REF) throw new Error(`${envFile} points at PRODUCTION — refusing`);
+  if (!useProd && isProd) throw new Error(`${envFile} points at PRODUCTION (${host}) — refusing`);
 
   await c.connect();
   await ensureLedger(c);
@@ -139,7 +158,7 @@ async function main() {
   const done = await applied(c);
   const pending = all.filter((m) => !done.has(m.version));
 
-  console.log(`target: ${target} (${ref})`);
+  console.log(`target: ${target} (${host})`);
   console.log(`migrations on disk: ${all.length}   applied: ${all.length - pending.length}   pending: ${pending.length}\n`);
 
   if (cmd === "status") {
@@ -213,7 +232,7 @@ async function main() {
 
     // PostgREST caches the schema and only rebuilds it on this signal. The
     // hosted projects ship `pgrst_ddl_watch`/`pgrst_drop_watch` event triggers
-    // that fire it automatically; the self-hosted droplet has NO event triggers
+    // that fire it automatically; the self-hosted VPS has NO event triggers
     // at all, so a migration there lands in the database and stays invisible to
     // the API — `PGRST205 Could not find the table` on a table that plainly
     // exists. Hit for real after 20260824000000_salary_cycles.sql.
