@@ -109,7 +109,7 @@ export async function sendDailySummary(
   // the scheduler ticks every 15 minutes, so they all arrive within one tick of
   // each other.
   //
-  // Real case: DigitalOcean blocks outbound SMTP, so every report from
+  // Real case: the self-hosted VPS blocks outbound SMTP, so every report from
   // 2026-08-21 failed. Restoring mail without this guard would have dumped the
   // whole backlog on every owner.
   //

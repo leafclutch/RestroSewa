@@ -157,6 +157,9 @@ follow-up. This exists so future work doesn't re-propose things already chosen o
 - **Two Supabase projects (dev/prod).** `.env.local` = DEV, `.env.production` = prod (local
   tooling only — Vercel runtime uses dashboard env). *Reason:* isolate real data. Never `>>` an
   env file without a trailing newline (it once corrupted `VAPID_SUBJECT`).
+  ⚠️ **Superseded by the self-hosted cutover — see the 2026-08-27 entry below.** The app no longer
+  runs on Vercel and `.env.production` is no longer the live database; that file has since been
+  renamed to `.env.production(supabase)` to stop this exact line from being trusted again.
 
 - **CSS traps to never reintroduce.** (1) Never re-add `inline` to the `@theme` in globals.css —
   it froze utilities to literal hex and made `.dark` inert. (2) Keep animation `fill-mode:
@@ -449,3 +452,84 @@ follow-up. This exists so future work doesn't re-propose things already chosen o
   behind** (`20260806000000`, since applied) with **`pg_cron` missing** (since installed; the JOB is
   still deliberately deferred to cutover). Droplet data is stale (payments 469 vs prod 847), so the
   cutover re-clone is mandatory regardless.
+
+- **The self-hosted cutover is complete — the droplet (`.env.hrestrosewa`) is the ONLY live
+  database now, and `.env.production` was never it.** (2026-08-27). Confirmed the hard way: two
+  pending migrations (`20260826000000_staff_pin_lockout`, `20260826300000_subscription_install_date`)
+  were applied to `.env.production` (`migrate:prod:up` — the hosted Supabase project
+  `qsccnzgrhrnjggyymefr`) and verified there directly (raw Postgres connection AND the REST API both
+  returned correct data). The live site (`hrestrosewa.leafclutch.com.np`, Coolify) kept 500ing anyway
+  — `getAllRestaurants(): query failed — 42703 column restaurants.install_date does not exist` —
+  because Coolify's app was never pointed at that project at all. It reads `.env.hrestrosewa` (the
+  self-hosted Supabase on the DigitalOcean droplet from the 2026-08-01 cutover above), which still had
+  the two migrations pending. Applying them there (`node scripts/migrate.mjs up --env .env.hrestrosewa
+  --http --yes`) fixed the outage immediately. The droplet's restaurant list (9 rows, including one
+  the hosted project doesn't have) proves it — not the hosted project — is now the row of record; the
+  2026-08-09 entry's "droplet data is stale, cutover mandatory" is resolved.
+  **Symptom trail worth remembering, since none of it pointed at the DB directly:** silently-swallowed
+  Supabase errors (`getAllRestaurants` didn't check `error`, so the missing column read as "0
+  restaurants" instead of failing loudly) → superadmin dashboard showing 0 restaurants → after adding
+  proper error throwing (a good fix in its own right, kept), the SAME missing column turned into a
+  redacted "Server Components render" 500 with no message, only a `digest` → the digest was useless
+  without server-side console access, which for a Coolify/Docker deploy means the app's own container
+  logs (`docker logs`), not a network panel or a managed platform's dashboard.
+  ⚠️ **`.env.production` has been renamed to `.env.production(supabase)`** specifically so its name
+  can never again be mistaken for "the" production target. Treat `.env.hrestrosewa` as prod for every
+  future migration, diagnostic query, or env-var comparison against what Coolify has configured —
+  and if either file's contents or the live domain's target ever seem to disagree again, verify
+  against the LIVE site's own error output before trusting either file's name or `migrate:prod`'s
+  default.
+
+- **Second self-hosted move: DigitalOcean droplet → OVHcloud VPS, same Coolify-managed
+  architecture (2026-10-04).** The entire stack from the 2026-08-01/08-27 entries above (the app
+  and its self-hosted Supabase, both Coolify-managed, both read via `.env.hrestrosewa`) relocated
+  to a new **OVHcloud** VPS at `15.204.123.150` (Coolify dashboard `http://15.204.123.150:8000/`).
+  Reported complete: DNS/`hrestrosewa.leafclutch.com.np` and the Supabase stack both live on the
+  new VPS; the DigitalOcean droplet is retired. **Nothing about the architecture changed** — Kong
+  `/pg/query` still fronts Postgres with no exposed port, `.env.hrestrosewa` is still the one true
+  prod env file, `.env.production(supabase)` is still the decoy hosted project. Only the hosting
+  provider and IP changed. *Why this entry exists:* every prior entry's troubleshooting steps
+  (`docker ps`, proxy network checks, Coolify service records) still apply verbatim, just against
+  the new host — don't let the provider name "DigitalOcean" in earlier entries read as current.
+  ⚠️ Unverified in this session (confirm before relying on them): whether the old DigitalOcean
+  droplet's IP/firewall rules were fully decommissioned, and whether any hardcoded DigitalOcean IP
+  (vs. the domain name) exists anywhere in configs, CI, or docs outside this memory bank.
+
+- **`.env.production(supabase)` deleted outright, and the migration tooling's `--prod` flag
+  repointed to mean `.env.hrestrosewa` (2026-10-04).** The decoy hosted project (`.env.production`,
+  renamed `.env.production(supabase)` at the 2026-08-27 outage) was confirmed genuinely unused — the
+  original, pre-self-hosting Supabase project — and deleted, not merely ignored. This exposed a real
+  gap the rename alone hadn't closed: `scripts/migrate.mjs`'s `--prod` flag (and therefore
+  `npm run migrate:prod` / `migrate:prod:up`) still **hardcoded `.env.production` as its target** and
+  checked the connection's project ref against `PROD_REF = "qsccnzgrhrnjggyymefr"` (the retired hosted
+  project) — so the "convenient" prod commands had been silently dead (file-not-found) since the file
+  was renamed, with the only working path being the manual `--env .env.hrestrosewa --http --yes`.
+  Fixed by redefining `--prod` to target `.env.hrestrosewa` directly and imply `--http` (self-hosted
+  has no reachable direct port), and replacing the ref-equality check with a **hostname** check
+  (`*.hrestrosewa.leafclutch.com.np`) — a hosted-project ref is meaningless for a self-hosted URL, but
+  its hostname IS what identifies it as production. `npm run migrate:prod` / `migrate:prod:up` now
+  correctly reach the real production database again.
+  **Same `PROD_REF`/`.env.production`-default pattern existed in three more scripts**, each fixed
+  according to its own actual role rather than uniformly:
+  — `clone-db.mjs` (whole-DB copier) and `verify-parity.mjs` (schema/data diff) had their default
+  `--from .env.production` **removed outright** (now a required flag) rather than repointed at
+  `.env.hrestrosewa`: both scripts connect to their `--from` source by DIRECT Postgres only (no
+  `--http` support on that side), and the self-hosted database has no reachable direct port — so
+  `.env.hrestrosewa` structurally cannot serve as `--from` in either script. `clone-db.mjs`'s
+  destination write-guard WAS repointed to the new hostname check (never write into the self-hosted
+  database as a "clone destination" — that script is for populating a fresh/empty target, not
+  overwriting a live one).
+  — `copy-storage.mjs`'s PROD_REF guard was **removed, not repointed**: unlike the other two, this
+  script's entire purpose is writing logos *into* `.env.hrestrosewa` (that was always its documented
+  destination) — redefining "production" as its own guarded destination would have made the script
+  refuse to do its one job. Replaced with a same-database source/destination check instead, which is
+  the guard that actually matches a real mistake here.
+  **Lesson:** a single shared constant (`PROD_REF`) had been copy-pasted across four scripts that use
+  "production" for three different roles (migration target, clone destination-to-avoid, and
+  intentional write-destination) — fixing it required reading what each script actually does with the
+  flag, not a global find-and-replace. `docs/menu-import.md` and `docs/runbooks/migrating-to-production.md`
+  updated to match (two databases now, not three); `scripts/import-menu.mjs`'s usage examples updated
+  (REST-API based, no ref/host guard of its own to fix). `scripts/deep-structure.mjs` was deliberately
+  left untouched — it's a one-off artifact from the original cutover with a hardcoded path from a
+  different machine (`C:/Users/Dell/...`) and the retired SSH-tunnel port; it was already dead before
+  this change and rewriting its hardcoded assumptions would mean guessing new ones, not fixing a flow.
