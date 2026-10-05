@@ -27,14 +27,14 @@ import { formatDateTime } from "@/lib/format-time";
 import { Button } from "@/components/ui/button";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { OrderItem } from "@/app/(employee)/employee/_components/order-item";
-import { SessionPrintButtons } from "@/app/(employee)/employee/session/[id]/_components/print-tickets";
-import type { RestaurantInfo, PrintStation } from "@/app/(employee)/employee/session/[id]/_components/print-tickets";
+import { SessionPrintButtons } from "@/app/(employee)/employee/session/(split)/[id]/_components/print-tickets";
+import type { RestaurantInfo, PrintStation } from "@/app/(employee)/employee/session/(split)/[id]/_components/print-tickets";
 import { PrintModal, BillTicket, ticketNumber } from "@/app/(employee)/employee/_components/bill-ticket";
 import { folioToBill } from "@/lib/billing/room-bill";
 import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
 import { billMethodLabel } from "@/lib/billing/payment-method";
 import {
-  ArrowLeft, BedDouble, Clock, Lock, Pencil, Plus, Printer, Trash2, User, UtensilsCrossed, Wallet, X, XCircle,
+  BedDouble, ChevronLeft, Clock, Lock, Pencil, Plus, Printer, Trash2, User, UtensilsCrossed, Wallet, X, XCircle,
 } from "lucide-react";
 
 const rupee = (n: number) =>
@@ -1204,12 +1204,16 @@ export function FolioClient({
           the folio re-reads itself when orders move — no refresh, no stale total. */}
       <RealtimeRefresh topics={["orders", "tables"]} />
 
+      {/* Same solid brand-primary "Back" button as the table session screen — a
+          button tapped constantly on a busy floor has to read as one at a glance.
+          `self-start` so the flex column doesn't stretch it full width. */}
       <Link
         href="/employee/dashboard"
-        className="inline-flex items-center gap-1.5 text-sm"
-        style={{ color: "var(--color-ink-mute)" }}
+        className="self-start inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 -ml-1 rounded-lg transition-colors hover:brightness-110 active:brightness-95"
+        style={{ color: "#fff", background: "var(--color-primary)" }}
       >
-        <ArrowLeft size={14} /> Dashboard
+        <ChevronLeft size={15} />
+        Back
       </Link>
 
       {/* Guest */}

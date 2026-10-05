@@ -47,6 +47,7 @@ export function MenuBrowser({
   canAddCustom = false,
   workstations = [],
   onOrderPlaced,
+  returnHref,
 }: {
   sessionId: string;
   categories: CategoryRow[];
@@ -66,6 +67,12 @@ export function MenuBrowser({
    * than being the page.
    */
   onOrderPlaced?: () => void;
+  /**
+   * Where the default (no `onOrderPlaced`) success navigation goes. Defaults to
+   * the session page; a room stay passes its room screen so it doesn't bounce
+   * through the table session route's layout before that page redirects.
+   */
+  returnHref?: string;
 }) {
   const router = useRouter();
   const [activeCategoryId, setActiveCategoryId] = useState<string>(categories[0]?.id ?? "");
@@ -97,7 +104,7 @@ export function MenuBrowser({
       setCart(new Map());
       setCustomLines([]);
       if (onOrderPlaced) onOrderPlaced();
-      else router.push(`/employee/session/${sessionId}`);
+      else router.push(returnHref ?? `/employee/session/${sessionId}`);
     }
     wasPending.current = pending;
     // eslint-disable-next-line react-hooks/exhaustive-deps

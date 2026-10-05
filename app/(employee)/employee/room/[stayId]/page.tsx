@@ -5,8 +5,9 @@ import { getRoomFolio } from "@/app/actions/rooms";
 import { getSessionDetail } from "@/app/actions/pos";
 import { getWorkstations } from "@/app/actions/workstations";
 import { getRestaurantConfig } from "@/lib/restaurant-info";
+import { createServiceClient } from "@/lib/supabase/service";
 import { FolioClient } from "./_components/folio-client";
-import { TransferHistory } from "../../session/[id]/_components/transfer-history";
+import { TransferHistory } from "../../session/(split)/[id]/_components/transfer-history";
 
 /**
  * The room's ONE screen — the counterpart of a table's session screen.
@@ -33,22 +34,38 @@ export default async function RoomPage({
   const { stayId } = await params;
   const { restaurantUser } = await requireRestaurantStaff();
 
-  const view = await getRoomFolio(stayId);
-  if (!view) notFound();
+  // Everything starts at once. The folio used to be awaited first and the rest only
+  // started after it, though only the session detail actually needs anything from the
+  // stay — its session id. That id is looked up on its own (one small query) so the
+  // session detail runs alongside the folio instead of after it. Nothing is rendered
+  // until `getRoomFolio` has passed its restaurant + room-visibility check below.
+  const service = createServiceClient();
+  const sessionPromise = (async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data } = await (service as any)
+      .from("sessions")
+      .select("id")
+      .eq("room_stay_id", stayId)
+      .eq("restaurant_id", restaurantUser.restaurant_id)
+      .maybeSingle();
+    // The stay's session, in the SAME shape the table screen uses — so the room
+    // can render the very same ticket components rather than a second set that has
+    // to be kept in step.
+    return data?.id ? getSessionDetail(data.id) : null;
+  })();
 
-  const [config, session, workstations] = await Promise.all([
+  const [view, config, session, workstations] = await Promise.all([
+    getRoomFolio(stayId),
     // The SAME cached config the session screen reads, instead of this page's own
     // uncached `restaurants` select. It removes a round trip, and it carries two things
     // that select never did: the tax/service percentages the printed bill needs, and
     // whether a discount PIN exists at all.
     getRestaurantConfig(restaurantUser.restaurant_id),
-    // The stay's session, in the SAME shape the table screen uses — so the room
-    // can render the very same ticket components rather than a second set that has
-    // to be kept in step.
-    view.session_id ? getSessionDetail(view.session_id) : Promise.resolve(null),
+    sessionPromise,
     // Station list so each item lands on its own workstation Order Ticket.
     getWorkstations(restaurantUser.restaurant_id),
   ]);
+  if (!view) notFound();
 
   // KOT/BOT and bill printing is a billing/order-management action — Cashier /
   // Receptionist, NOT a waiter. Gate on the billing permissions only they carry,
