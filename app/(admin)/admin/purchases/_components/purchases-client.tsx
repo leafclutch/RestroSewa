@@ -86,7 +86,161 @@ function StatCard({ label, value, tone }: { label: string; value: string; tone?:
 
 // ── New purchase ──────────────────────────────────────────────────────────────
 
-type Line = { key: number; product_id: string; quantity: string; unit_cost: string };
+/**
+ * One product line. Its cost can be typed either way a vendor's bill states it:
+ * `unit` — "₹300 per kg" (`unit_cost`), or `total` — "5 kg for ₹1,500"
+ * (`total_cost`). Either way the server is sent a per-unit cost; in `total` mode
+ * that's total ÷ quantity, kept to 6 decimals (the column's precision) so the
+ * stored line total comes back as exactly the amount typed.
+ */
+type CostMode = "unit" | "total";
+type Line = {
+  key: number;
+  product_id: string;
+  quantity: string;
+  unit_cost: string;
+  cost_mode: CostMode;
+  total_cost: string;
+};
+
+const blankLine = (key: number): Line => ({
+  key,
+  product_id: "",
+  quantity: "",
+  unit_cost: "",
+  cost_mode: "unit",
+  total_cost: "",
+});
+
+const round = (n: number, dp: number) => Math.round(n * 10 ** dp) / 10 ** dp;
+
+/** The per-unit cost the server will store, and the line total it will compute
+ *  from it (`round(quantity * unit_cost, 2)`, as the DB's generated column does) —
+ *  so the preview shows the same number the saved bill will. NaN when incomplete. */
+function lineCost(l: Line): { unit: number; total: number } {
+  const q = parseFloat(l.quantity);
+  const unit =
+    l.cost_mode === "unit"
+      ? parseFloat(l.unit_cost)
+      : q > 0 && parseFloat(l.total_cost) >= 0
+      ? round(parseFloat(l.total_cost) / q, 6)
+      : NaN;
+  return { unit, total: q > 0 && unit >= 0 ? round(q * unit, 2) : NaN };
+}
+
+/** Product picker that can be typed into: filters by name as you type, arrow keys
+ *  + Enter to pick. Replaces a plain <select>, which with a long product list
+ *  meant scrolling through everything to find "Paneer". */
+function ProductPicker({
+  products,
+  value,
+  onChange,
+}: {
+  products: ProductOption[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  const selected = products.find((p) => p.id === value);
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? products.filter((p) => p.name.toLowerCase().includes(q)) : products;
+  }, [products, query]);
+
+  const pick = (p: ProductOption) => {
+    onChange(p.id);
+    setOpen(false);
+    setQuery("");
+  };
+
+  // Keep the highlighted option in view while arrowing through a long list.
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.children[highlight]?.scrollIntoView({ block: "nearest" });
+  }, [highlight, open]);
+
+  return (
+    <div className="relative flex-1 min-w-0">
+      <Search
+        size={14}
+        className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+        style={{ color: "var(--color-ink-mute)" }}
+      />
+      <input
+        type="text"
+        role="combobox"
+        aria-expanded={open}
+        aria-autocomplete="list"
+        autoComplete="off"
+        placeholder={selected ? `${selected.name} (${selected.unit})` : "Search a product…"}
+        value={open ? query : selected ? `${selected.name} (${selected.unit})` : ""}
+        onFocus={() => { setOpen(true); setQuery(""); setHighlight(0); }}
+        onBlur={() => setOpen(false)}
+        onChange={(e) => { setQuery(e.target.value); setHighlight(0); setOpen(true); }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setOpen(true);
+            setHighlight((h) => Math.min(h + 1, matches.length - 1));
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlight((h) => Math.max(h - 1, 0));
+          } else if (e.key === "Enter") {
+            // Never let Enter here submit the whole purchase form.
+            e.preventDefault();
+            if (open && matches[highlight]) pick(matches[highlight]);
+          } else if (e.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+        className="w-full text-sm rounded-lg border pl-8 pr-2.5 py-1.5"
+        style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline-input)", color: "var(--color-ink)" }}
+      />
+      {open && (
+        <ul
+          ref={listRef}
+          role="listbox"
+          className="absolute z-20 left-0 right-0 mt-1 max-h-60 overflow-y-auto thin-scrollbar rounded-lg border py-1"
+          style={{
+            background: "var(--color-canvas)",
+            borderColor: "var(--color-hairline-input)",
+            boxShadow: "0 6px 20px rgba(0,0,0,0.12)",
+          }}
+        >
+          {matches.length === 0 ? (
+            <li className="px-3 py-2 text-sm" style={{ color: "var(--color-ink-mute)" }}>
+              No product matches “{query.trim()}”
+            </li>
+          ) : (
+            matches.map((p, i) => (
+              <li
+                key={p.id}
+                role="option"
+                aria-selected={p.id === value}
+                // mousedown, not click: it fires before the input's blur closes the list.
+                onMouseDown={(e) => { e.preventDefault(); pick(p); }}
+                onMouseEnter={() => setHighlight(i)}
+                className="px-3 py-1.5 text-sm cursor-pointer flex items-center justify-between gap-2"
+                style={{
+                  background: i === highlight ? "var(--color-canvas-soft)" : "transparent",
+                  color: "var(--color-ink)",
+                  fontWeight: p.id === value ? 600 : 400,
+                }}
+              >
+                <span className="truncate">{p.name}</span>
+                <span className="text-xs shrink-0" style={{ color: "var(--color-ink-mute)" }}>{p.unit}</span>
+              </li>
+            ))
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export type PurchaseFormInitial = {
   vendorId: string;
@@ -123,9 +277,7 @@ function PurchaseForm({
   const [mixOnline, setMixOnline] = useState(edit?.initial.mixOnline ?? "");
   const [pinOpen, setPinOpen] = useState(false);
   const nextKey = useRef((edit?.initial.lines.length ?? 1) + 1);
-  const [lines, setLines] = useState<Line[]>(
-    edit?.initial.lines ?? [{ key: 0, product_id: "", quantity: "", unit_cost: "" }]
-  );
+  const [lines, setLines] = useState<Line[]>(edit?.initial.lines ?? [blankLine(0)]);
 
   const wasPending = useRef(false);
   useEffect(() => {
@@ -133,21 +285,36 @@ function PurchaseForm({
     wasPending.current = pending;
   }, [pending, state, onDone]);
 
-  const addLine = () =>
-    setLines((l) => [...l, { key: nextKey.current++, product_id: "", quantity: "", unit_cost: "" }]);
+  const addLine = () => setLines((l) => [...l, blankLine(nextKey.current++)]);
   const removeLine = (key: number) => setLines((l) => l.filter((x) => x.key !== key));
   const setLine = (key: number, patch: Partial<Line>) =>
     setLines((l) => l.map((x) => (x.key === key ? { ...x, ...patch } : x)));
 
   // The total shown here is only a preview — the server recomputes it from the
-  // lines, so the bill can never disagree with what's in it.
-  const validLines = lines.filter(
-    (l) => l.product_id && parseFloat(l.quantity) > 0 && parseFloat(l.unit_cost) >= 0
-  );
-  const total = validLines.reduce(
-    (sum, l) => sum + parseFloat(l.quantity) * parseFloat(l.unit_cost),
-    0
-  );
+  // lines, so the bill can never disagree with what's in it. Each line is rounded
+  // to paise the way the server rounds it, so the two agree to the paisa (a mixed
+  // payment has to match the server's total exactly).
+  const costed = lines.map((l) => ({ line: l, ...lineCost(l) }));
+  const validLines = costed.filter((c) => c.line.product_id && c.unit >= 0 && c.total >= 0);
+  const total = round(validLines.reduce((sum, c) => sum + c.total, 0), 2);
+  const itemsPayload = validLines.map((c) => ({
+    product_id: c.line.product_id,
+    quantity: parseFloat(c.line.quantity),
+    unit_cost: c.unit,
+  }));
+
+  // Flipping a line between "per unit" and "total" carries its amount across, so
+  // nothing typed is lost: ₹300/kg × 5 becomes ₹1,500 total, and back.
+  const setCostMode = (l: Line, mode: CostMode) => {
+    if (mode === l.cost_mode) return;
+    const { unit, total: lt } = lineCost(l);
+    setLine(l.key, {
+      cost_mode: mode,
+      ...(mode === "total"
+        ? { total_cost: lt >= 0 ? String(lt) : l.total_cost }
+        : { unit_cost: unit >= 0 ? String(round(unit, 2)) : l.unit_cost }),
+    });
+  };
 
   const paidNowNum = parseFloat(paidNow) || 0;
   const onCredit = method === "credit" ? Math.max(0, total - paidNowNum) : 0;
@@ -177,11 +344,7 @@ function PurchaseForm({
       method === "mixed" ? (parseFloat(mixOnline) || 0)
       : method === "credit" ? (paidTender === "mixed" ? (parseFloat(mixOnline) || 0) : paidTender === "online" ? paidNowNum : 0)
       : 0,
-    items: validLines.map((l) => ({
-      product_id: l.product_id,
-      quantity: parseFloat(l.quantity),
-      unit_cost: parseFloat(l.unit_cost),
-    })),
+    items: itemsPayload,
     notes: notes.trim() || null,
   };
 
@@ -196,13 +359,7 @@ function PurchaseForm({
       <input
         type="hidden"
         name="items"
-        value={JSON.stringify(
-          validLines.map((l) => ({
-            product_id: l.product_id,
-            quantity: parseFloat(l.quantity),
-            unit_cost: parseFloat(l.unit_cost),
-          }))
-        )}
+        value={JSON.stringify(itemsPayload)}
       />
 
       {/* Vendor */}
@@ -238,12 +395,8 @@ function PurchaseForm({
           Products
         </p>
 
-        {lines.map((l) => {
+        {costed.map(({ line: l, unit, total: lineTotal }) => {
           const prod = products.find((p) => p.id === l.product_id);
-          const lineTotal =
-            parseFloat(l.quantity) > 0 && parseFloat(l.unit_cost) >= 0
-              ? parseFloat(l.quantity) * parseFloat(l.unit_cost)
-              : 0;
           return (
             <div
               key={l.key}
@@ -251,17 +404,11 @@ function PurchaseForm({
               style={{ background: "var(--color-canvas-soft)", borderColor: "var(--color-hairline)" }}
             >
               <div className="flex items-center gap-2">
-                <select
+                <ProductPicker
+                  products={products}
                   value={l.product_id}
-                  onChange={(e) => setLine(l.key, { product_id: e.target.value })}
-                  className="flex-1 min-w-0 text-sm rounded-lg border px-2.5 py-1.5"
-                  style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline-input)", color: "var(--color-ink)" }}
-                >
-                  <option value="">Choose a product…</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.unit})</option>
-                  ))}
-                </select>
+                  onChange={(id) => setLine(l.key, { product_id: id })}
+                />
                 {lines.length > 1 && (
                   <button
                     type="button"
@@ -275,6 +422,35 @@ function PurchaseForm({
                 )}
               </div>
 
+              {/* How this line's cost is typed — per unit, or what the whole line cost. */}
+              <div
+                className="self-start inline-flex rounded-lg border p-0.5"
+                style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)" }}
+                role="radiogroup"
+                aria-label="Cost entered as"
+              >
+                {(["unit", "total"] as const).map((m) => {
+                  const active = l.cost_mode === m;
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setCostMode(l, m)}
+                      className="text-xs px-2.5 py-1 rounded-md transition-colors"
+                      style={{
+                        background: active ? "var(--color-primary)" : "transparent",
+                        color: active ? "#fff" : "var(--color-ink-mute)",
+                        fontWeight: active ? 600 : 400,
+                      }}
+                    >
+                      {m === "unit" ? "Per unit cost" : "Total cost"}
+                    </button>
+                  );
+                })}
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <Input
                   type="number"
@@ -284,19 +460,32 @@ function PurchaseForm({
                   value={l.quantity}
                   onChange={(e) => setLine(l.key, { quantity: e.target.value })}
                 />
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="Cost per unit (₹)"
-                  value={l.unit_cost}
-                  onChange={(e) => setLine(l.key, { unit_cost: e.target.value })}
-                />
+                {l.cost_mode === "unit" ? (
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder={prod ? `Cost per ${prod.unit} (₹)` : "Cost per unit (₹)"}
+                    value={l.unit_cost}
+                    onChange={(e) => setLine(l.key, { unit_cost: e.target.value })}
+                  />
+                ) : (
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Total cost (₹)"
+                    value={l.total_cost}
+                    onChange={(e) => setLine(l.key, { total_cost: e.target.value })}
+                  />
+                )}
               </div>
 
               {lineTotal > 0 && (
                 <p className="text-xs text-right tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
-                  Line total {money2(lineTotal)}
+                  {l.cost_mode === "unit"
+                    ? `Line total ${money2(lineTotal)}`
+                    : `= ${money2(unit)} per ${prod?.unit ?? "unit"}`}
                 </p>
               )}
             </div>
@@ -546,12 +735,20 @@ function PurchaseDetailView({
             vendorId: detail.vendor_id,
             method: m,
             notes: detail.notes ?? "",
-            lines: detail.items.map((i, idx) => ({
-              key: idx,
-              product_id: i.product_id,
-              quantity: String(i.quantity),
-              unit_cost: String(i.unit_cost),
-            })),
+            // A unit cost with more than 2 decimals can only have come from a line
+            // typed as a TOTAL (₹100 for 3) — reopen it that way, showing the ₹100
+            // that was typed rather than a per-unit 33.333333.
+            lines: detail.items.map((i, idx) => {
+              const fromTotal = round(i.unit_cost, 2) !== i.unit_cost;
+              return {
+                key: idx,
+                product_id: i.product_id,
+                quantity: String(i.quantity),
+                unit_cost: fromTotal ? "" : String(i.unit_cost),
+                cost_mode: fromTotal ? "total" : "unit",
+                total_cost: fromTotal ? String(i.line_total) : "",
+              };
+            }),
             // For a credit purchase the "paid now" is whatever was tendered up front
             // (cash, online, or mixed); mixed carries the full cash/online split.
             paidNow: m === "credit" ? String(detail.cash_amount + detail.online_amount) : "",
