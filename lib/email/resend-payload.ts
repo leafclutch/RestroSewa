@@ -4,9 +4,9 @@
 // `nodemailer`, so anything worth testing has to have ZERO runtime imports.
 // `Buffer` is a Node global, not an import, so it does not break that rule.
 //
-// WHY RESEND AT ALL: DigitalOcean drops outbound packets on every SMTP port
-// (25/465/587) to every provider, so nodemailer cannot deliver from the droplet
-// — proven by socket test, and it is why every 2026-08-21 report failed with
+// WHY RESEND AT ALL: the self-hosted VPS drops outbound packets on every SMTP
+// port (25/465/587) to every provider, so nodemailer cannot deliver from it —
+// proven by socket test, and it is why every 2026-08-21 report failed with
 // "Connection timeout". Port 443 is open, so mail has to leave over HTTPS.
 
 export type ResendAttachment = {

@@ -48,3 +48,6 @@ next-env.d.ts
 # defeats the env-file rule above. Keep them out of the repo entirely; a script
 # worth keeping belongs in scripts/ and reads its credentials from an env file.
 scratch/
+
+# graphify output — regenerated knowledge-graph cache/artifacts, not source.
+graphify-out/

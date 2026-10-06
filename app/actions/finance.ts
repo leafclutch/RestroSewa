@@ -4,6 +4,8 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { STOCK_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
+import { requireRestaurantStaff } from "@/lib/auth/guards";
+import { verifySecurityPin, logSecurityEvent } from "@/lib/security/authorize";
 import {
   periodBounds,
   PERIOD_LABEL,
@@ -60,6 +62,10 @@ const EMPTY = (period: FinancePeriod, from: string, to: string): FinanceReport =
   extraExpensesOnline: 0,
   extraExpensesTotal: 0,
   extraExpensesByCategory: [],
+  incomeCash: 0,
+  incomeOnline: 0,
+  incomeCard: 0,
+  incomeTotal: 0,
   customerCreditCreated: 0,
   customerCreditCollected: 0,
   customerCreditDiscounted: 0,
@@ -177,6 +183,11 @@ export async function getFinanceReport(params?: {
       online: num(c.online),
       total: num(c.total),
     })),
+
+    incomeCash: num(row.income_cash),
+    incomeOnline: num(row.income_online),
+    incomeCard: num(row.income_card),
+    incomeTotal: num(row.income_total),
 
     customerCreditCreated: num(row.customer_credit_created),
     customerCreditCollected: num(row.customer_credit_collected),
@@ -341,21 +352,20 @@ export async function getOpeningBalance(): Promise<OpeningBalance> {
 }
 
 export async function setOpeningBalance(
-  _prevState: ActionResult,
-  formData: FormData
+  pin: string,
+  input: { cash: number; online: number; effective_from: string }
 ): Promise<ActionResult> {
-  const ru = await getRestaurantUser();
+  // requireRestaurantStaff, not getRestaurantUser: the audit record needs
+  // `display_name`, and a log entry that cannot name the actor is not an audit
+  // trail. Same fuller context every other PIN-gated action uses.
+  const { restaurantUser: ru } = await requireRestaurantStaff();
   // Seeding the books rewrites every balance from that date on — writer-level.
   if (!STOCK_ACCESS.canManageStock(ru) || !STOCK_ACCESS.canViewFinance(ru)) {
     return { error: "You don't have permission to set the opening balance." };
   }
 
-  const cashRaw = (formData.get("cash") as string) || "";
-  const onlineRaw = (formData.get("online") as string) || "";
-  const dateRaw = ((formData.get("effective_from") as string) || "").trim();
-
-  const cash = cashRaw === "" ? 0 : parseFloat(cashRaw);
-  const online = onlineRaw === "" ? 0 : parseFloat(onlineRaw);
+  const { cash, online } = input;
+  const dateRaw = (input.effective_from || "").trim();
 
   if (isNaN(cash) || cash < 0) return { error: "Cash on hand must be zero or more." };
   if (isNaN(online) || online < 0) return { error: "Bank balance must be zero or more." };
@@ -363,6 +373,14 @@ export async function setOpeningBalance(
 
   const effectiveFrom = new Date(`${dateRaw}T00:00:00`);
   if (isNaN(effectiveFrom.getTime())) return { error: "Invalid start date." };
+
+  const authorized = await verifySecurityPin(ru, "set_opening_balance", pin, {
+    type: "finance_opening",
+    id: null,
+  });
+  if (!authorized) return { error: "Incorrect Security PIN." };
+
+  const before = await getOpeningBalance();
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -375,8 +393,33 @@ export async function setOpeningBalance(
   });
 
   if (error) {
+    await logSecurityEvent({
+      restaurantId: ru.restaurant_id,
+      actor: ru,
+      operation: "set_opening_balance",
+      targetType: "finance_opening",
+      targetId: null,
+      outcome: "blocked",
+      detail: { code: error.message },
+    });
     return { error: "Could not save the opening balance. Please try again." };
   }
+
+  // The BEFORE figures are the point of this log: every later day's balance is
+  // carried forward from this row, so an audit that only said "changed" without
+  // what it changed FROM would be useless the moment someone asks why.
+  await logSecurityEvent({
+    restaurantId: ru.restaurant_id,
+    actor: ru,
+    operation: "set_opening_balance",
+    targetType: "finance_opening",
+    targetId: null,
+    outcome: "success",
+    detail: {
+      before,
+      after: { cash, online, effective_from: dateRaw },
+    },
+  });
 
   revalidatePath("/admin/finance");
   return null;
@@ -510,6 +553,14 @@ export async function exportFinanceCsv(params?: {
           ]),
         ]
       : []),
+    [],
+    // Money in that is NOT a sale. Never added to TOTAL SALES above — this table
+    // never touches `payments`, so there is nothing here to double-count.
+    ["EXTRA INCOME"],
+    ["Cash", fmt(report.incomeCash)],
+    ["Online", fmt(report.incomeOnline)],
+    ["Card", fmt(report.incomeCard)],
+    ["Total Extra Income", fmt(report.incomeTotal)],
     [],
     // Each supplier bill behind that total — who, when, how much, how settled.
     ...(purchases.length > 0

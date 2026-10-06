@@ -1,12 +1,14 @@
 "use client";
 
 import { useActionState, useEffect, useTransition, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   closeSessionWithPayment,
   updateOrderItemStatus,
   forceCloseSession,
   cancelOrderItem,
   updateWalkInCustomer,
+  updateTableCustomerName,
 } from "@/app/actions/pos";
 import type { ActionResult, OrderItemRow, SessionDetail } from "@/app/actions/pos";
 import { searchCreditCustomers } from "@/app/actions/credits";
@@ -51,10 +53,41 @@ function PaymentForm({
    *  so the field isn't shown. The PIN is still verified server-side at payment. */
   discountEnabled: boolean;
 }) {
-  const [state, action, pending] = useActionState<ActionResult, FormData>(
-    closeSessionWithPayment,
-    null
-  );
+  // A directly-controlled submit rather than `useActionState` + native `<form
+  // action>` — that combination relies on `pending` reliably flipping
+  // true→false in the same render cycle a `wasPending` ref effect can catch,
+  // and in testing the post-close redirect this drove sometimes just never
+  // fired. This version awaits the action itself and reacts to its result in
+  // the SAME function call — no separate effect, no transition-timing to get
+  // right — mirroring the already-reliable `run()` in `tables-grid.tsx`.
+  const [state, setState] = useState<ActionResult>(null);
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    startTransition(async () => {
+      // The CREDIT branch of `closeSessionWithPayment` still redirects itself
+      // (to the dashboard's credit view — a different, deliberate
+      // destination) by throwing — NOT caught here, so it propagates and
+      // Next performs that navigation on its own; this code simply never
+      // reaches the lines below for that branch.
+      const res = await closeSessionWithPayment(null, formData);
+      if (res?.error) {
+        setState(res);
+        return;
+      }
+      setState(null);
+      // Destination: Sales, not the previous table or the dashboard — a
+      // normal paid-in-full close is the one flow that ends with printing
+      // the bill. `?session=` (not just `?focus=sales`) is what lets Sales
+      // scroll straight to and ring THIS bill specifically, rather than
+      // leaving the cashier to find it in today's list themselves — see
+      // `sales-view.tsx`'s `highlightSessionId`.
+      router.push(`/employee/dashboard?focus=sales&session=${session.id}`);
+    });
+  }
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [cashAmt, setCashAmt]     = useState("");
   const [onlineAmt, setOnlineAmt] = useState("");
@@ -190,7 +223,7 @@ function PaymentForm({
 
   return (
     <form
-      action={action}
+      onSubmit={handleSubmit}
       className="rounded-xl border px-5 py-5 flex flex-col gap-4"
       style={{ background: "var(--color-canvas)", borderColor: "var(--color-primary)", borderWidth: 1.5 }}
     >
@@ -824,6 +857,78 @@ function WalkInCustomerPanel({
   );
 }
 
+// Optional customer name on a normal table bill — deliberately the thinnest
+// version of WalkInCustomerPanel above: one field, no phone, no address. A
+// table bill's customer is a courtesy label ("whose bill is this"), not a
+// takeaway contact, so the extra fields that panel needs would just be noise
+// here. Same edit-until-closed rule, same server action shape, different
+// permission (create_orders, not manage_walkins) enforced server-side.
+function TableCustomerNamePanel({
+  session,
+  canEdit,
+}: {
+  session: SessionDetail;
+  canEdit: boolean;
+}) {
+  const has = !!session.customer_name;
+  const [editing, setEditing] = useState(false);
+  const [state, action, pending] = useActionState<ActionResult, FormData>(updateTableCustomerName, null);
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => { if (pending) setSubmitted(true); }, [pending]);
+  useEffect(() => {
+    if (submitted && !pending && state === null) { setSubmitted(false); setEditing(false); }
+  }, [submitted, pending, state]);
+
+  if (!canEdit && !has) return null; // nothing to show, nothing the viewer could add
+
+  return (
+    <div
+      className="rounded-xl border overflow-hidden"
+      style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+    >
+      <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: "var(--color-canvas-soft)" }}>
+        <User size={14} style={{ color: "var(--color-ink-mute)" }} />
+        <span className="text-xs font-medium flex-1" style={{ color: "var(--color-ink)" }}>
+          Customer name <span style={{ color: "var(--color-ink-mute)" }}>· optional</span>
+        </span>
+        {canEdit && !editing && (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="text-xs inline-flex items-center gap-1"
+            style={{ color: "var(--color-primary)" }}
+          >
+            <Pencil size={12} /> {has ? "Edit" : "Add"}
+          </button>
+        )}
+      </div>
+
+      {editing && canEdit ? (
+        <form action={action} className="px-4 py-3 flex flex-col gap-2">
+          <input type="hidden" name="session_id" value={session.id} />
+          <Input name="customer_name" defaultValue={session.customer_name ?? ""} placeholder="e.g. Ram Sharma" autoFocus />
+          <div className="flex items-center gap-2 mt-1">
+            <Button type="submit" variant="primary" disabled={pending} className="text-xs px-3 h-9">
+              {pending ? "Saving…" : "Save"}
+            </Button>
+            {has && (
+              <Button type="button" variant="secondary" onClick={() => setEditing(false)} className="text-xs px-3 h-9">
+                Cancel
+              </Button>
+            )}
+            {state?.error && <span className="text-xs" style={{ color: "var(--color-ruby)" }}>{state.error}</span>}
+          </div>
+        </form>
+      ) : has ? (
+        <div className="px-4 py-3 text-sm" style={{ color: "var(--color-ink)" }}>
+          {session.customer_name}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function SessionClient({
   session,
   restaurant,
@@ -852,6 +957,7 @@ export function SessionClient({
   discountEnabled?: boolean;
   canCancelOrders?: boolean;
 }) {
+  const router = useRouter();
   const [forceClosing, startForceClose] = useTransition();
   const [forceError, setForceError] = useState<string | null>(null);
   const hasOrders = session.items.length > 0;
@@ -904,6 +1010,12 @@ export function SessionClient({
         <WalkInCustomerPanel session={session} canEdit={canCreateOrders && !isClosed} />
       )}
 
+      {/* Table bill's own optional customer name — same edit-until-closed rule,
+          just one field instead of the walk-in desk's three. */}
+      {session.type === "table" && (
+        <TableCustomerNamePanel session={session} canEdit={canCreateOrders && !isClosed} />
+      )}
+
       {/* Items */}
       {session.items.length === 0 ? (
         <div
@@ -948,8 +1060,12 @@ export function SessionClient({
       {/* Actions */}
       {!isClosed && (
         <>
+          {/* Desktop/tablet reaches the same menu through the split-view's own
+              "Menu" tab (see session-split-view.tsx) instead of navigating to
+              a separate page, so this button — and the navigation it does —
+              is mobile-only. */}
           {canCreateOrders && (
-            <Link href={`/employee/session/${session.id}/add`}>
+            <Link href={`/employee/session/${session.id}/add`} className="lg:hidden">
               <Button variant="secondary" className="w-full flex items-center justify-center gap-2">
                 <Plus size={14} />
                 Add items
@@ -1012,7 +1128,20 @@ export function SessionClient({
                     setForceError(null);
                     startForceClose(async () => {
                       const res = await forceCloseSession(session.id);
-                      if (res?.error) setForceError(res.error);
+                      if (res?.error) {
+                        setForceError(res.error);
+                      } else if (window.matchMedia("(min-width: 1024px)").matches) {
+                        // Desktop/tablet: don't navigate anywhere — stay on this exact
+                        // page. `isClosed` (below) already swaps the whole Actions block
+                        // for the "Session closed" banner once `session.status` flips, so
+                        // a refresh is all that's needed to show the table as closed in
+                        // place, with the persistent rail right where it was.
+                        router.refresh();
+                      } else {
+                        // Mobile has no rail to stay near, so this goes home instead —
+                        // same as it always has.
+                        router.push("/employee/dashboard");
+                      }
                     });
                   }
                 }}

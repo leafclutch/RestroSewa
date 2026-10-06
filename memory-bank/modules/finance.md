@@ -14,7 +14,9 @@ module covers the on-screen Finance report and the emailed daily report.
 - **Finance report** (`/admin/finance`) — `finance_report(restaurant, from, to)` derives opening,
   sales split, purchases, vendor+customer credit, salaries, and closing. CSV export mirrors it.
 - **Opening balance seed** (`finance_openings`) — the one non-derivable number; every later day's
-  opening carries forward.
+  opening carries forward. **Security PIN-gated** (`set_opening_balance`, 2026-08-26) — setting or
+  changing it rewrites every later balance, so it goes through the same reusable authorization
+  service as the other sensitive edits. See `modules/security-pin.md`.
 - **Business closing time** — periods anchor on the per-restaurant closing hour (see
   `modules/settings.md`, `lib/business-day.ts`).
 - **Daily Finance Report** — automatic per-business-day PDF from `lib/reports/*`, emailed via
@@ -73,6 +75,20 @@ module covers the on-screen Finance report and the emailed daily report.
   **Category keys are single words on purpose**: `finance_transactions` labels a ledger row with
   `initcap(category)`, so a label like "Licenses & Taxes" in `lib/expenses.ts` would make the same
   expense read two different ways on two screens.
+- **Extra income is the mirror of extra expenses, on the money-IN side** (added 2026-08-25):
+  `extra_income` — misc/service/other income received by hand, recorded from `/admin/finance`
+  itself (not a separate page, unlike expenses). Same "the row IS the payment" shape, but **Card
+  is a real standalone tender** (`cash_amount`/`online_amount`/`card_amount`, method
+  `cash|online|card|mixed` — `extra_expenses` never offered Card at all) and **there is no category
+  taxonomy**: the requirement asked for free-text "Description / Reason" only, so each entry prints
+  as its own PDF/report line keyed by its own description rather than being grouped — grouping
+  free text the way `expcat` groups a CHECK-constrained category would silently split "Misc income"
+  from "misc income" into two lines. **NEVER a sale** — `sales_total`/`salesCash`/etc. are
+  untouched; it never touches `payments`. Reported as `income_cash`/`_online`/`_card`/`_total` on
+  `finance_report`, folding Card into the online balance leg like every other tender in this app.
+  Correcting or removing an entry is `updateExtraIncome`/`removeExtraIncome` in
+  `app/actions/security.ts` — admin-only + Security PIN, audit-logged, same lane as
+  `updateExtraExpense`/`updateRoomAdvance`. `estimatedProfit` (daily summary) gained `+ incomeTotal`.
 - **A SAVING is an extra expense with a pot** — the eleventh category, `saving`. Because it is just
   a category, it reached the period total, the split, the ledger, the CSV, the PDF and the profit
   subtraction **with no change to either finance function**; a separate `savings` table would have

@@ -33,12 +33,19 @@ permissions — all realtime, installable as a PWA. Must "feel instantaneous".
 
 ## Tech stack
 - **Next.js** (App Router; Server Components + Server Actions) 16.x, **React** 19.x, **TypeScript**.
-- **Supabase**: Postgres (RLS + `service_role`), Auth, Storage. Two projects: **dev**
-  (`ojqomyunjmaivsyvnvbv`) and **prod** (`qsccnzgrhrnjggyymefr`).
+- **Supabase**: Postgres (RLS + `service_role`), Auth, Storage. **dev** is the hosted project
+  `lnhionnsqbcfiigbsokg` (`.env.local`). **prod** is a **self-hosted** Supabase stack on an
+  **OVHcloud** VPS, `.env.hrestrosewa` — this is the ONLY production target. The old hosted
+  project (`qsccnzgrhrnjggyymefr`) was retired 2026-08-27; its env file (renamed
+  `.env.production(supabase)` to stop it being mistaken for prod) was deleted outright on
+  2026-10-04 — there is no `.env.production*` file in the repo anymore. See `decisions.md`'s
+  2026-08-01, 2026-08-27 and 2026-10-04 entries.
 - **Tailwind CSS v4**, `radix-ui`, `lucide-react`.
 - **web-push** (VAPID) for notifications; **SSE** for realtime; **nodemailer** (Gmail SMTP) +
   **pdf-lib** for the daily report; `qrcode.react`; `pg` for the migration runner.
-- Hosted on **Vercel**. Playwright for E2E; ad-hoc Node scripts for DB/verify.
+- Self-hosted via **Coolify** on an **OVHcloud** VPS (`15.204.123.150`, dashboard
+  `http://15.204.123.150:8000/`), serving `hrestrosewa.leafclutch.com.np` — not Vercel, and no
+  longer DigitalOcean (migrated 2026-10-04). Playwright for E2E; ad-hoc Node scripts for DB/verify.
 
 ## Main features
 QR ordering · tables & table-groups · rooms & room-types (check-in/out, folios) · sessions

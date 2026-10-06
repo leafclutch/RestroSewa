@@ -62,8 +62,8 @@ Write the menu as JSON (copy `docs/menu-data/hotel-glasgow.json` as the template
 plain items, multi-price variants and description rows), then:
 
 ```bash
-node scripts/import-menu.mjs --file docs/menu-data/<name>.json --env .env.production --dry-run
-node scripts/import-menu.mjs --file docs/menu-data/<name>.json --env .env.production --yes
+node scripts/import-menu.mjs --file docs/menu-data/<name>.json --env .env.hrestrosewa --dry-run
+node scripts/import-menu.mjs --file docs/menu-data/<name>.json --env .env.hrestrosewa --yes
 ```
 
 It encodes all five rules below, and it is **idempotent** — existing categories/items are matched
@@ -153,15 +153,17 @@ variant prices are **absolute**; `menu_items.price` matches the cheapest variant
 
 ## Which database?
 
-There are three, and they are NOT interchangeable — pick deliberately and say so out loud:
+There are two, and they are NOT interchangeable — pick deliberately and say so out loud:
 
 | Target | How to reach it |
 |---|---|
-| DEV (`ojqomyunjmaivsyvnvbv`) | `.env.local` |
-| Hosted PRODUCTION (`qsccnzgrhrnjggyymefr`) | `.env.production` — **live customers** |
-| Self-hosted DO droplet | `.env.hrestrosewa`, via Kong `POST {url}/pg/query` |
+| DEV (`lnhionnsqbcfiigbsokg`) | `.env.local` |
+| PRODUCTION — self-hosted VPS, **live customers** | `.env.hrestrosewa`, via Kong `POST {url}/pg/query` |
 
-For the droplet, `/pg/query` takes a **SQL string with no bind parameters**, and one request is one
+(The old hosted Supabase project, `.env.production` / `qsccnzgrhrnjggyymefr`, was retired
+2026-08-27 and the file deleted 2026-10-04 — it is not a third option.)
+
+For the VPS, `/pg/query` takes a **SQL string with no bind parameters**, and one request is one
 connection — so a transaction cannot span requests. Put `begin … commit` inside a single request.
 
 ## Checklist

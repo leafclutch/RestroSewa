@@ -31,11 +31,27 @@ export type SecurityOperation =
   // till reconciliation with nothing left to explain it.
   | "edit_extra_expense"
   | "delete_extra_expense"
+  // Correcting or removing an extra-income entry. The mirror of the extra-expense
+  // pair above, on the money-IN side — same reasoning, same admin-only gate.
+  | "edit_extra_income"
+  | "delete_extra_income"
   // Ending a stay without billing it, and keeping part (or none) of the deposit.
   // The only PIN operation that is NOT admin-only — a permitted staff member may
   // do it too — which is precisely why the PIN matters here: the permission says
   // who may try, the PIN says it is really them, and the log says what they kept.
-  | "cancel_room_stay";
+  | "cancel_room_stay"
+  // Setting or changing the books' opening balance. Gated on the existing
+  // MANAGE_STOCK + VIEW_FINANCE permission rather than on `requireRestaurantAdmin`
+  // — same shape as `cancel_room_stay` — a permitted staff member may still
+  // attempt it, the PIN says it is really them. It rewrites the number every
+  // later balance is carried forward from, so a wrong or malicious change here
+  // stays wrong forever, not just for one day, which is what earns it the PIN.
+  | "set_opening_balance"
+  // Adding an old or forgotten debt to a customer's credit account. Like
+  // `cancel_room_stay` it is NOT admin-only — anyone who manages Credits may
+  // try — but it raises what a customer owes with no bill behind it, so the PIN
+  // proves it's really them and the log records who added how much, to whom.
+  | "add_credit_charge";
 
 export type SecurityAuditRow = {
   id: string;
@@ -106,16 +122,25 @@ export async function verifySecurityPin(
 }
 
 // The recent security activity for the owner's Settings surface, newest first.
+// `from`/`to` narrow it to a period (see `lib/history-period.ts`); omitted, it's
+// unbounded — same "show everything" default as before this filter existed.
 export async function getSecurityAuditRows(
   restaurantId: string,
-  limit = 50
+  limit = 50,
+  from?: Date,
+  to?: Date
 ): Promise<SecurityAuditRow[]> {
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any)
+  let query = (service as any)
     .from("security_audit_log")
     .select("id, created_at, actor_name, operation, target_type, outcome, detail")
-    .eq("restaurant_id", restaurantId)
+    .eq("restaurant_id", restaurantId);
+
+  if (from) query = query.gte("created_at", from.toISOString());
+  if (to) query = query.lt("created_at", to.toISOString());
+
+  const { data } = await query
     .order("created_at", { ascending: false })
     .limit(Math.min(Math.max(1, limit), 200));
 

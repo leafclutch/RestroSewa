@@ -5,6 +5,8 @@ import { getActiveNotifications } from "@/app/actions/notifications";
 import { StaffNav } from "./employee/_components/staff-nav";
 import { PullToRefresh } from "@/components/pwa/pull-to-refresh";
 import { OfflineGate } from "@/components/pwa/offline-gate";
+import { SubscriptionWatermark } from "@/components/subscription-watermark";
+import { subscriptionDaysRemaining } from "@/lib/subscription";
 
 // Overrides the root's light theme colour for the staff surface only.
 //
@@ -21,19 +23,47 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: restaurant } = await (service as any)
+  const { data: restaurant, error } = await (service as any)
     .from("restaurants")
-    .select("name, logo_url")
+    .select("name, logo_url, install_date, subscription_extra_days")
     .eq("id", restaurantUser.restaurant_id)
     .single();
+
+  // Every downstream default in this layout (name, logo, the watermark)
+  // silently swallowed a failed query as "restaurant just has no name/logo
+  // set" — exactly how a migration lagging behind this layout's own code
+  // (querying columns the database doesn't have yet) presented as a missing
+  // logo and a missing watermark with nothing in any log to explain it.
+  // Throw instead, same as `getAllRestaurants`.
+  if (error) {
+    throw new Error(
+      `EmployeeLayout: restaurant lookup failed for ${restaurantUser.restaurant_id} — ` +
+        `${error.code ?? "?"} ${error.message ?? error}`
+    );
+  }
 
   // Single unread badge on the (now minimal) top bar — every new alert the staff
   // member is permitted to see. Sections themselves live on the dashboard.
   const notifs = await getActiveNotifications(restaurantUser.restaurant_id, restaurantUser);
   const notificationCount = notifs.filter((n) => n.status === "new").length;
 
+  // Computed fresh every request — deliberately NOT the 60s-cached
+  // `getRestaurantConfig()` (not called from this layout today), since a
+  // countdown that says "today" should always mean today.
+  const daysRemaining = subscriptionDaysRemaining(
+    restaurant?.install_date ?? null,
+    restaurant?.subscription_extra_days ?? 0
+  );
+
   return (
-    <div className="min-h-screen" style={{ background: "var(--color-canvas-soft)" }}>
+    // `min-h-dvh`, NOT `min-h-screen` (`100vh`): on a phone whose browser toolbar
+    // is currently showing, the dynamic viewport (`dvh`) is SHORTER than `vh` by
+    // the toolbar's height. The split-view sizes itself to `100dvh` throughout
+    // (`SCREEN_UNDER_NAV` in `session-split-view.tsx`) so its content sums to
+    // exactly the visible viewport — but a `100vh` floor on this ancestor forced
+    // the page to be at least that much taller anyway, and the leftover sliver
+    // between `vh` and `dvh` was exactly the "whole section is scrollable" gap.
+    <div className="min-h-dvh" style={{ background: "var(--color-canvas-soft)" }}>
       <StaffNav
         restaurantName={restaurant?.name ?? "Restaurant"}
         restaurantLogo={restaurant?.logo_url ?? null}
@@ -53,6 +83,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
           than one that plainly refuses — the first sends someone away believing the
           table is settled. */}
       <OfflineGate />
+      <SubscriptionWatermark daysRemaining={daysRemaining} />
     </div>
   );
 }

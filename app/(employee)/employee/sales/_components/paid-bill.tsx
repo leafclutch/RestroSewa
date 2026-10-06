@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getPaidBill } from "@/app/actions/pos";
 import type { PaidBill } from "@/app/actions/pos";
 import { PrintModal, BillTicket } from "@/app/(employee)/employee/_components/bill-ticket";
@@ -11,7 +11,21 @@ import { Printer, Loader2 } from "lucide-react";
 // Reprints a closed bill for one transaction. Fetches the receipt on demand from
 // the existing payment record — never creates or changes a bill. A bill that went
 // on credit reprints with its CURRENT balance, not as "paid".
-export function PaidBillButton({ paymentId }: { paymentId: string }) {
+export function PaidBillButton({
+  paymentId,
+  autoOpen = false,
+  renderTrigger,
+}: {
+  paymentId: string;
+  /** Replaces the default printer icon — e.g. a whole credit-history row that opens
+   *  this bill when tapped. Gets the opener and whether the bill is loading. */
+  renderTrigger?: (open: () => void, loading: boolean) => React.ReactNode;
+  /** Open the print preview the moment this mounts — for the one bill a normal
+   *  close just redirected here to highlight, so printing it costs zero taps
+   *  instead of one. Fires once; toggling this back off does nothing (the
+   *  cashier may still be looking at the preview). */
+  autoOpen?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [bill, setBill] = useState<PaidBill | null>(null);
@@ -33,8 +47,18 @@ export function PaidBillButton({ paymentId }: { paymentId: string }) {
     }
   }
 
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (autoOpen && !autoOpened.current) {
+      autoOpened.current = true;
+      openBill();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen]);
+
   return (
     <>
+      {renderTrigger ? renderTrigger(openBill, loading) : (
       <button
         type="button"
         onClick={openBill}
@@ -45,6 +69,7 @@ export function PaidBillButton({ paymentId }: { paymentId: string }) {
       >
         {loading ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
       </button>
+      )}
 
       {bill && (
         <PrintModal open={open} onClose={() => setOpen(false)} title="Bill — preview" paperWidthMm={bill.restaurant.paper_width_mm ?? 80}>
@@ -67,6 +92,9 @@ export function PaidBillButton({ paymentId }: { paymentId: string }) {
             sections={bill.sections}
             stay={bill.stay}
             discount={bill.discount}
+            advancePaid={bill.advancePaid}
+            advanceCash={bill.advanceCash}
+            advanceOnline={bill.advanceOnline}
             payment={{
               method: billMethodLabel(bill.method),
               cashier: bill.cashier_name,

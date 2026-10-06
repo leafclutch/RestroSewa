@@ -81,7 +81,7 @@ function listenerConfig() {
   //
   // The default MUST stay on: Supabase's hosted databases require TLS and carry
   // no sslmode. But a self-hosted Postgres container normally runs with
-  // `ssl = off` (the DigitalOcean/Coolify one does — measured), and asking for
+  // `ssl = off` (the self-hosted Coolify stack does — measured), and asking for
   // TLS there makes node-postgres throw "The server does not support SSL
   // connections". On this code path that is the worst kind of failure: the
   // listener never connects, every dashboard quietly falls back to its slow

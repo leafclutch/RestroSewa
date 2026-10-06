@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Printer, X } from "lucide-react";
+import { mergeLines, billLineKey } from "@/lib/billing/merge-lines";
 
 // Shared, reusable receipt/ticket rendering used by both the live session screen
 // (KOT + pre-payment bill) and the Sales dashboard (reprint of a PAID bill).
@@ -477,6 +478,8 @@ export function BillTicket({
   grandTotalOverride,
   advancePaid = 0,
   balanceDue,
+  advanceCash = 0,
+  advanceOnline = 0,
 }: {
   restaurant: RestaurantInfo;
   billNo: string;
@@ -517,11 +520,25 @@ export function BillTicket({
    */
   advancePaid?: number;
   balanceDue?: number;
+  /**
+   * How the deposit above was itself tendered. Printed as its own split line
+   * whenever there's anything to show — unlike the checkout tender's split
+   * (which stays silent for a single method, since the "Payment" line already
+   * names it), the advance has no other line naming its method at all.
+   */
+  advanceCash?: number;
+  advanceOnline?: number;
 }) {
   const hasCustomer = !!(
     customer &&
     (customer.name || customer.phone || customer.address || customer.idNumber)
   );
+  // The same dish ordered in several rounds prints as ONE row with its quantities
+  // added up ("3 × Momo", not three "1 × Momo" rows). Done here, where every bill is
+  // drawn, so the table bill, the room bill and a paid-bill reprint all agree. The
+  // amounts are unchanged — only the rows they're spread over.
+  items = mergeLines(items, billLineKey);
+  sections = sections?.map((s) => ({ ...s, lines: mergeLines(s.lines, billLineKey) }));
   // Sections REPLACE items when supplied, so the subtotal is taken over whichever the
   // caller gave us — a room bill groups its lines, a table bill has one flat list.
   const allLines = sections ? sections.flatMap((s) => s.lines) : items;
@@ -551,6 +568,15 @@ export function BillTicket({
     : [];
   const tenderSplit =
     parts.length > 1 ? parts.map((p) => `${p.label} ${rupee(p.v)}`).join(" · ") : null;
+
+  // Unlike the checkout tender above, nothing else on this receipt names how the
+  // advance arrived — so this prints even for a single method, not just a mix.
+  const advanceParts = [
+    { label: "Cash", v: advanceCash },
+    { label: "Online", v: advanceOnline },
+  ].filter((p) => p.v > 0);
+  const advanceSplit =
+    advanceParts.length > 0 ? advanceParts.map((p) => `${p.label} ${rupee(p.v)}`).join(" · ") : null;
 
   return (
     <>
@@ -671,6 +697,7 @@ export function BillTicket({
       {advancePaid > 0 && (
         <>
           <Line label="Advance received" value={`- ${rupee(advancePaid)}`} />
+          {advanceSplit && <div style={{ fontSize: 11, textAlign: "right" }}>{advanceSplit}</div>}
           <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
           <Line
             label="BALANCE PAYABLE"
