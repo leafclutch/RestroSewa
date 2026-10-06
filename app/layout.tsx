@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { RegisterServiceWorker } from "@/components/pwa/register-sw";
 import { APPLE_SPLASH } from "@/lib/pwa/apple-splash";
@@ -91,8 +92,13 @@ export default async function RootLayout({
         */}
         <link rel="manifest" href="/manifest.webmanifest" crossOrigin="use-credentials" />
 
-        {/* Anti-theme-flash inline script */}
-        <script
+        {/* Anti-theme-flash inline script. Through next/script with beforeInteractive, not a
+            raw <script>: React 19 warns about (and never runs) a <script> element it renders
+            on the client. beforeInteractive puts it in the server HTML ahead of hydration —
+            still before first paint, which is the whole point — and keeps it out of React. */}
+        <Script
+          id="rs-theme-init"
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{
             __html: `
               (function() {

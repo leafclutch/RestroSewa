@@ -6,6 +6,7 @@ import { STOCK_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { dayBounds, stockStatus, CAN_ADD_STOCK } from "@/lib/stock";
 import type { StockMovement, StockStatus } from "@/lib/stock";
+import { historyPeriodBounds, type HistoryPeriod } from "@/lib/history-period";
 
 export type ActionResult = { error: string } | null;
 
@@ -394,20 +395,47 @@ export async function getProductDetail(
 // that data already lives, so the final balance always equals the stock level.
 
 export async function getProductHistory(
-  productId: string
+  productId: string,
+  /** Which window to send. Defaults to the week — the screen's default — so a busy
+   *  product no longer ships its whole life on every open. "all" = everything. */
+  period: HistoryPeriod = "week"
 ): Promise<StockMovement[]> {
   const ru = await getRestaurantUser();
   if (!STOCK_ACCESS.canViewStock(ru)) return [];
 
   const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any).rpc("product_history", {
-    p_restaurant_id: ru.restaurant_id, // tenant scope enforced inside the function
-    p_product_id: productId,
-  });
+  // Business-day bounds, the same "This Week" every other list in the app means.
+  // Each row's running balance is still computed over the WHOLE history inside
+  // product_history_range, so it stays the true on-hand figure.
+  const bounds = period === "all" ? null : historyPeriodBounds(period, ru.closingHour);
 
+  // PAGED, never one call. The API returns at most 1000 rows per request, and this
+  // function returns OLDEST-first (so the running balance can accumulate) — so a
+  // busy product silently lost its NEWEST movements: Shining Crown's "Shikhar ice"
+  // had 1,786 rows and the screen stopped at row 1,000, on Sept 6, while sales kept
+  // deducting live. Paging is safe because the function orders by (at, tiebreak,
+  // kind), a total order, so pages neither overlap nor skip.
+  const PAGE = 1000;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = (data ?? []) as any[];
+  const rows: any[] = [];
+  // Advance by what actually came back and stop only on an empty page — so a server
+  // whose cap is BELOW `PAGE` still gets paged through rather than stopping early.
+  for (let from = 0; ; ) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (service as any)
+      .rpc("product_history_range", {
+        p_restaurant_id: ru.restaurant_id, // tenant scope enforced inside the function
+        p_product_id: productId,
+        p_from: bounds ? bounds.from.toISOString() : null,
+        p_to: bounds ? bounds.to.toISOString() : null,
+      })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`Could not load stock history: ${error.message}`);
+    const page = (data ?? []) as unknown[];
+    if (page.length === 0) break;
+    rows.push(...page);
+    from += page.length;
+  }
   if (rows.length === 0) return [];
 
   const staffIds = [...new Set(rows.map((m) => m.staff_id).filter(Boolean))] as string[];

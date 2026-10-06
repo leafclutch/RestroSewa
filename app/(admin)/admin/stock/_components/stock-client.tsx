@@ -73,6 +73,8 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import { PeriodFilter } from "@/components/ui/period-filter";
+import { HISTORY_PERIOD_LABEL, type HistoryPeriod } from "@/lib/history-period";
 
 
 const PAGE_SIZE = 10;
@@ -693,39 +695,67 @@ function ProductLinks({
 
 // ── Stock history ─────────────────────────────────────────────────────────────
 
+// The windows offered on a product's history. "Today" is left out — a product's
+// day is a handful of rows the week view already shows at the top.
+const STOCK_HISTORY_PERIODS: HistoryPeriod[] = ["week", "month", "year", "all"];
+
 function HistoryList({ productId, unit }: { productId: string; unit: string }) {
   const [rows, setRows] = useState<StockMovement[] | null>(null);
   const [showAll, setShowAll] = useState(false);
+  // Opens on the week: a busy product has thousands of movements over its life,
+  // and loading all of them on every open was most of this screen's wait.
+  const [period, setPeriod] = useState<HistoryPeriod>("week");
 
   useEffect(() => {
     let alive = true;
+    setRows(null);
+    setShowAll(false);
     (async () => {
-      const h = await getProductHistory(productId);
+      const h = await getProductHistory(productId, period);
       if (alive) setRows(h);
     })();
     return () => { alive = false; };
-  }, [productId]);
+  }, [productId, period]);
+
+  const filter = (
+    <div className="mb-2">
+      <PeriodFilter value={period} onChange={setPeriod} periods={STOCK_HISTORY_PERIODS} />
+    </div>
+  );
 
   if (!rows) {
     return (
-      <div className="flex items-center justify-center py-6" style={{ color: "var(--color-ink-mute)" }}>
-        <Loader2 size={16} className="animate-spin" />
-      </div>
+      <>
+        {filter}
+        <div className="flex items-center justify-center py-6" style={{ color: "var(--color-ink-mute)" }}>
+          <Loader2 size={16} className="animate-spin" />
+        </div>
+      </>
     );
   }
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-xl border px-4 py-6 text-center" style={{ borderStyle: "dashed", borderColor: "var(--color-hairline)" }}>
-        <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>No movements yet.</p>
-      </div>
+      <>
+        {filter}
+        <div className="rounded-xl border px-4 py-6 text-center" style={{ borderStyle: "dashed", borderColor: "var(--color-hairline)" }}>
+          <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
+            {period === "all" ? "No movements yet." : `No movements ${HISTORY_PERIOD_LABEL[period].toLowerCase()}.`}
+          </p>
+        </div>
+      </>
     );
   }
 
   const shown = showAll ? rows : rows.slice(0, HISTORY_PAGE);
+  // What was on hand when the window opened: the oldest row's balance before its
+  // own movement. Rows arrive newest-first, so that's the last one.
+  const oldest = rows[rows.length - 1];
+  const startBalance = oldest.balance - oldest.qty;
 
   return (
     <>
+      {filter}
       <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--color-hairline)" }}>
         {shown.map((m, i) => {
           const tone = MOVEMENT_COLOR[m.kind];
@@ -797,6 +827,13 @@ function HistoryList({ productId, unit }: { productId: string; unit: string }) {
             ? "Show less"
             : `Show all ${rows.length} movements`}
         </button>
+      )}
+
+      {/* Only meaningful for a window — "All Time" starts from nothing. */}
+      {period !== "all" && (
+        <p className="mt-2 text-xs text-right tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
+          On hand at the start of {HISTORY_PERIOD_LABEL[period].toLowerCase()}: {qty(startBalance)} {unit}
+        </p>
       )}
     </>
   );

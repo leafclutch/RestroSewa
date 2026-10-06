@@ -9,7 +9,20 @@ import { WalkInsGrid } from "./walkins-grid";
 //
 // Server component does the first fetch (in the HTML, no loading flash); WalkInsGrid keeps
 // it live from there off the same "tables" realtime topic a session change already emits.
-export async function WalkInsSection({ restaurantUser }: { restaurantUser: RestaurantUserContext }) {
+export async function WalkInsSection({
+  restaurantUser,
+  compact,
+}: {
+  restaurantUser: RestaurantUserContext;
+  /** The session screen's left rail — see WalkInsGrid. */
+  compact?: boolean;
+}) {
   const walkIns = await getWalkInStatusOverview(restaurantUser.restaurant_id);
-  return <WalkInsGrid initial={walkIns} canManage={WALKIN_ACCESS.canManageWalkins(restaurantUser)} />;
+  return (
+    <WalkInsGrid
+      initial={walkIns}
+      canManage={WALKIN_ACCESS.canManageWalkins(restaurantUser)}
+      compact={compact}
+    />
+  );
 }
