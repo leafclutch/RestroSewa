@@ -16,6 +16,7 @@ import type { RestaurantInfo, BillItem } from "@/app/(employee)/employee/_compon
 import { ticketCodeOf } from "@/lib/workstations/ticket-code";
 import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
 import { formatOtNumber } from "@/lib/billing/ot-number";
+import { mergeLines, billLineKey } from "@/lib/billing/merge-lines";
 
 // Re-export so existing imports (`./print-tickets`) keep working.
 export type { RestaurantInfo } from "@/app/(employee)/employee/_components/bill-ticket";
@@ -182,6 +183,9 @@ function StationTicket({
    *  label frozen on the ticket, so an old KOT keeps saying the table it was cooked for. */
   location?: string;
 }) {
+  // The same dish from several order rounds prints as ONE row ("3 × Momo"). A line
+  // with a different note stays its own row — the kitchen has to see "no onion".
+  items = mergeLines(items, (it) => `${billLineKey(it)}\u0000${it.notes ?? ""}`);
   return (
     <>
       <div style={{ textAlign: "center" }}>

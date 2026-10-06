@@ -46,7 +46,12 @@ export type SecurityOperation =
   // attempt it, the PIN says it is really them. It rewrites the number every
   // later balance is carried forward from, so a wrong or malicious change here
   // stays wrong forever, not just for one day, which is what earns it the PIN.
-  | "set_opening_balance";
+  | "set_opening_balance"
+  // Adding an old or forgotten debt to a customer's credit account. Like
+  // `cancel_room_stay` it is NOT admin-only — anyone who manages Credits may
+  // try — but it raises what a customer owes with no bill behind it, so the PIN
+  // proves it's really them and the log records who added how much, to whom.
+  | "add_credit_charge";
 
 export type SecurityAuditRow = {
   id: string;

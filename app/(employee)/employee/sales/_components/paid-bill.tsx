@@ -14,8 +14,12 @@ import { Printer, Loader2 } from "lucide-react";
 export function PaidBillButton({
   paymentId,
   autoOpen = false,
+  renderTrigger,
 }: {
   paymentId: string;
+  /** Replaces the default printer icon — e.g. a whole credit-history row that opens
+   *  this bill when tapped. Gets the opener and whether the bill is loading. */
+  renderTrigger?: (open: () => void, loading: boolean) => React.ReactNode;
   /** Open the print preview the moment this mounts — for the one bill a normal
    *  close just redirected here to highlight, so printing it costs zero taps
    *  instead of one. Fires once; toggling this back off does nothing (the
@@ -54,6 +58,7 @@ export function PaidBillButton({
 
   return (
     <>
+      {renderTrigger ? renderTrigger(openBill, loading) : (
       <button
         type="button"
         onClick={openBill}
@@ -64,6 +69,7 @@ export function PaidBillButton({
       >
         {loading ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
       </button>
+      )}
 
       {bill && (
         <PrintModal open={open} onClose={() => setOpen(false)} title="Bill — preview" paperWidthMm={bill.restaurant.paper_width_mm ?? 80}>

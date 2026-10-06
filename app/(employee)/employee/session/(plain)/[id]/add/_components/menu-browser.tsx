@@ -39,6 +39,11 @@ const parseKey = (key: LineKey): { itemId: string; variantId: string | null } =>
   return { itemId, variantId: variantId ?? null };
 };
 
+// "All" is a VIRTUAL category (same idea as the customer site's): never stored or
+// fetched, it just stands in the `activeCategoryId` state. A `__`-fenced literal
+// can't collide with a uuid.
+const ALL_CATEGORY_ID = "__all__";
+
 export function MenuBrowser({
   sessionId,
   categories,
@@ -75,7 +80,9 @@ export function MenuBrowser({
   returnHref?: string;
 }) {
   const router = useRouter();
-  const [activeCategoryId, setActiveCategoryId] = useState<string>(categories[0]?.id ?? "");
+  // Opens on "All", like the customer site — the whole menu, grouped by category,
+  // before narrowing it down.
+  const [activeCategoryId, setActiveCategoryId] = useState<string>(ALL_CATEGORY_ID);
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<Map<LineKey, number>>(new Map());
   const [picking, setPicking] = useState<MenuItemRow | null>(null);
@@ -130,9 +137,26 @@ export function MenuBrowser({
   // tab. The input is a plain controlled field, so it never remounts and never loses focus.
   const q = query.trim().toLowerCase();
   const searching = q.length > 0;
+  const showingAll = !searching && activeCategoryId === ALL_CATEGORY_ID;
+  const availableItems = useMemo(
+    () => items.filter((i) => i.availability_status === "available"),
+    [items]
+  );
   const visibleItems = searching
-    ? items.filter((i) => i.availability_status === "available" && i.name.toLowerCase().includes(q))
-    : items.filter((i) => i.category_id === activeCategoryId && i.availability_status === "available");
+    ? availableItems.filter((i) => i.name.toLowerCase().includes(q))
+    : showingAll
+    ? availableItems
+    : availableItems.filter((i) => i.category_id === activeCategoryId);
+
+  // "All" keeps the category structure: built by walking `categories`, which arrives
+  // in the admin's order, so the sections inherit it.
+  const groupedItems = useMemo(
+    () =>
+      categories
+        .map((c) => ({ category: c, items: availableItems.filter((i) => i.category_id === c.id) }))
+        .filter((g) => g.items.length > 0),
+    [categories, availableItems]
+  );
 
   function adjust(key: LineKey, delta: number) {
     setCart((prev) => {
@@ -239,6 +263,99 @@ export function MenuBrowser({
     );
   }
 
+  // One menu card. Shared by a single category's grid and by "All", which lays the
+  // same cards out under each category's heading.
+  const renderItem = (item: MenuItemRow) => {
+    const qty = qtyOfItem(item.id);
+    const opts = variantsOf.get(item.id) ?? [];
+    const hasVariants = opts.length > 0;
+    // With variants the card can't show one price — it shows the
+    // cheapest as a "from", which is what the guest will pay at minimum.
+    const from = hasVariants
+      ? Math.min(...opts.map((v) => Number(v.price)))
+      : Number(item.price);
+
+    // Each card wears its category's hue on a 3px left edge, so a dish is tied to its
+    // category at a glance — the cue that matters most in search results, where items
+    // from different categories sit side by side. A card in the cart deepens to the full
+    // category border + tint; the Add/±/quantity controls stay brand purple (the "this is
+    // the action" colour, consistent app-wide).
+    const cat = catStyleOf(item.category_id);
+    return (
+      <div
+        key={item.id}
+        className="rounded-xl border p-3.5 flex flex-col gap-2"
+        // All four sides as LONGHANDS. Mixing the `borderColor` shorthand with a
+        // `borderLeftColor` longhand made React warn on every re-render — i.e. on
+        // every tap of + or − while taking an order — which buried anything real
+        // in the console. Same appearance, no warning.
+        style={{
+          background: qty > 0 ? cat.soft : "var(--color-canvas)",
+          borderTopColor: qty > 0 ? cat.color : "var(--color-hairline)",
+          borderRightColor: qty > 0 ? cat.color : "var(--color-hairline)",
+          borderBottomColor: qty > 0 ? cat.color : "var(--color-hairline)",
+          borderLeftColor: cat.color,
+          borderLeftWidth: 3,
+        }}
+      >
+        <div className="flex items-start gap-1.5">
+          <span className="mt-0.5">
+            <FoodMark type={item.food_type} size={12} />
+          </span>
+          <p className="text-sm leading-tight flex-1" style={{ color: "var(--color-ink)" }}>
+            {item.name}
+          </p>
+        </div>
+        <p className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>
+          {hasVariants && <span className="text-xs">from </span>}₹{from.toFixed(0)}
+        </p>
+
+        <div className="flex items-center gap-2 mt-auto">
+          {/* An item with variants always routes through the picker, so
+              it keeps a single "Add" even when some are already in the
+              cart — a bare +/- would have no variant to apply to. */}
+          {qty === 0 || hasVariants ? (
+            <button
+              type="button"
+              onClick={() => handleAdd(item)}
+              className="flex-1 h-9 rounded-lg text-sm flex items-center justify-center gap-1"
+              style={{ background: "var(--color-primary)", color: "#fff" }}
+            >
+              <Plus size={15} /> {hasVariants ? (qty > 0 ? `Add · ${qty}` : "Choose") : "Add"}
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5 flex-1">
+              <button
+                type="button"
+                aria-label={`One less ${item.name}`}
+                onClick={() => adjust(keyOf(item.id, null), -1)}
+                className="w-9 h-9 rounded-lg flex items-center justify-center border"
+                style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline-input)" }}
+              >
+                <Minus size={15} style={{ color: "var(--color-ink)" }} />
+              </button>
+              <span
+                className="flex-1 text-center text-base font-medium tabular"
+                style={{ color: "var(--color-ink)" }}
+              >
+                {qty}
+              </span>
+              <button
+                type="button"
+                aria-label={`One more ${item.name}`}
+                onClick={() => adjust(keyOf(item.id, null), 1)}
+                className="w-9 h-9 rounded-lg flex items-center justify-center"
+                style={{ background: "var(--color-primary)" }}
+              >
+                <Plus size={15} style={{ color: "#fff" }} />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     // `flex-1 min-h-0`, NOT `h-full`. This is a flex child sitting BELOW the page's
     // "Add items" header bar, so `h-full` (100% of the whole column) overflowed the
@@ -298,6 +415,27 @@ export function MenuBrowser({
           className="flex gap-1.5 overflow-x-auto px-4 py-2.5 border-b shrink-0"
           style={{ borderColor: "var(--color-hairline)" }}
         >
+          {/* "All" leads, in the app's primary colour — it isn't a category, so it
+              doesn't take one of the category hues. Same outline → filled states. */}
+          {(() => {
+            const active = activeCategoryId === ALL_CATEGORY_ID;
+            return (
+              <button
+                type="button"
+                onClick={() => setActiveCategoryId(ALL_CATEGORY_ID)}
+                className="px-3.5 py-2 rounded-lg text-sm whitespace-nowrap shrink-0 border transition-all"
+                style={{
+                  background: active ? "color-mix(in srgb, var(--color-primary) 18%, var(--color-canvas))" : "transparent",
+                  color: "var(--color-primary)",
+                  borderColor: "var(--color-primary)",
+                  boxShadow: active ? "inset 0 0 0 1px var(--color-primary)" : "none",
+                  fontWeight: active ? 600 : 400,
+                }}
+              >
+                All
+              </button>
+            );
+          })()}
           {categories.map((c) => {
             const active = activeCategoryId === c.id;
             const cat = catStyleOf(c.id);
@@ -336,98 +474,34 @@ export function MenuBrowser({
           <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
             {searching ? `No items match “${query.trim()}”.` : "No items in this category."}
           </p>
-        ) : (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-            {visibleItems.map((item) => {
-              const qty = qtyOfItem(item.id);
-              const opts = variantsOf.get(item.id) ?? [];
-              const hasVariants = opts.length > 0;
-              // With variants the card can't show one price — it shows the
-              // cheapest as a "from", which is what the guest will pay at minimum.
-              const from = hasVariants
-                ? Math.min(...opts.map((v) => Number(v.price)))
-                : Number(item.price);
-
-              // Each card wears its category's hue on a 3px left edge, so a dish is tied to its
-              // category at a glance — the cue that matters most in search results, where items
-              // from different categories sit side by side. A card in the cart deepens to the full
-              // category border + tint; the Add/±/quantity controls stay brand purple (the "this is
-              // the action" colour, consistent app-wide).
-              const cat = catStyleOf(item.category_id);
+        ) : showingAll ? (
+          /* "All" — every dish, still grouped under its category heading in the admin's
+             order, the same way the customer site's "All" reads. Empty categories drop
+             out rather than render a bare heading. */
+          <div className="flex flex-col gap-5">
+            {groupedItems.map(({ category, items: catItems }) => {
+              const cat = catStyleOf(category.id);
               return (
-                <div
-                  key={item.id}
-                  className="rounded-xl border p-3.5 flex flex-col gap-2"
-                  // All four sides as LONGHANDS. Mixing the `borderColor` shorthand with a
-                  // `borderLeftColor` longhand made React warn on every re-render — i.e. on
-                  // every tap of + or − while taking an order — which buried anything real
-                  // in the console. Same appearance, no warning.
-                  style={{
-                    background: qty > 0 ? cat.soft : "var(--color-canvas)",
-                    borderTopColor: qty > 0 ? cat.color : "var(--color-hairline)",
-                    borderRightColor: qty > 0 ? cat.color : "var(--color-hairline)",
-                    borderBottomColor: qty > 0 ? cat.color : "var(--color-hairline)",
-                    borderLeftColor: cat.color,
-                    borderLeftWidth: 3,
-                  }}
-                >
-                  <div className="flex items-start gap-1.5">
-                    <span className="mt-0.5">
-                      <FoodMark type={item.food_type} size={12} />
+                <section key={category.id}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="text-sm font-semibold" style={{ color: cat.color }}>
+                      {category.name}
+                    </h3>
+                    <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                      {catItems.length}
                     </span>
-                    <p className="text-sm leading-tight flex-1" style={{ color: "var(--color-ink)" }}>
-                      {item.name}
-                    </p>
+                    <span className="flex-1 h-px ml-1" style={{ background: "var(--color-hairline)" }} />
                   </div>
-                  <p className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>
-                    {hasVariants && <span className="text-xs">from </span>}₹{from.toFixed(0)}
-                  </p>
-
-                  <div className="flex items-center gap-2 mt-auto">
-                    {/* An item with variants always routes through the picker, so
-                        it keeps a single "Add" even when some are already in the
-                        cart — a bare +/- would have no variant to apply to. */}
-                    {qty === 0 || hasVariants ? (
-                      <button
-                        type="button"
-                        onClick={() => handleAdd(item)}
-                        className="flex-1 h-9 rounded-lg text-sm flex items-center justify-center gap-1"
-                        style={{ background: "var(--color-primary)", color: "#fff" }}
-                      >
-                        <Plus size={15} /> {hasVariants ? (qty > 0 ? `Add · ${qty}` : "Choose") : "Add"}
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-1.5 flex-1">
-                        <button
-                          type="button"
-                          aria-label={`One less ${item.name}`}
-                          onClick={() => adjust(keyOf(item.id, null), -1)}
-                          className="w-9 h-9 rounded-lg flex items-center justify-center border"
-                          style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline-input)" }}
-                        >
-                          <Minus size={15} style={{ color: "var(--color-ink)" }} />
-                        </button>
-                        <span
-                          className="flex-1 text-center text-base font-medium tabular"
-                          style={{ color: "var(--color-ink)" }}
-                        >
-                          {qty}
-                        </span>
-                        <button
-                          type="button"
-                          aria-label={`One more ${item.name}`}
-                          onClick={() => adjust(keyOf(item.id, null), 1)}
-                          className="w-9 h-9 rounded-lg flex items-center justify-center"
-                          style={{ background: "var(--color-primary)" }}
-                        >
-                          <Plus size={15} style={{ color: "#fff" }} />
-                        </button>
-                      </div>
-                    )}
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                    {catItems.map(renderItem)}
                   </div>
-                </div>
+                </section>
               );
             })}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+            {visibleItems.map(renderItem)}
           </div>
         )}
       </div>

@@ -16,6 +16,8 @@ import {
   roomNightBoundary,
   type RoomDayRule,
 } from "./business-day.ts";
+// Zero imports of its own, so it's reachable from `node --test` too (see above).
+import { mergeLines } from "./billing/merge-lines.ts";
 
 export type { RoomDayRule };
 
@@ -99,6 +101,10 @@ export type FolioLine = {
   /** The second line under the label — "3 × ₹2,500", "2 × Momo (Large)". */
   detail?: string;
   amount: number;
+  /** Set only on a food line — what lets the printed bill show it in its Qty and
+   *  Rate columns ("Momo · 3 · 150.00") instead of as one lump. */
+  quantity?: number;
+  unitPrice?: number;
 };
 
 export type StayInput = {
@@ -249,11 +255,21 @@ export function buildFolio(
   }));
 
   // Written off with the cancellation, exactly like the extras above.
-  const foodLines: FolioLine[] = (cancelled ? [] : food).map((f) => ({
+  // The same dish ordered in several rounds is ONE line with its quantities added
+  // ("3 × Momo"), on the folio and on the printed room bill alike. Merged on name +
+  // rate, so a price change between rounds stays two lines. The total is unchanged:
+  // rates are whole paise and quantities whole units, so price × (a + b) is exactly
+  // price × a + price × b.
+  const foodLines: FolioLine[] = mergeLines(
+    (cancelled ? [] : food).map((f) => ({ ...f, quantity: Number(f.quantity) })),
+    (f) => `${f.item_name}\u0000${Number(f.item_price)}`
+  ).map((f) => ({
     key: f.id,
     label: f.item_name,
     detail: `${f.quantity} × ${rupees(Number(f.item_price))}`,
     amount: money(Number(f.item_price) * f.quantity),
+    quantity: f.quantity,
+    unitPrice: Number(f.item_price),
   }));
 
   const extrasTotal = money(extraLines.reduce((s, l) => s + l.amount, 0));

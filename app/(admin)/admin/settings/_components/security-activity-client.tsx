@@ -15,6 +15,7 @@ const OP_LABEL: Record<string, string> = {
   edit_payment_tender: "Edited payment tender",
   edit_purchase: "Edited purchase",
   set_opening_balance: "Set opening balance",
+  add_credit_charge: "Added charge to customer credit",
 };
 
 const OUTCOME = {
@@ -39,7 +40,7 @@ function changeSummary(row: SecurityAuditRow): string | null {
   if (row.outcome !== "success" || !row.detail?.after) return null;
   // Every operation except the FIRST opening-balance set always has a `before` —
   // there is no prior balance to compare against the very first time one is seeded.
-  if (!row.detail?.before && row.operation !== "set_opening_balance") return null;
+  if (!row.detail?.before && row.operation !== "set_opening_balance" && row.operation !== "add_credit_charge") return null;
   const b = row.detail.before, a = row.detail.after;
   if (row.operation === "edit_payment_tender") {
     return `${b.payment_method} → ${a.payment_method}  ·  cash ${money(b.cash_amount)}→${money(a.cash_amount)}, online ${money(b.online_amount)}→${money(a.online_amount)}, card ${money(b.card_amount)}→${money(a.card_amount)}`;
@@ -51,6 +52,9 @@ function changeSummary(row: SecurityAuditRow): string | null {
     if (String(b.vendor_id) !== String(a.vendor_id)) parts.push("vendor changed");
     parts.push("items updated");
     return parts.join("  ·  ");
+  }
+  if (row.operation === "add_credit_charge") {
+    return `${a.credit_number ?? "charge"}  ·  ${money(a.amount)}  ·  ${a.description ?? ""}`;
   }
   if (row.operation === "set_opening_balance") {
     const beforeLabel = b ? `cash ${money(b.cash)}, online ${money(b.online)} (from ${b.effective_from ?? "—"})` : "not set";

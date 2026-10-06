@@ -2700,7 +2700,11 @@ function settingsNumber(settings: any, ...keys: string[]): number | undefined {
 
 export async function getPaidBill(paymentId: string): Promise<PaidBill | { error: string }> {
   const ru = await getRestaurantUser();
-  if (!NAV_ACCESS.canSeeSales(ru)) {
+  const canSeeSales = NAV_ACCESS.canSeeSales(ru);
+  // Credits staff may open a bill too — but only one that went on credit, from the
+  // customer's credit history ("what did they actually have?"). Checked below, once
+  // the payment's credit row is known.
+  if (!canSeeSales && !NAV_ACCESS.canManageCredits(ru)) {
     return { error: "You don't have permission to view bills." };
   }
 
@@ -2716,6 +2720,10 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
     .maybeSingle();
 
   if (!p || p.restaurant_id !== ru.restaurant_id) return { error: "Bill not found." };
+  const isCreditBill = Array.isArray(p.credits) ? p.credits.length > 0 : !!p.credits;
+  if (!canSeeSales && !isCreditBill) {
+    return { error: "You don't have permission to view bills." };
+  }
 
   // Items via the session's orders (the same records the bill was totalled from).
   let items: PaidBillItem[] = [];
