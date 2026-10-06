@@ -1,9 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { MenuBrowser } from "../add/_components/menu-browser";
+import { MenuBrowser } from "@/app/(employee)/employee/session/(plain)/[id]/add/_components/menu-browser";
 import type { AddItemsMenuData } from "@/lib/menu-browser-data";
-import { NAV_HEIGHT, RAIL_BOX_WIDTH } from "../../_components/layout-metrics";
+import { NAV_HEIGHT, RAIL_BOX_WIDTH } from "../../../_components/layout-metrics";
 
 /**
  * Desktop/tablet only (`lg:` and up — matching the sidebar's own mobile/

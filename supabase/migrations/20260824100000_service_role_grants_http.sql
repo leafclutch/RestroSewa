@@ -9,7 +9,7 @@
 -- Default privileges are recorded PER GRANTING ROLE (pg_default_acl.defaclrole).
 -- On the hosted projects migrations connect as `postgres`, so the rule was filed
 -- under `postgres` and everything since has inherited correctly. The self-hosted
--- droplet has no published Postgres port, so migrations go through Kong's
+-- VPS has no published Postgres port, so migrations go through Kong's
 -- `/pg/query` instead — and postgres-meta connects as `supabase_admin`. A table
 -- created by supabase_admin matches no default-privilege rule at all:
 --

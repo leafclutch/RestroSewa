@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Printer, X } from "lucide-react";
+import { mergeLines, billLineKey } from "@/lib/billing/merge-lines";
 
 // Shared, reusable receipt/ticket rendering used by both the live session screen
 // (KOT + pre-payment bill) and the Sales dashboard (reprint of a PAID bill).
@@ -532,6 +533,12 @@ export function BillTicket({
     customer &&
     (customer.name || customer.phone || customer.address || customer.idNumber)
   );
+  // The same dish ordered in several rounds prints as ONE row with its quantities
+  // added up ("3 × Momo", not three "1 × Momo" rows). Done here, where every bill is
+  // drawn, so the table bill, the room bill and a paid-bill reprint all agree. The
+  // amounts are unchanged — only the rows they're spread over.
+  items = mergeLines(items, billLineKey);
+  sections = sections?.map((s) => ({ ...s, lines: mergeLines(s.lines, billLineKey) }));
   // Sections REPLACE items when supplied, so the subtotal is taken over whichever the
   // caller gave us — a room bill groups its lines, a table bill has one flat list.
   const allLines = sections ? sections.flatMap((s) => s.lines) : items;

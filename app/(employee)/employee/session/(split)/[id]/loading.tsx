@@ -1,4 +1,4 @@
-import { NAV_HEIGHT, RAIL_BOX_WIDTH } from "../_components/layout-metrics";
+import { NAV_HEIGHT, RAIL_BOX_WIDTH } from "../../_components/layout-metrics";
 
 /**
  * The session screen's shell, painted the instant the navigation starts.

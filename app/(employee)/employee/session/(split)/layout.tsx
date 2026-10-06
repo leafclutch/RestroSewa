@@ -1,6 +1,6 @@
 import { requireRestaurantStaff } from "@/lib/auth/guards";
-import { TablesSection } from "../dashboard/_components/tables-section";
-import { NAV_HEIGHT, RAIL_BOX_WIDTH } from "./_components/layout-metrics";
+import { TablesSection } from "../../dashboard/_components/tables-section";
+import { NAV_HEIGHT, RAIL_BOX_WIDTH } from "../_components/layout-metrics";
 
 /**
  * Deliberately ABOVE `session/[id]/`, not a `layout.tsx` inside it. Next.js
@@ -17,6 +17,11 @@ import { NAV_HEIGHT, RAIL_BOX_WIDTH } from "./_components/layout-metrics";
  * and the order/menu columns rendered by the page below still read as one
  * continuous strip, even though they're now two independently-`fixed`
  * elements in different parts of the tree.
+ *
+ * Scoped to the `(split)` route group so it wraps ONLY the table session page.
+ * The standalone add-items screen (`(plain)/[id]/add`) sits outside it, because
+ * a room stay's "Add order" opens that screen too, and a room must not inherit
+ * the tables rail or the split-view loading skeleton.
  */
 export default async function SessionLayout({ children }: { children: React.ReactNode }) {
   const { restaurantUser } = await requireRestaurantStaff();

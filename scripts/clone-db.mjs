@@ -13,9 +13,16 @@
  * `migrate.mjs up`, so the destination's migration ledger stays truthful rather
  * than inheriting a dump's idea of history.
  *
- *   node scripts/clone-db.mjs --env .env.hrestrosewa --http --yes
- *   node scripts/clone-db.mjs --env … --dry-run          plan + row counts, no writes
- *   node scripts/clone-db.mjs --env … --reset --yes      empty it first, then copy
+ *   node scripts/clone-db.mjs --from <source env> --env <dest env> --http --yes
+ *   node scripts/clone-db.mjs --from … --env … --dry-run          plan + row counts, no writes
+ *   node scripts/clone-db.mjs --from … --env … --reset --yes      empty it first, then copy
+ *
+ * --from has no default and must name a database reachable by DIRECT Postgres
+ * connection (this script never speaks HTTP to the source) — written originally
+ * for the one-time hosted-Supabase-Cloud → self-hosted cutover (2026-08), whose
+ * source project is now retired. The current production (`.env.hrestrosewa`,
+ * self-hosted, no published port) therefore cannot be `--from`, only ever the
+ * thing this script refuses to let `--env` point at.
  *
  * Design decisions that matter:
  *
@@ -49,7 +56,12 @@ import pg from "pg";
 import { HttpClient, dollarQuote } from "./lib/pg-http.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PROD_REF = "qsccnzgrhrnjggyymefr";
+// The one true production host — see scripts/migrate.mjs for why this is a
+// hostname check rather than a hosted-project ref (there is no hosted project
+// anymore; the old `.env.production` / `qsccnzgrhrnjggyymefr` was retired
+// 2026-08-27, file deleted 2026-10-04).
+const PROD_HOST = "hrestrosewa.leafclutch.com.np";
+const isProdHost = (host) => host === PROD_HOST || host.endsWith(`.${PROD_HOST}`);
 
 // A `date` is a CALENDAR DAY, not an instant, but node-postgres parses OID 1082
 // into a JS Date at LOCAL midnight. Serialising that with toISOString() then
@@ -87,8 +99,15 @@ const flag = (name, fallback) => {
   return args[i + 1];
 };
 const targetEnv = flag("--env", null);
-const sourceEnv = flag("--from", ".env.production");
+// No default: the old default (`.env.production`, the hosted project this
+// script was built to clone FROM) was retired 2026-08-27 and the file deleted
+// 2026-10-04. There is no live source role to default to — this script's
+// `source` connection is always DIRECT (no --http support), and the current
+// production (`.env.hrestrosewa`, self-hosted) has no reachable direct port,
+// so it cannot serve as `--from` either. Name the source explicitly.
+const sourceEnv = flag("--from", null);
 if (!targetEnv) throw new Error("--env <file> is required (the DESTINATION env file)");
+if (!sourceEnv) throw new Error("--from <file> is required (the SOURCE env file, read-only)");
 
 // ── connection ────────────────────────────────────────────────────────────────
 function connect(envFile, { ssl, http = false }) {
@@ -97,12 +116,12 @@ function connect(envFile, { ssl, http = false }) {
   const env = fs.readFileSync(file, "utf8");
   const get = (k) => env.match(new RegExp(`^${k}=(.*)$`, "m"))?.[1]?.trim().replace(/^["']|["']$/g, "") ?? "";
   const url = get("NEXT_PUBLIC_SUPABASE_URL");
-  const ref = url.match(/https:\/\/([a-z0-9]+)\./)?.[1] ?? "unknown";
+  const host = (() => { try { return new URL(url).hostname; } catch { return "unknown"; } })();
 
   if (http) {
     const key = get("SUPABASE_SERVICE_ROLE_KEY");
     if (!key) throw new Error(`SUPABASE_SERVICE_ROLE_KEY missing from ${envFile}`);
-    return { client: new HttpClient({ url, key }), ref };
+    return { client: new HttpClient({ url, key }), host };
   }
 
   const raw = get("SUPABASE_DB_URL");
@@ -116,7 +135,7 @@ function connect(envFile, { ssl, http = false }) {
       user: m[1], password: m[2], host: m[3], port: Number(m[4]), database: m[5],
       ssl: ssl ? { rejectUnauthorized: false } : false, connectionTimeoutMillis: 20000,
     }),
-    ref,
+    host,
   };
 }
 
@@ -249,16 +268,16 @@ async function copyTable(src, dst, schema, table, report) {
 
 // ── main ──────────────────────────────────────────────────────────────────────
 async function main() {
-  // The source is read-only, and it is production — it always speaks TLS.
-  // --no-ssl describes the DESTINATION container only.
-  const { client: src, ref: srcRef } = connect(sourceEnv, { ssl: true });
-  const { client: dst, ref: dstRef } = connect(targetEnv, { ssl: !noSsl, http: useHttp });
+  // The source is read-only, and must be reachable directly — it always
+  // speaks TLS. --no-ssl describes the DESTINATION container only.
+  const { client: src, host: srcHost } = connect(sourceEnv, { ssl: true });
+  const { client: dst, host: dstHost } = connect(targetEnv, { ssl: !noSsl, http: useHttp });
 
-  if (dstRef === PROD_REF) throw new Error(`${targetEnv} points at PRODUCTION — refusing to write there`);
-  if (srcRef === dstRef) throw new Error(`source and destination are the same database (${srcRef})`);
+  if (isProdHost(dstHost)) throw new Error(`${targetEnv} points at PRODUCTION (${dstHost}) — refusing to write there`);
+  if (srcHost === dstHost) throw new Error(`source and destination are the same database (${srcHost})`);
 
-  console.log(`source:      ${sourceEnv} (${srcRef})   READ ONLY`);
-  console.log(`destination: ${targetEnv} (${dstRef})\n`);
+  console.log(`source:      ${sourceEnv} (${srcHost})   READ ONLY`);
+  console.log(`destination: ${targetEnv} (${dstHost})\n`);
 
   await src.connect();
   await dst.connect();

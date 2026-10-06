@@ -3,6 +3,7 @@
 import { createPortal } from "react-dom";
 import { useActionState, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import {
+  addCreditCharge,
   addCreditPayment,
   getCreditDetail,
   getCredits,
@@ -11,6 +12,7 @@ import {
 import type {
   ActionResult,
   CreditCustomer,
+  CreditBill,
   CreditCustomerDetail,
   CreditFilter,
 } from "@/app/actions/credits";
@@ -21,7 +23,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PaymentMethodPicker, splitIsValid, type PaymentMethod } from "@/components/ui/payment-method-picker";
 import { CreditReceiptButton } from "./credit-receipt";
-import { Loader2, Search, X } from "lucide-react";
+import { ChevronRight, Loader2, Plus, Search, X } from "lucide-react";
+import { PaidBillButton } from "@/app/(employee)/employee/sales/_components/paid-bill";
+import { SecurityPinDialog } from "@/components/security-pin-dialog";
 
 function money(n: number) {
   return `₹${Math.round(n).toLocaleString("en-IN")}`;
@@ -131,6 +135,169 @@ function CustomerCard({
 }
 
 // ── Account detail: balance, bills, payments, take money ──────────────────────
+
+// ── Add a charge (old / forgotten debt) ───────────────────────────────────────
+
+/** Today as YYYY-MM-DD in the browser's (the restaurant's) local time. */
+function localToday(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function AddChargeButton({
+  customerId,
+  customerName,
+  onAdded,
+}: {
+  customerId: string;
+  customerName: string;
+  onAdded: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [description, setDescription] = useState("");
+  const [date, setDate] = useState(localToday);
+
+  const today = localToday();
+  const amountNum = parseFloat(amount);
+  const valid = amountNum > 0 && description.trim().length > 0 && !!date && date <= today;
+
+  const reset = () => { setAmount(""); setDescription(""); setDate(localToday()); };
+
+  return (
+    <>
+      <Button type="button" variant="secondary" onClick={() => setOpen(true)} className="flex items-center justify-center gap-1.5">
+        <Plus size={14} /> Add charge (old / forgotten credit)
+      </Button>
+
+      <SecurityPinDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        onSuccess={() => { setOpen(false); reset(); onAdded(); }}
+        title="Add a charge"
+        description={`Adds to what ${customerName} owes. It is not counted as a sale.`}
+        confirmLabel={amountNum > 0 ? `Add ${money2(amountNum)}` : "Add charge"}
+        extraValid={valid}
+        onConfirm={(pin) =>
+          addCreditCharge(pin, customerId, {
+            amount: amountNum,
+            description,
+            // Today → stamped "now". A past day → NOON of that day, in local time: a
+            // business day here can start in the early morning, so midnight could land
+            // the charge on the PREVIOUS day's books; noon is inside the right one.
+            chargedAt: date === today ? null : new Date(`${date}T12:00:00`).toISOString(),
+          })
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+              Amount (₹)
+            </span>
+            <Input
+              type="number"
+              min="0.01"
+              step="0.01"
+              inputMode="decimal"
+              placeholder="0.00"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+              What is it for?
+            </span>
+            <Input
+              type="text"
+              maxLength={200}
+              autoComplete="off"
+              placeholder="e.g. Old khata balance · 2 beers missed on 12 Sep"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+              Date of the credit
+            </span>
+            <Input type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} />
+          </label>
+        </div>
+      </SecurityPinDialog>
+    </>
+  );
+}
+
+// One bill under a credit account. A bill that came from a table/room is tappable:
+// it opens that bill exactly as it printed (same view as Sales' reprint), so staff
+// can see what the customer actually had. A hand-added charge has no bill behind it.
+function CreditBillRow({ bill: b, first }: { bill: CreditBill; first: boolean }) {
+  const content = (
+    <>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm" style={{ color: "var(--color-ink)" }}>
+          {b.credit_number}
+          <span
+            className="ml-1.5 text-xs"
+            style={{ color: b.kind === "charge" ? "var(--color-warning)" : "var(--color-ink-mute)" }}
+          >
+            {b.location}
+          </span>
+        </p>
+        {/* A charge has no table to name — its description is what it is. */}
+        {b.kind === "charge" && b.notes && (
+          <p className="text-xs" style={{ color: "var(--color-ink)" }}>{b.notes}</p>
+        )}
+        <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+          {new Date(b.created_at).toLocaleString("en-IN", {
+            dateStyle: "medium",
+            timeStyle: "short",
+          })}
+        </p>
+      </div>
+      <div className="text-right shrink-0">
+        <p className="text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>
+          {money2(b.bill_amount)}
+        </p>
+        <p
+          className="text-[10px] uppercase tracking-wide"
+          style={{ color: CREDIT_STATUS_COLOR[b.status], letterSpacing: "0.06em" }}
+        >
+          {CREDIT_STATUS_LABEL[b.status]}
+          {b.balance > 0 && ` · ${money(b.balance)} left`}
+        </p>
+      </div>
+    </>
+  );
+  const rowStyle = {
+    borderTop: first ? "none" : "1px solid var(--color-hairline)",
+    background: "var(--color-canvas)",
+  };
+  if (b.kind !== "bill" || !b.payment_id) {
+    return <div className="flex items-start gap-3 px-4 py-2.5" style={rowStyle}>{content}</div>;
+  }
+  return (
+    <PaidBillButton
+      paymentId={b.payment_id}
+      renderTrigger={(open, loading) => (
+        <button
+          type="button"
+          onClick={open}
+          disabled={loading}
+          title="View this bill"
+          className="w-full text-left flex items-start gap-3 px-4 py-2.5 transition-colors hover:brightness-[0.97] disabled:opacity-60"
+          style={rowStyle}
+        >
+          {content}
+          <span className="self-center shrink-0" style={{ color: "var(--color-ink-mute)" }}>
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <ChevronRight size={15} />}
+          </span>
+        </button>
+      )}
+    />
+  );
+}
 
 function CustomerDetailModal({
   customerId,
@@ -308,6 +475,14 @@ function CustomerDetailModal({
                   </span>
                 </div>
               </div>
+
+              {/* Put an old or forgotten debt on this account. Offered even on a settled
+                  account — that's exactly when a forgotten one tends to surface. */}
+              <AddChargeButton
+                customerId={detail.id}
+                customerName={detail.name}
+                onAdded={() => { load(); onChanged(); }}
+              />
 
               {/* Take money against the ACCOUNT — it settles their oldest bills first. */}
               {!settled && (
@@ -511,44 +686,13 @@ function CustomerDetailModal({
                   style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
                 >
                   Bills on credit ({detail.bills.length})
+                  <span className="ml-1.5 normal-case tracking-normal font-normal">
+                    · tap a bill to see what was ordered
+                  </span>
                 </p>
                 <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--color-hairline)" }}>
                   {detail.bills.map((b, i) => (
-                    <div
-                      key={b.id}
-                      className="flex items-start gap-3 px-4 py-2.5"
-                      style={{
-                        borderTop: i === 0 ? "none" : "1px solid var(--color-hairline)",
-                        background: "var(--color-canvas)",
-                      }}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm" style={{ color: "var(--color-ink)" }}>
-                          {b.credit_number}
-                          <span className="ml-1.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                            {b.location}
-                          </span>
-                        </p>
-                        <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                          {new Date(b.created_at).toLocaleString("en-IN", {
-                            dateStyle: "medium",
-                            timeStyle: "short",
-                          })}
-                        </p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>
-                          {money2(b.bill_amount)}
-                        </p>
-                        <p
-                          className="text-[10px] uppercase tracking-wide"
-                          style={{ color: CREDIT_STATUS_COLOR[b.status], letterSpacing: "0.06em" }}
-                        >
-                          {CREDIT_STATUS_LABEL[b.status]}
-                          {b.balance > 0 && ` · ${money(b.balance)} left`}
-                        </p>
-                      </div>
-                    </div>
+                    <CreditBillRow key={b.id} bill={b} first={i === 0} />
                   ))}
                 </div>
               </div>

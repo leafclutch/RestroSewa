@@ -71,6 +71,13 @@ export type RoomBillInput = {
  * ("2 × ₹2,500 per night"). Splitting it into qty and rate columns would re-derive money.
  */
 function toLine(l: FolioLine): BillSectionLine {
+  // A food line is the exception: it IS qty × rate (the folio merges repeat orders of
+  // a dish into one line), so it prints in the columns like a table bill — "Momo · 3 ·
+  // 150.00 · 450.00" — rather than "Momo (3 × ₹150) · 1 · 450.00". rate × qty equals
+  // `amount` exactly, so nothing is re-derived.
+  if (l.quantity != null && l.unitPrice != null) {
+    return { id: l.key, item_name: l.label, item_price: l.unitPrice, quantity: l.quantity };
+  }
   return {
     id: l.key,
     item_name: l.detail ? `${l.label} (${l.detail})` : l.label,

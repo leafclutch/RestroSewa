@@ -468,7 +468,9 @@ export async function checkInRoom(
   }
 
   revalidatePath("/employee/dashboard");
-  redirect(`/employee/session/${data.session_id}`);
+  // Straight to the room screen: the session URL would paint the table session
+  // route's layout for a moment before redirecting there anyway.
+  redirect(`/employee/room/${data.stay_id}`);
 }
 
 // A room parks in "cleaning" automatically at checkout (see check_out_room). This is the way
@@ -615,21 +617,23 @@ async function loadFolioInputs(stayId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = service as any;
 
-  const { data: stay } = await svc
-    .from("room_stays")
-    .select(
-      "id, room_id, guest_name, guest_phone, guest_count, guest_id_type, guest_id_number, guest_address, notes, room_rate, check_in_at, check_out_at, status, cancellation_charge, cancellation_reason, cancelled_at, price_shift_hours, price_shift_at, new_day_hour, double_hour, rooms ( number, room_type_id ), price_shift_user:restaurant_users!room_stays_price_shift_by_fkey ( display_name )"
-    )
-    .eq("id", stayId)
-    .eq("restaurant_id", ru.restaurant_id)
-    .maybeSingle();
+  // The stay and the caller's visibility don't depend on each other — one round trip.
+  const [{ data: stay }, visibility] = await Promise.all([
+    svc
+      .from("room_stays")
+      .select(
+        "id, room_id, guest_name, guest_phone, guest_count, guest_id_type, guest_id_number, guest_address, notes, room_rate, check_in_at, check_out_at, status, cancellation_charge, cancellation_reason, cancelled_at, price_shift_hours, price_shift_at, new_day_hour, double_hour, rooms ( number, room_type_id ), price_shift_user:restaurant_users!room_stays_price_shift_by_fkey ( display_name )"
+      )
+      .eq("id", stayId)
+      .eq("restaurant_id", ru.restaurant_id)
+      .maybeSingle(),
+    buildVisibilityFilter(ru.restaurant_id, ru),
+  ]);
 
   if (!stay) return null;
-
-  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
   if (!visibility.seesAll && !visibility.canSeeRoom(stay.room_id)) return null;
 
-  const [typeRes, chargesRes, sessionRes, restRes, advancesRes] = await Promise.all([
+  const [typeRes, chargesRes, sessionRes, restRes, advancesRes, foodRes] = await Promise.all([
     svc.from("room_types").select("name").eq("id", stay.rooms?.room_type_id).maybeSingle(),
     svc
       .from("room_charges")
@@ -646,35 +650,34 @@ async function loadFolioInputs(stayId: string) {
       .select("id, amount, cash_amount, online_amount, card_amount, method, note, created_at")
       .eq("stay_id", stayId)
       .order("created_at"),
+    // F&B ordered against this stay's session — this is what puts room service on
+    // the room bill instead of on a ticket of its own. Reached through the session's
+    // `room_stay_id` in this same round trip; it used to be two more trips after this
+    // batch (the session's orders, then their items), each waiting on the last.
+    svc
+      .from("session_order_items")
+      .select("id, item_name, item_price, quantity, active_quantity, session_orders!inner ( sessions!inner ( room_stay_id ) )")
+      .eq("session_orders.sessions.room_stay_id", stayId)
+      .is("cancelled_at", null)
+      .order("created_at"),
   ]);
 
-  // F&B ordered against this stay's session — this is what puts room service on
-  // the room bill instead of on a ticket of its own.
-  let food: { id: string; item_name: string; item_price: number; quantity: number }[] = [];
   const sessionId = sessionRes.data?.id ?? null;
-  if (sessionId) {
-    const { data: orders } = await svc.from("session_orders").select("id").eq("session_id", sessionId);
-    const orderIds = ((orders ?? []) as { id: string }[]).map((o) => o.id);
-    if (orderIds.length > 0) {
-      const { data: items } = await svc
-        .from("session_order_items")
-        .select("id, item_name, item_price, quantity, active_quantity")
-        .in("order_id", orderIds)
-        .is("cancelled_at", null)
-        .order("created_at");
-      // The guest's food lines. `quantity` is replaced by the ACTIVE count so a
-      // partly-cancelled line bills — and prints — only what they are keeping; a
-      // line cancelled down to nothing drops off the folio entirely.
-      food = ((items ?? []) as (typeof food[number] & { active_quantity: number })[])
-        .filter((i) => Number(i.active_quantity) > 0)
-        .map((i) => ({
-          id: i.id,
-          item_name: i.item_name,
-          item_price: Number(i.item_price),
-          quantity: Number(i.active_quantity),
-        }));
-    }
-  }
+  // This feeds the amount the guest is charged. A failed query must not read as
+  // "no food" and quietly print a cheaper bill — fail the page instead.
+  if (foodRes.error) throw new Error(`Could not load room food lines: ${foodRes.error.message}`);
+  // The guest's food lines. `quantity` is replaced by the ACTIVE count so a
+  // partly-cancelled line bills — and prints — only what they are keeping; a
+  // line cancelled down to nothing drops off the folio entirely.
+  type FoodLine = { id: string; item_name: string; item_price: number; quantity: number };
+  const food: FoodLine[] = ((foodRes.data ?? []) as (FoodLine & { active_quantity: number })[])
+    .filter((i) => Number(i.active_quantity) > 0)
+    .map((i) => ({
+      id: i.id,
+      item_name: i.item_name,
+      item_price: Number(i.item_price),
+      quantity: Number(i.active_quantity),
+    }));
 
   const settings = (restRes.data?.settings ?? {}) as Record<string, unknown>;
 

@@ -244,7 +244,8 @@ export type FinanceTxKind =
   | "salary"
   | "salary_advance"
   | "vendor_opening"
-  | "customer_opening";
+  | "customer_opening"
+  | "customer_charge";
 
 export const TX_LABEL: Record<FinanceTxKind, string> = {
   sale: "Sale",
@@ -266,6 +267,9 @@ export const TX_LABEL: Record<FinanceTxKind, string> = {
   // books. It still belongs on the ledger: it is why the credit balance jumped.
   vendor_opening: "Vendor Opening Balance",
   customer_opening: "Customer Opening Balance",
+  // An old or forgotten debt added to a customer's account by hand — like an
+  // opening balance, no money moved and it is not a sale, but credit-to-us rose.
+  customer_charge: "Customer Credit Charge",
 };
 
 /**

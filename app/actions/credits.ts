@@ -9,6 +9,8 @@ import { resolveSplit } from "@/lib/payment-split";
 import { businessPeriodBounds } from "@/lib/business-day";
 import { getRestaurantConfig } from "@/lib/restaurant-info";
 import type { CreditStats, CreditStatus } from "@/lib/credits";
+import { verifySecurityPin, logSecurityEvent } from "@/lib/security/authorize";
+import { requireRestaurantStaff } from "@/lib/auth/guards";
 
 export type ActionResult = { error: string } | null;
 
@@ -45,6 +47,8 @@ export type CreditBill = {
   created_at: string;
   payment_id: string | null;
   location: string;
+  /** 'bill' — a bill closed on credit; 'charge' — a debt added to the account by hand. */
+  kind: "bill" | "charge";
 };
 
 /** One payment received against the account. */
@@ -86,6 +90,7 @@ const RPC_ERRORS: Record<string, string> = {
   ALREADY_IMPORTED:
     "This customer already has an imported opening balance. Record a repayment instead, or edit the existing account.",
   FUTURE_DATE: "The credit date can't be in the future.",
+  DESCRIPTION_REQUIRED: "Say what the charge is for.",
 };
 
 function rpcError(message: string, fallback: string): string {
@@ -272,7 +277,7 @@ export async function getCreditDetail(
     (service as any)
       .from("credits")
       .select(
-        "id, credit_number, bill_amount, down_payment, paid_amount, balance, status, notes, created_at, payment_id, sessions ( type, restaurant_tables ( number ), rooms ( number ) )"
+        "id, credit_number, bill_amount, down_payment, paid_amount, balance, status, notes, created_at, payment_id, kind, sessions ( type, restaurant_tables ( number ), rooms ( number ) )"
       )
       .eq("customer_id", customerId)
       .order("created_at", { ascending: false }),
@@ -314,7 +319,9 @@ export async function getCreditDetail(
     notes: b.notes ?? null,
     created_at: b.created_at,
     payment_id: b.payment_id ?? null,
-    location: locationOf(b.sessions),
+    // A hand-added charge has no table or room — say what it is instead.
+    location: b.kind === "charge" ? "Added charge" : locationOf(b.sessions),
+    kind: b.kind === "charge" ? "charge" : "bill",
   }));
 
   return {
@@ -429,6 +436,105 @@ export async function addCreditPayment(
   // lands in the Discounts block.
   revalidatePath("/admin/finance");
   return null;
+}
+
+// ─── Add a charge to an existing account ──────────────────────────────────────
+// An old or forgotten debt ("₹1,200 — old khata", "2 beers missed on 12 Sep") put
+// onto a customer's account. It becomes a `credits` row of kind 'charge', so
+// repayments settle it like any bill — but it is NOT a sale: Sales and the
+// credit-sales figures skip it (see migration 20261005100000_credit_charges.sql).
+//
+// Anyone who manages Credits may add one, behind the Security PIN: it raises what
+// a customer owes with no bill behind it, so the PIN proves who did it and the
+// security log keeps the amount and the reason.
+
+export type CreditChargeInput = {
+  amount: number;
+  description: string;
+  /** When the debt was incurred, as an ISO instant. Null = now. Never in the future. */
+  chargedAt: string | null;
+};
+
+export async function addCreditCharge(
+  pin: string,
+  customerId: string,
+  input: CreditChargeInput
+): Promise<{ error: string } | { ok: true }> {
+  // requireRestaurantStaff, not getRestaurantUser: the audit record needs the
+  // actor's display name (same as cancelRoomStay).
+  const { restaurantUser: ru } = await requireRestaurantStaff();
+  if (!NAV_ACCESS.canManageCredits(ru)) {
+    return { error: "You don't have permission to add charges to credit accounts." };
+  }
+
+  const amount = Number(input.amount);
+  const description = (input.description ?? "").trim().slice(0, 200);
+  if (!customerId) return { error: "Customer not found." };
+  if (!Number.isFinite(amount) || amount <= 0) return { error: "Enter an amount greater than zero." };
+  if (!description) return { error: "Say what the charge is for." };
+
+  let chargedAt: string | null = null;
+  if (input.chargedAt) {
+    const when = new Date(input.chargedAt);
+    if (isNaN(when.getTime())) return { error: "Invalid date." };
+    if (when.getTime() > Date.now()) return { error: "The charge date can't be in the future." };
+    chargedAt = when.toISOString();
+  }
+
+  // Wrong PINs are logged by verifySecurityPin itself.
+  const authorized = await verifySecurityPin(ru, "add_credit_charge", pin, {
+    type: "credit_customer",
+    id: customerId,
+  });
+  if (!authorized) return { error: "Incorrect Security PIN." };
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (service as any).rpc("add_credit_charge", {
+    p_restaurant_id: ru.restaurant_id, // tenant scope re-checked inside the RPC
+    p_customer_id: customerId,
+    p_amount: amount,
+    p_description: description,
+    p_charged_at: chargedAt,
+    p_created_by: ru.id,
+  });
+
+  if (error) {
+    await logSecurityEvent({
+      restaurantId: ru.restaurant_id,
+      actor: ru,
+      operation: "add_credit_charge",
+      targetType: "credit_customer",
+      targetId: customerId,
+      outcome: "blocked",
+      detail: { code: error.message },
+    });
+    return { error: rpcError(error.message ?? "", "Could not add the charge. Please try again.") };
+  }
+
+  // No RPC-side audit for this one, so success is logged here — with the figures,
+  // because "who added a charge" without "how much, and why" isn't an audit trail.
+  await logSecurityEvent({
+    restaurantId: ru.restaurant_id,
+    actor: ru,
+    operation: "add_credit_charge",
+    targetType: "credit_customer",
+    targetId: customerId,
+    outcome: "success",
+    detail: {
+      after: {
+        credit_number: data?.credit_number ?? null,
+        amount: Number(data?.bill_amount ?? amount),
+        description,
+        charged_at: data?.created_at ?? chargedAt,
+      },
+    },
+  });
+
+  revalidatePath("/employee/credits");
+  revalidatePath("/employee/dashboard");
+  revalidatePath("/admin/finance");
+  return { ok: true };
 }
 
 // ─── Credit receipt ───────────────────────────────────────────────────────────

@@ -1,13 +1,20 @@
 #!/usr/bin/env node
 /**
- * Compares a migrated database against production and reports every difference.
+ * Compares a migrated database against a reference database and reports every
+ * difference.
  *
  * WHY: "the migrations ran without error" is not the same claim as "this database
- * matches production", and the gap between them is where a migration to a new
+ * matches the reference", and the gap between them is where a migration to a new
  * server goes wrong quietly. This asks both databases the same questions and
  * diffs the answers.
  *
- *   node scripts/verify-parity.mjs --env .env.hrestrosewa --http
+ *   node scripts/verify-parity.mjs --from <reference env> --env .env.hrestrosewa --http
+ *
+ * --from has no default and must name a database reachable by DIRECT Postgres
+ * connection (the source side never speaks HTTP here) — written originally for
+ * the one-time hosted-Supabase-Cloud → self-hosted cutover (2026-08), whose
+ * source project is now retired. The current production (`.env.hrestrosewa`,
+ * self-hosted, no published port) cannot serve as `--from` either.
  *
  * Structure checks always run. Data checks (row counts, then derived financial
  * values) run once the destination has rows — a derived-value check is the only
@@ -71,8 +78,9 @@ const useHttp = args.includes("--http");
 const noSsl = args.includes("--no-ssl");
 const flag = (n, d) => { const i = args.indexOf(n); if (i === -1) return d; if (!args[i + 1]) throw new Error(`${n} needs a value`); return args[i + 1]; };
 const targetEnv = flag("--env", null);
-const sourceEnv = flag("--from", ".env.production");
+const sourceEnv = flag("--from", null);
 if (!targetEnv) throw new Error("--env <file> is required");
+if (!sourceEnv) throw new Error("--from <file> is required (the REFERENCE env file, read-only)");
 
 function open(envFile, { http = false, ssl = true } = {}) {
   const e = fs.readFileSync(path.join(ROOT, envFile), "utf8");
@@ -93,7 +101,7 @@ const bad = (label, detail = "") => { failures++; console.log(`  FAIL  ${label.p
  *
  * `allowMissing` waives keys the SOURCE has and the destination deliberately
  * does not. It is never applied to `extra`: something the destination has and
- * production does not is always a finding, whatever it is.
+ * the source does not is always a finding, whatever it is.
  */
 async function diff(label, sql, src, dst, key, allowMissing = null) {
   const a = await src.query(sql); const b = await dst.query(sql);
