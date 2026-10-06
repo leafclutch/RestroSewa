@@ -660,45 +660,69 @@ export async function adjustStock(
     return { error: "You don't have permission to adjust stock." };
   }
 
-  const productId = formData.get("product_id") as string;
   const kind = ((formData.get("kind") as string) || "kitchen_usage").toLowerCase();
   const direction = (formData.get("direction") as string) || "remove";
-  const magnitude = parseFloat(formData.get("qty") as string);
   const notes = ((formData.get("notes") as string) || "").trim();
-
-  if (!productId) return { error: "Product not found." };
   if (!REASONS.has(kind)) return { error: "Choose a reason." };
-  if (isNaN(magnitude) || magnitude <= 0) {
-    return { error: "Enter a quantity greater than zero." };
+
+  // One product (`product_id` + `qty`), or several at once (`items`: JSON
+  // [{ product_id, qty }]) — the multi-line form, so a day's kitchen usage is one
+  // submit rather than one per product. Same reason, direction and note for all.
+  let lines: { product_id: string; magnitude: number }[];
+  const itemsRaw = formData.get("items") as string | null;
+  if (itemsRaw) {
+    try {
+      const parsed = JSON.parse(itemsRaw) as { product_id?: unknown; qty?: unknown }[];
+      if (!Array.isArray(parsed)) throw new Error();
+      lines = parsed.map((i) => ({ product_id: String(i.product_id ?? ""), magnitude: Number(i.qty) }));
+    } catch {
+      return { error: "Invalid items." };
+    }
+  } else {
+    lines = [{
+      product_id: (formData.get("product_id") as string) || "",
+      magnitude: parseFloat(formData.get("qty") as string),
+    }];
+  }
+  if (lines.length === 0) return { error: "Add at least one product." };
+  if (lines.length > 100) return { error: "Too many products at once." };
+  for (const l of lines) {
+    if (!l.product_id) return { error: "Product not found." };
+    if (!Number.isFinite(l.magnitude) || l.magnitude <= 0) {
+      return { error: "Enter a quantity greater than zero." };
+    }
   }
 
   // Every reason consumes stock. Only a correction may put stock back, and only
   // when the admin explicitly asks for it — so a mis-picked reason can never
   // silently ADD stock.
-  const qty =
-    CAN_ADD_STOCK(kind) && direction === "add" ? magnitude : -magnitude;
+  const sign = CAN_ADD_STOCK(kind) && direction === "add" ? 1 : -1;
 
   const service = createServiceClient();
-  // Ownership check — stock_adjustments takes a product_id, so confirm the
-  // product is ours before writing against it.
+  // Ownership check — stock_adjustments takes a product_id, so confirm EVERY
+  // product is ours before writing against any of them (one query for all).
+  const ids = [...new Set(lines.map((l) => l.product_id))];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: prod } = await (service as any)
+  const { data: owned } = await (service as any)
     .from("products")
     .select("id")
-    .eq("id", productId)
-    .eq("restaurant_id", ru.restaurant_id)
-    .maybeSingle();
-  if (!prod) return { error: "Product not found." };
+    .in("id", ids)
+    .eq("restaurant_id", ru.restaurant_id);
+  if ((owned ?? []).length !== ids.length) return { error: "Product not found." };
 
+  // One insert for all lines — a single statement, so either every deduction is
+  // recorded or none is; a half-recorded batch would be worse than a failed one.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (service as any).from("stock_adjustments").insert({
-    restaurant_id: ru.restaurant_id,
-    product_id: productId,
-    kind,
-    qty,
-    notes: notes || null,
-    created_by: ru.id,
-  });
+  const { error } = await (service as any).from("stock_adjustments").insert(
+    lines.map((l) => ({
+      restaurant_id: ru.restaurant_id,
+      product_id: l.product_id,
+      kind,
+      qty: sign * l.magnitude,
+      notes: notes || null,
+      created_by: ru.id,
+    }))
+  );
 
   if (error) return { error: "Could not record the adjustment. Please try again." };
 

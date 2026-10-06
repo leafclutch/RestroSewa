@@ -74,6 +74,7 @@ import {
   X,
 } from "lucide-react";
 import { PeriodFilter } from "@/components/ui/period-filter";
+import { SearchSelect } from "@/components/ui/search-select";
 import { HISTORY_PERIOD_LABEL, type HistoryPeriod } from "@/lib/history-period";
 
 
@@ -313,12 +314,18 @@ function ProductForm({
 // For stock consumed outside a sale: kitchen usage, waste, damage, staff meals.
 // Every reason removes stock; only a correction may put it back.
 
+// One product line of the multi-product deduction (opened from the header).
+type DeductLine = { key: number; productId: string; amount: string };
+
 function DeductForm({
   products,
+  levels,
   preselected,
   onDone,
 }: {
   products: ProductOption[];
+  /** On-hand per product, for the "in stock" / "after this" hints on each line. */
+  levels?: Map<string, number>;
   preselected?: StockRow;
   onDone: () => void;
 }) {
@@ -327,6 +334,14 @@ function DeductForm({
   const [reason, setReason] = useState("kitchen_usage");
   const [direction, setDirection] = useState<"remove" | "add">("remove");
   const [amount, setAmount] = useState("");
+  // Opened from the header: several products in one go, like a purchase. Opened from a
+  // product's row it stays the single, already-chosen product.
+  const multi = !preselected;
+  const nextKey = useRef(1);
+  const [lines, setLines] = useState<DeductLine[]>([{ key: 0, productId: "", amount: "" }]);
+  const setLine = (key: number, patch: Partial<DeductLine>) =>
+    setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const validLines = lines.filter((l) => l.productId && (parseFloat(l.amount) || 0) > 0);
 
   const wasPending = useRef(false);
   useEffect(() => {
@@ -345,7 +360,15 @@ function DeductForm({
 
   return (
     <form action={action} className="flex flex-col gap-3">
-      <input type="hidden" name="product_id" value={productId} />
+      {multi ? (
+        <input
+          type="hidden"
+          name="items"
+          value={JSON.stringify(validLines.map((l) => ({ product_id: l.productId, qty: parseFloat(l.amount) })))}
+        />
+      ) : (
+        <input type="hidden" name="product_id" value={productId} />
+      )}
       <input type="hidden" name="kind" value={reason} />
       <input type="hidden" name="direction" value={canAdd ? direction : "remove"} />
 
@@ -361,26 +384,7 @@ function DeductForm({
             {qty(preselected.closing)} {preselected.unit} in stock
           </span>
         </div>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="d_product" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
-            Product <span style={{ color: "var(--color-ruby)" }}>*</span>
-          </label>
-          <select
-            id="d_product"
-            required
-            value={productId}
-            onChange={(e) => setProductId(e.target.value)}
-            className="w-full text-sm rounded-lg border px-3 py-2"
-            style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline-input)", color: "var(--color-ink)" }}
-          >
-            <option value="">Choose a product…</option>
-            {products.map((p) => (
-              <option key={p.id} value={p.id}>{p.name} ({p.unit})</option>
-            ))}
-          </select>
-        </div>
-      )}
+      ) : null}
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor="d_reason" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
@@ -426,22 +430,89 @@ function DeductForm({
         </div>
       )}
 
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="d_qty" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
-          Quantity{unit ? ` (${unit})` : ""} <span style={{ color: "var(--color-ruby)" }}>*</span>
-        </label>
-        <Input
-          id="d_qty"
-          name="qty"
-          type="number"
-          min="0.001"
-          step="0.001"
-          required
-          placeholder="0"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
-      </div>
+      {multi ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+            Products <span style={{ color: "var(--color-ruby)" }}>*</span>
+          </p>
+          {lines.map((l) => {
+            const p = products.find((x) => x.id === l.productId);
+            const have = l.productId ? levels?.get(l.productId) : undefined;
+            const n = parseFloat(l.amount) || 0;
+            const left = have !== undefined && n > 0 ? have + (removing ? -n : n) : undefined;
+            return (
+              <div
+                key={l.key}
+                className="rounded-lg border px-3 py-2.5 flex flex-col gap-2"
+                style={{ background: "var(--color-canvas-soft)", borderColor: "var(--color-hairline)" }}
+              >
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <SearchSelect
+                      options={products.map((x) => ({ value: x.id, label: x.name, hint: x.unit }))}
+                      value={l.productId}
+                      onChange={(id) => setLine(l.key, { productId: id })}
+                      placeholder="Search a product…"
+                      emptyText="No product matches"
+                    />
+                  </div>
+                  <Input
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    placeholder={p ? p.unit : "Qty"}
+                    value={l.amount}
+                    onChange={(e) => setLine(l.key, { amount: e.target.value })}
+                    className="w-24 shrink-0"
+                  />
+                  {lines.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
+                      aria-label="Remove line"
+                      className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                      style={{ background: "var(--color-canvas)", color: "var(--color-ink-mute)" }}
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+                {have !== undefined && (
+                  <p className="text-[11px] tabular-nums" style={{ color: left !== undefined && left < 0 ? "var(--color-warning)" : "var(--color-ink-mute)" }}>
+                    {qty(have)} {p?.unit} in stock
+                    {left !== undefined && <> → {qty(left)} {p?.unit} after</>}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setLines((ls) => [...ls, { key: nextKey.current++, productId: "", amount: "" }])}
+            className="self-start text-xs px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5"
+            style={{ borderColor: "var(--color-hairline)", color: "var(--color-primary)" }}
+          >
+            <Plus size={13} /> Add another product
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="d_qty" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+            Quantity{unit ? ` (${unit})` : ""} <span style={{ color: "var(--color-ruby)" }}>*</span>
+          </label>
+          <Input
+            id="d_qty"
+            name="qty"
+            type="number"
+            min="0.001"
+            step="0.001"
+            required
+            placeholder="0"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </div>
+      )}
 
       <Input name="notes" placeholder="Note (optional) — e.g. used for staff lunch" autoComplete="off" />
 
@@ -463,6 +534,13 @@ function DeductForm({
         </div>
       )}
 
+      {multi && removing && validLines.some((l) => (levels?.get(l.productId) ?? Infinity) - (parseFloat(l.amount) || 0) < 0) && (
+        <p className="text-xs" style={{ color: "var(--color-warning)" }}>
+          Some lines deduct more than you have on hand. They will be recorded anyway — the
+          negative balance tells you the count is off somewhere.
+        </p>
+      )}
+
       {after !== undefined && after < 0 && (
         <p className="text-xs" style={{ color: "var(--color-warning)" }}>
           This deducts more than you have on hand. It will be recorded anyway — the negative
@@ -476,9 +554,22 @@ function DeductForm({
         </p>
       )}
 
-      <Button type="submit" variant="primary" disabled={pending || !productId || amountNum <= 0}>
+      <Button
+        type="submit"
+        variant="primary"
+        disabled={
+          pending ||
+          (multi
+            // Every started line must be complete — a half-filled line silently left
+            // out of the batch would be a deduction staff think they recorded.
+            ? validLines.length === 0 || lines.some((l) => (l.productId || l.amount) && !validLines.includes(l))
+            : !productId || amountNum <= 0)
+        }
+      >
         {pending
           ? "Recording…"
+          : multi
+          ? `${removing ? "Deduct" : "Add"} ${validLines.length || ""} product${validLines.length === 1 ? "" : "s"}`.replace("  ", " ")
           : removing
           ? `Deduct ${amountNum > 0 ? `${qty(amountNum)} ${unit}` : "stock"}`
           : `Add ${qty(amountNum)} ${unit}`}
@@ -622,20 +713,15 @@ function ProductLinks({
           <input type="hidden" name="menu_item_id" value={chosen?.menu_item_id ?? ""} />
           <input type="hidden" name="variant_id" value={chosen?.variant_id ?? ""} />
 
-          <select
-            required
+          {/* Searchable — a full menu as a plain <select> meant scrolling past every
+              dish (and every variant of it) to find the one to link. */}
+          <SearchSelect
+            options={available.map((t) => ({ value: targetValue(t), label: t.label }))}
             value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            className="w-full text-sm rounded-lg border px-2.5 py-1.5"
-            style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline-input)", color: "var(--color-ink)" }}
-          >
-            <option value="">Choose a menu item or variant…</option>
-            {available.map((t) => (
-              <option key={targetValue(t)} value={targetValue(t)}>
-                {t.label}
-              </option>
-            ))}
-          </select>
+            onChange={setTarget}
+            placeholder="Search a menu item or variant…"
+            emptyText="No menu item matches"
+          />
 
           {/* Say out loud what attaching to a VARIANT means, because it changes
               what the item's own recipe does. */}
@@ -1716,7 +1802,7 @@ export function StockClient({
         )}
       </Modal>
 
-      {/* Manual deduction — from a row (product fixed) or the header (pick one). */}
+      {/* Manual deduction — from a row (that one product) or the header (any number of products at once). */}
       <Modal
         open={!!deducting || deductAny}
         onClose={() => { setDeducting(null); setDeductAny(false); }}
@@ -1725,6 +1811,7 @@ export function StockClient({
       >
         <DeductForm
           products={products}
+          levels={new Map(rows.map((r) => [r.id, r.closing]))}
           preselected={deducting ?? undefined}
           onDone={() => { setDeducting(null); setDeductAny(false); refresh(); }}
         />
