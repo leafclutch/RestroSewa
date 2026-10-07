@@ -11,6 +11,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { SessionClient } from "./_components/session-client";
 import { TransferHistory } from "./_components/transfer-history";
 import { SessionSplitView } from "./_components/session-split-view";
+import { RailKind } from "../../_components/session-rail";
 import { getAddItemsMenuData } from "@/lib/menu-browser-data";
 import type { RestaurantInfo } from "./_components/print-tickets";
 import { ChevronLeft } from "lucide-react";
@@ -134,6 +135,8 @@ export default async function SessionPage({
       canCreateOrders={canCreateOrders}
       menuData={menuData}
     >
+      {/* Tells the persistent left rail which list this session belongs to. */}
+      <RailKind sessionId={id} kind={session.type === "walk_in" ? "walkins" : "tables"} />
       {/* Solid brand-primary fill, not a soft pill — the soft tint (previous
           version, and still what pills elsewhere use) reads as calm, passive
           UI chrome. A back button gets tapped constantly on a busy floor and

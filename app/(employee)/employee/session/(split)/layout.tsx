@@ -1,5 +1,9 @@
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { TablesSection } from "../../dashboard/_components/tables-section";
+import { WalkInsSection } from "../../dashboard/_components/walkins-section";
+import { getWalkInStatusOverview, getTableStatusOverview } from "@/app/actions/pos";
+import { WALKIN_ACCESS } from "@/lib/permissions";
+import { SessionRail } from "../_components/session-rail";
 import { NAV_HEIGHT, RAIL_BOX_WIDTH } from "../_components/layout-metrics";
 
 /**
@@ -25,6 +29,17 @@ import { NAV_HEIGHT, RAIL_BOX_WIDTH } from "../_components/layout-metrics";
  */
 export default async function SessionLayout({ children }: { children: React.ReactNode }) {
   const { restaurantUser } = await requireRestaurantStaff();
+  // A walk-in session shows the walk-ins in this rail, not the tables (see SessionRail).
+  // The open session ids are only a first-paint hint (this layout is cached across
+  // sessions); the rail looks up anything they don’t cover, and the page confirms.
+  // Both reads run in parallel; the tables one is light (one query plus the viewer scope).
+  const canSeeWalkIns = WALKIN_ACCESS.canViewWalkins(restaurantUser);
+  const [walkIns, tablesOverview] = await Promise.all([
+    canSeeWalkIns ? getWalkInStatusOverview(restaurantUser.restaurant_id) : Promise.resolve([]),
+    getTableStatusOverview(restaurantUser.restaurant_id),
+  ]);
+  const walkInSessionIds = walkIns.map((w) => w.session_id).filter((id): id is string => !!id);
+  const tableSessionIds = tablesOverview.map((t) => t.session_id).filter((id): id is string => !!id);
 
   return (
     <>
@@ -59,7 +74,12 @@ export default async function SessionLayout({ children }: { children: React.Reac
             boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
           }}
         >
-          <TablesSection restaurantUser={restaurantUser} compact />
+          <SessionRail
+            tables={<TablesSection restaurantUser={restaurantUser} compact />}
+            walkins={canSeeWalkIns ? <WalkInsSection restaurantUser={restaurantUser} compact /> : null}
+            walkInSessionIds={walkInSessionIds}
+            tableSessionIds={tableSessionIds}
+          />
         </div>
       </div>
     </>

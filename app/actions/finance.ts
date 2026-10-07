@@ -240,13 +240,27 @@ export async function getFinanceTransactions(params?: {
   const { from, to } = periodBounds(period, ru.closingHour, params?.from, params?.to);
 
   const service = createServiceClient();
+  // PAGED, never one call: the API returns at most 1000 rows per request, and a
+  // busy restaurant's month already exceeds that (The Classy: 1,318) — the oldest
+  // movements of the period silently vanished. Same fix as getProductHistory:
+  // advance by what came back, stop on an empty page.
+  const PAGE = 1000;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (service as any).rpc("finance_transactions", {
-    p_restaurant_id: ru.restaurant_id,
-    p_from: from.toISOString(),
-    p_to: to.toISOString(),
-  });
-  if (error || !Array.isArray(data)) return [];
+  const data: any[] = [];
+  for (let off = 0; ; ) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: page, error } = await (service as any)
+      .rpc("finance_transactions", {
+        p_restaurant_id: ru.restaurant_id,
+        p_from: from.toISOString(),
+        p_to: to.toISOString(),
+      })
+      .range(off, off + PAGE - 1);
+    if (error || !Array.isArray(page)) return [];
+    if (page.length === 0) break;
+    data.push(...page);
+    off += page.length;
+  }
 
   const num = (v: unknown) => Number(v ?? 0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

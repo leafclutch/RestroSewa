@@ -6,6 +6,7 @@ import { STOCK_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { dayBounds, stockStatus, CAN_ADD_STOCK } from "@/lib/stock";
 import type { StockMovement, StockStatus } from "@/lib/stock";
+import { historyPeriodBounds, type HistoryPeriod } from "@/lib/history-period";
 
 export type ActionResult = { error: string } | null;
 
@@ -394,20 +395,47 @@ export async function getProductDetail(
 // that data already lives, so the final balance always equals the stock level.
 
 export async function getProductHistory(
-  productId: string
+  productId: string,
+  /** Which window to send. Defaults to the week — the screen's default — so a busy
+   *  product no longer ships its whole life on every open. "all" = everything. */
+  period: HistoryPeriod = "week"
 ): Promise<StockMovement[]> {
   const ru = await getRestaurantUser();
   if (!STOCK_ACCESS.canViewStock(ru)) return [];
 
   const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any).rpc("product_history", {
-    p_restaurant_id: ru.restaurant_id, // tenant scope enforced inside the function
-    p_product_id: productId,
-  });
+  // Business-day bounds, the same "This Week" every other list in the app means.
+  // Each row's running balance is still computed over the WHOLE history inside
+  // product_history_range, so it stays the true on-hand figure.
+  const bounds = period === "all" ? null : historyPeriodBounds(period, ru.closingHour);
 
+  // PAGED, never one call. The API returns at most 1000 rows per request, and this
+  // function returns OLDEST-first (so the running balance can accumulate) — so a
+  // busy product silently lost its NEWEST movements: Shining Crown's "Shikhar ice"
+  // had 1,786 rows and the screen stopped at row 1,000, on Sept 6, while sales kept
+  // deducting live. Paging is safe because the function orders by (at, tiebreak,
+  // kind), a total order, so pages neither overlap nor skip.
+  const PAGE = 1000;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = (data ?? []) as any[];
+  const rows: any[] = [];
+  // Advance by what actually came back and stop only on an empty page — so a server
+  // whose cap is BELOW `PAGE` still gets paged through rather than stopping early.
+  for (let from = 0; ; ) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (service as any)
+      .rpc("product_history_range", {
+        p_restaurant_id: ru.restaurant_id, // tenant scope enforced inside the function
+        p_product_id: productId,
+        p_from: bounds ? bounds.from.toISOString() : null,
+        p_to: bounds ? bounds.to.toISOString() : null,
+      })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`Could not load stock history: ${error.message}`);
+    const page = (data ?? []) as unknown[];
+    if (page.length === 0) break;
+    rows.push(...page);
+    from += page.length;
+  }
   if (rows.length === 0) return [];
 
   const staffIds = [...new Set(rows.map((m) => m.staff_id).filter(Boolean))] as string[];
@@ -632,45 +660,69 @@ export async function adjustStock(
     return { error: "You don't have permission to adjust stock." };
   }
 
-  const productId = formData.get("product_id") as string;
   const kind = ((formData.get("kind") as string) || "kitchen_usage").toLowerCase();
   const direction = (formData.get("direction") as string) || "remove";
-  const magnitude = parseFloat(formData.get("qty") as string);
   const notes = ((formData.get("notes") as string) || "").trim();
-
-  if (!productId) return { error: "Product not found." };
   if (!REASONS.has(kind)) return { error: "Choose a reason." };
-  if (isNaN(magnitude) || magnitude <= 0) {
-    return { error: "Enter a quantity greater than zero." };
+
+  // One product (`product_id` + `qty`), or several at once (`items`: JSON
+  // [{ product_id, qty }]) — the multi-line form, so a day's kitchen usage is one
+  // submit rather than one per product. Same reason, direction and note for all.
+  let lines: { product_id: string; magnitude: number }[];
+  const itemsRaw = formData.get("items") as string | null;
+  if (itemsRaw) {
+    try {
+      const parsed = JSON.parse(itemsRaw) as { product_id?: unknown; qty?: unknown }[];
+      if (!Array.isArray(parsed)) throw new Error();
+      lines = parsed.map((i) => ({ product_id: String(i.product_id ?? ""), magnitude: Number(i.qty) }));
+    } catch {
+      return { error: "Invalid items." };
+    }
+  } else {
+    lines = [{
+      product_id: (formData.get("product_id") as string) || "",
+      magnitude: parseFloat(formData.get("qty") as string),
+    }];
+  }
+  if (lines.length === 0) return { error: "Add at least one product." };
+  if (lines.length > 100) return { error: "Too many products at once." };
+  for (const l of lines) {
+    if (!l.product_id) return { error: "Product not found." };
+    if (!Number.isFinite(l.magnitude) || l.magnitude <= 0) {
+      return { error: "Enter a quantity greater than zero." };
+    }
   }
 
   // Every reason consumes stock. Only a correction may put stock back, and only
   // when the admin explicitly asks for it — so a mis-picked reason can never
   // silently ADD stock.
-  const qty =
-    CAN_ADD_STOCK(kind) && direction === "add" ? magnitude : -magnitude;
+  const sign = CAN_ADD_STOCK(kind) && direction === "add" ? 1 : -1;
 
   const service = createServiceClient();
-  // Ownership check — stock_adjustments takes a product_id, so confirm the
-  // product is ours before writing against it.
+  // Ownership check — stock_adjustments takes a product_id, so confirm EVERY
+  // product is ours before writing against any of them (one query for all).
+  const ids = [...new Set(lines.map((l) => l.product_id))];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: prod } = await (service as any)
+  const { data: owned } = await (service as any)
     .from("products")
     .select("id")
-    .eq("id", productId)
-    .eq("restaurant_id", ru.restaurant_id)
-    .maybeSingle();
-  if (!prod) return { error: "Product not found." };
+    .in("id", ids)
+    .eq("restaurant_id", ru.restaurant_id);
+  if ((owned ?? []).length !== ids.length) return { error: "Product not found." };
 
+  // One insert for all lines — a single statement, so either every deduction is
+  // recorded or none is; a half-recorded batch would be worse than a failed one.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (service as any).from("stock_adjustments").insert({
-    restaurant_id: ru.restaurant_id,
-    product_id: productId,
-    kind,
-    qty,
-    notes: notes || null,
-    created_by: ru.id,
-  });
+  const { error } = await (service as any).from("stock_adjustments").insert(
+    lines.map((l) => ({
+      restaurant_id: ru.restaurant_id,
+      product_id: l.product_id,
+      kind,
+      qty: sign * l.magnitude,
+      notes: notes || null,
+      created_by: ru.id,
+    }))
+  );
 
   if (error) return { error: "Could not record the adjustment. Please try again." };
 
