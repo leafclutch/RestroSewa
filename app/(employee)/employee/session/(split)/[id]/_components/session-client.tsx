@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useTransition, useState } from "react";
+import { useActionState, useEffect, useRef, useTransition, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   closeSessionWithPayment,
@@ -790,15 +790,54 @@ function WalkInCustomerPanel({
   session: SessionDetail;
   canEdit: boolean;
 }) {
-  const has = !!(session.customer_name || session.customer_phone || session.customer_address);
+  const saved = {
+    name: session.customer_name ?? "",
+    phone: session.customer_phone ?? "",
+    address: session.customer_address ?? "",
+  };
+  const has = !!(saved.name || saved.phone || saved.address);
   const [editing, setEditing] = useState(!has);
-  const [state, action, pending] = useActionState<ActionResult, FormData>(updateWalkInCustomer, null);
-  const [submitted, setSubmitted] = useState(false);
+  const [fields, setFields] = useState(saved);
+  const [error, setError] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const [pending, startSave] = useTransition();
+  // The last values the server accepted, so an unchanged blur doesn't re-save.
+  const lastSaved = useRef(saved);
 
-  useEffect(() => { if (pending) setSubmitted(true); }, [pending]);
-  useEffect(() => {
-    if (submitted && !pending && state === null) { setSubmitted(false); setEditing(false); }
-  }, [submitted, pending, state]);
+  const dirty =
+    fields.name.trim() !== lastSaved.current.name.trim() ||
+    fields.phone.trim() !== lastSaved.current.phone.trim() ||
+    fields.address.trim() !== lastSaved.current.address.trim();
+
+  // Saves straight away when staff leave a field — the details used to sit unsaved in
+  // the form until "Save" was pressed, so typing a name and phone and going on to pay
+  // printed a bill with NO customer on it. The success is read from the action's own
+  // return, not inferred from a pending→idle transition (which silently misfires).
+  // Server actions run in order, so a save fired by tapping Pay lands before the payment.
+  function save(closeAfter: boolean) {
+    if (!dirty) {
+      if (closeAfter && (fields.name || fields.phone || fields.address)) setEditing(false);
+      return;
+    }
+    const fd = new FormData();
+    fd.set("session_id", session.id);
+    fd.set("customer_name", fields.name);
+    fd.set("customer_phone", fields.phone);
+    fd.set("customer_address", fields.address);
+    const snapshot = { ...fields };
+    startSave(async () => {
+      const res = await updateWalkInCustomer(null, fd);
+      if (res?.error) { setError(res.error); return; }
+      setError(null);
+      lastSaved.current = snapshot;
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1500);
+      if (closeAfter) setEditing(false);
+    });
+  }
+
+  const set = (k: keyof typeof fields) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setFields((f) => ({ ...f, [k]: e.target.value }));
 
   return (
     <div
@@ -810,6 +849,8 @@ function WalkInCustomerPanel({
         <span className="text-xs font-medium flex-1" style={{ color: "var(--color-ink)" }}>
           Customer details <span style={{ color: "var(--color-ink-mute)" }}>· optional</span>
         </span>
+        {pending && <span className="text-[11px]" style={{ color: "var(--color-ink-mute)" }}>Saving…</span>}
+        {!pending && savedFlash && <span className="text-[11px]" style={{ color: "var(--color-success)" }}>Saved</span>}
         {canEdit && !editing && (
           <button
             type="button"
@@ -823,30 +864,37 @@ function WalkInCustomerPanel({
       </div>
 
       {editing && canEdit ? (
-        <form action={action} className="px-4 py-3 flex flex-col gap-2">
-          <input type="hidden" name="session_id" value={session.id} />
-          <Input name="customer_name" defaultValue={session.customer_name ?? ""} placeholder="Customer name" />
-          <Input name="customer_phone" defaultValue={session.customer_phone ?? ""} placeholder="Phone number" inputMode="tel" />
-          <Input name="customer_address" defaultValue={session.customer_address ?? ""} placeholder="Delivery address" />
+        <form
+          onSubmit={(e) => { e.preventDefault(); save(true); }}
+          className="px-4 py-3 flex flex-col gap-2"
+        >
+          <Input value={fields.name} onChange={set("name")} onBlur={() => save(false)} placeholder="Customer name" />
+          <Input value={fields.phone} onChange={set("phone")} onBlur={() => save(false)} placeholder="Phone number" inputMode="tel" />
+          <Input value={fields.address} onChange={set("address")} onBlur={() => save(false)} placeholder="Delivery address" />
           <div className="flex items-center gap-2 mt-1">
             <Button type="submit" variant="primary" disabled={pending} className="text-xs px-3 h-9">
               {pending ? "Saving…" : "Save"}
             </Button>
             {has && (
-              <Button type="button" variant="secondary" onClick={() => setEditing(false)} className="text-xs px-3 h-9">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => { setFields(lastSaved.current); setEditing(false); }}
+                className="text-xs px-3 h-9"
+              >
                 Cancel
               </Button>
             )}
-            {state?.error && <span className="text-xs" style={{ color: "var(--color-ruby)" }}>{state.error}</span>}
+            {error && <span className="text-xs" style={{ color: "var(--color-ruby)" }}>{error}</span>}
           </div>
         </form>
       ) : (
         <div className="px-4 py-3 text-sm" style={{ color: "var(--color-ink)" }}>
-          {has ? (
+          {lastSaved.current.name || lastSaved.current.phone || lastSaved.current.address ? (
             <div className="flex flex-col gap-0.5">
-              {session.customer_name && <span>{session.customer_name}</span>}
-              {session.customer_phone && <span style={{ color: "var(--color-ink-mute)" }}>{session.customer_phone}</span>}
-              {session.customer_address && <span style={{ color: "var(--color-ink-mute)" }}>{session.customer_address}</span>}
+              {lastSaved.current.name && <span>{lastSaved.current.name}</span>}
+              {lastSaved.current.phone && <span style={{ color: "var(--color-ink-mute)" }}>{lastSaved.current.phone}</span>}
+              {lastSaved.current.address && <span style={{ color: "var(--color-ink-mute)" }}>{lastSaved.current.address}</span>}
             </div>
           ) : (
             <span style={{ color: "var(--color-ink-mute)" }}>No customer details.</span>
@@ -1130,6 +1178,12 @@ export function SessionClient({
                       const res = await forceCloseSession(session.id);
                       if (res?.error) {
                         setForceError(res.error);
+                      } else if (session.type === "walk_in") {
+                        // A closed walk-in is a dead end, and its number goes straight
+                        // back into use: staying here left a closed "W4" on screen while
+                        // the next walk-in added became a NEW W4 — two W4s, one closed,
+                        // which read like the app bouncing around the same walk-in.
+                        router.push("/employee/dashboard");
                       } else if (window.matchMedia("(min-width: 1024px)").matches) {
                         // Desktop/tablet: don't navigate anywhere — stay on this exact
                         // page. `isClosed` (below) already swaps the whole Actions block
@@ -1163,7 +1217,25 @@ export function SessionClient({
           className="rounded-xl border px-4 py-3 text-center text-sm"
           style={{ borderColor: "color-mix(in srgb, var(--color-success) 27%, transparent)", background: "var(--color-success-bg)", color: "var(--color-success)" }}
         >
-          Session closed
+          {session.type === "walk_in" ? (
+            // Reached from an old tab or link. The walk-in's number may already belong to
+            // a NEW walk-in, so say so instead of leaving a closed "W4" looking current.
+            <>
+              <p>This walk-in is finished.</p>
+              <p className="text-xs mt-1" style={{ color: "var(--color-ink-mute)" }}>
+                Its number may now be used by a new walk-in — open it from the dashboard.
+              </p>
+              <Link
+                href="/employee/dashboard"
+                className="inline-block mt-2 text-xs font-semibold px-3 py-1.5 rounded-lg"
+                style={{ color: "#fff", background: "var(--color-primary)" }}
+              >
+                Go to dashboard
+              </Link>
+            </>
+          ) : (
+            "Session closed"
+          )}
         </div>
       )}
     </div>

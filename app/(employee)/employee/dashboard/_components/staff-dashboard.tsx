@@ -164,26 +164,55 @@ export function StaffDashboard({
   // so #sec-orders can be a skeleton (or nothing) for a beat after mount. So retry
   // until it lands rather than firing once at 50ms and missing. Once it's scrolled,
   // strip ?focus from the URL so a pull-to-refresh doesn't yank the page back down.
+  //
+  // Then KEEP it there while the page settles. The sections ABOVE the target (Orders,
+  // Tables, Walk-ins …) are still skeletons when it first appears; as each fills in it
+  // grows and shoves the target down — so a closed bill landed on Sales, and a beat later
+  // the screen behind the print preview was showing Walk-ins. For ~4s (or until staff
+  // scroll / touch / press a key themselves) the target is re-pinned whenever it drifts.
   useEffect(() => {
     if (!focus) return;
     let tries = 0;
+    let found = false;
+    let userMoved = false;
+    const stopFollowing = () => { userMoved = true; };
+    const events = ["wheel", "touchstart", "keydown", "mousedown"] as const;
+    events.forEach((ev) => window.addEventListener(ev, stopFollowing, { passive: true }));
+
+    // Where the sticky quick-nav ends — scrollIntoView({block:"start"}) aims for 0, so
+    // that's the resting offset to compare against, with a little slack.
+    const drifted = (el: HTMLElement) => Math.abs(el.getBoundingClientRect().top) > 120;
+
     const timer = setInterval(() => {
       const el = document.getElementById(`sec-${focus}`);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "start" });
-        clearInterval(timer);
-        const url = new URL(window.location.href);
-        if (url.searchParams.has("focus")) {
-          url.searchParams.delete("focus");
-          window.history.replaceState(null, "", url.pathname + url.search);
+      if (!found) {
+        if (el) {
+          found = true;
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+          const url = new URL(window.location.href);
+          if (url.searchParams.has("focus")) {
+            url.searchParams.delete("focus");
+            window.history.replaceState(null, "", url.pathname + url.search);
+          }
+        } else if (++tries > 30) {
+          // ~3s and it never appeared (the staff member lacks that section): give up
+          // quietly rather than spin forever.
+          clearInterval(timer);
         }
-      } else if (++tries > 30) {
-        // ~3s and it never appeared (the staff member lacks that section): give up
-        // quietly rather than spin forever.
-        clearInterval(timer);
+        return;
       }
+      // Following phase: ~4s after it was found.
+      if (userMoved || ++tries > 30 + 40 || !el) {
+        clearInterval(timer);
+        return;
+      }
+      if (drifted(el)) el.scrollIntoView({ behavior: "auto", block: "start" });
     }, 100);
-    return () => clearInterval(timer);
+
+    return () => {
+      clearInterval(timer);
+      events.forEach((ev) => window.removeEventListener(ev, stopFollowing));
+    };
   }, [focus]);
 
   return (

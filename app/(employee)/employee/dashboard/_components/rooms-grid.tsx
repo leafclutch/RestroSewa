@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { memo, useActionState, useCallback, useEffect, useState, useTransition } from "react";
-import { checkInRoom, getRoomsOverview, markRoomClean } from "@/app/actions/rooms";
+import { memo, useActionState, useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { fetchFloor } from "@/lib/floor-client";
+import { checkInRoom, markRoomClean } from "@/app/actions/rooms";
 import type { RoomOverview } from "@/app/actions/rooms";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { STATUS_STYLE } from "@/lib/status-colors";
@@ -503,16 +504,20 @@ export function RoomsGrid({
   const [checkingIn, setCheckingIn] = useState<RoomOverview | null>(null);
   const [moving, setMoving] = useState<{ room: RoomOverview; sessionId: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
 
   // Refetches only the rooms. This was `router.refresh()` (via RealtimeRefresh),
   // which re-ran the entire dashboard route — sales, credits, the whole menu —
   // on every order event, and threw the results away because those sections keep
   // their own client state.
+  // A plain fetch, not a server action: server actions run one at a time in the same
+  // queue as navigation, so every realtime event used to hold up any tap that navigates.
+  // `seq` drops a response that lands after a newer one was asked for.
+  const seq = useRef(0);
   const resync = useCallback(() => {
-    startTransition(async () => {
-      setRooms(await getRoomsOverview());
-    });
+    const mine = ++seq.current;
+    fetchFloor<RoomOverview[]>("rooms")
+      .then((r) => { if (mine === seq.current) setRooms(r); })
+      .catch(() => { /* keep the last list */ });
   }, []);
 
   useRealtime(["tables", "orders"], resync);

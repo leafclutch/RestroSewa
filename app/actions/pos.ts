@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { hasPermission, hasAnyPermission, PERMISSIONS, NAV_ACCESS, WALKIN_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
-import { WALK_IN_SLOT_COUNT } from "@/lib/walk-ins";
+import { WALK_IN_SLOT_COUNT, EXTRA_WALK_IN_MAX, MAX_WALK_IN_NO } from "@/lib/walk-ins";
 import { buildVisibilityFilter, getAssignedWorkstationIds, resolveViewerScope } from "@/lib/assignments";
 import { computeCreditStats, settlementOf } from "@/lib/credits";
 import type { BillSettlement, CreditStats } from "@/lib/credits";
@@ -424,6 +424,8 @@ export type WalkInStatus = {
   session_opened_at: string | null;
   /** Shown on the card so a delivery/takeaway slot is recognisable at a glance. */
   customer_name: string | null;
+  /** An added walk-in (W4+) rather than one of the fixed slots — it goes away when closed. */
+  extra: boolean;
 };
 
 // The N walk-in slots with their live session state — the walk-in counterpart of
@@ -449,7 +451,8 @@ export async function getWalkInStatusOverview(
     customer_name: string | null;
   }[];
 
-  return Array.from({ length: WALK_IN_SLOT_COUNT }, (_, i) => {
+  // The fixed slots always show, free or busy.
+  const fixed: WalkInStatus[] = Array.from({ length: WALK_IN_SLOT_COUNT }, (_, i) => {
     const no = i + 1;
     const s = active.find((a) => a.walk_in_no === no) ?? null;
     return {
@@ -457,8 +460,24 @@ export async function getWalkInStatusOverview(
       session_id: s?.id ?? null,
       session_opened_at: s?.opened_at ?? null,
       customer_name: s?.customer_name ?? null,
+      extra: false,
     };
   });
+
+  // Extra walk-ins exist only while their session is open — so they're listed from
+  // the open sessions themselves, and a closed one simply isn't here any more.
+  const extras: WalkInStatus[] = active
+    .filter((a) => a.walk_in_no > WALK_IN_SLOT_COUNT)
+    .sort((a, b) => a.walk_in_no - b.walk_in_no)
+    .map((a) => ({
+      no: a.walk_in_no,
+      session_id: a.id,
+      session_opened_at: a.opened_at,
+      customer_name: a.customer_name,
+      extra: true,
+    }));
+
+  return [...fixed, ...extras];
 }
 
 /** For the dashboard's live refetch — same data, callable from the client action layer. */
@@ -468,36 +487,55 @@ export async function getMyWalkIns(): Promise<WalkInStatus[]> {
   return getWalkInStatusOverview(ru.restaurant_id);
 }
 
+/** What the walk-in actions hand back: the session to go to, or why not. */
+export type WalkInOpenResult = { sessionId: string } | { error: string };
+
 // Open (or resume) a walk-in slot. If the slot already has a live session, go straight
 // back to it — that is what makes a walk-in persist like a table. Otherwise create one,
 // tagged with the slot number. The customer PIN follows the SAME rule as a table: only a
 // "With PIN" restaurant gets one, so a "Without PIN" restaurant's walk-in never shows a PIN.
-export async function openWalkInSlot(no: number) {
+//
+// Returns the session id rather than redirecting. A server-action redirect makes the
+// server render the WHOLE next page before the tap shows anything; handing back the id
+// lets the client navigate itself — the session's loading screen paints at once and
+// the persistent left rail isn't re-rendered on the server.
+export async function openWalkInSlot(no: number): Promise<WalkInOpenResult> {
   const ru = await getRestaurantUser();
   if (!WALKIN_ACCESS.canManageWalkins(ru)) {
     return { error: "You don't have permission to open walk-ins." };
   }
+  if (!Number.isInteger(no) || no < 1 || no > MAX_WALK_IN_NO) {
+    return { error: "That walk-in doesn't exist." };
+  }
   const service = createServiceClient();
 
-  if (!Number.isInteger(no) || no < 1 || no > WALK_IN_SLOT_COUNT) {
-    redirect("/employee/dashboard");
+  const findOpen = async (): Promise<string | null> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data } = await (service as any)
+      .from("sessions")
+      .select("id")
+      .eq("restaurant_id", ru.restaurant_id)
+      .eq("type", "walk_in")
+      .eq("status", "active")
+      .eq("walk_in_no", no)
+      .maybeSingle();
+    return data?.id ?? null;
+  };
+
+  // Independent — one round trip, not two. The PIN is usually free (cached config).
+  const [existing, customer_pin] = await Promise.all([
+    findOpen(),
+    pinForNewSession(service, ru.restaurant_id),
+  ]);
+  if (existing) return { sessionId: existing };
+
+  // An extra walk-in that's no longer open has gone — it was finished (or closed)
+  // on another device. Never re-create it from a stale card; new ones come only
+  // from `addWalkIn`.
+  if (no > WALK_IN_SLOT_COUNT) {
+    return { error: "That walk-in has already been finished." };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: existing } = await (service as any)
-    .from("sessions")
-    .select("id")
-    .eq("restaurant_id", ru.restaurant_id)
-    .eq("type", "walk_in")
-    .eq("status", "active")
-    .eq("walk_in_no", no)
-    .maybeSingle();
-
-  if (existing) {
-    redirect(`/employee/session/${existing.id}`);
-  }
-
-  const customer_pin = await pinForNewSession(service, ru.restaurant_id);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: session, error } = await (service as any)
     .from("sessions")
@@ -513,19 +551,66 @@ export async function openWalkInSlot(no: number) {
   // A unique-index clash means the slot was taken between our check and insert (another
   // device opened it first) — resolve to that session rather than erroring.
   if (error) {
+    const raced = await findOpen();
+    if (raced) return { sessionId: raced };
+    return { error: "Could not open the walk-in. Please try again." };
+  }
+  return { sessionId: session.id };
+}
+
+// Add an extra walk-in on a busy day — the "+ Add walk-in" card. It takes the lowest
+// free number after the fixed slots (W4, then W5 …, reusing a number once its walk-in
+// is finished) and opens a session on it straight away. There is nothing to delete
+// afterwards: an extra walk-in IS its open session, so closing the bill removes it.
+// Returns the id for the client to navigate to — see openWalkInSlot.
+export async function addWalkIn(): Promise<WalkInOpenResult> {
+  const ru = await getRestaurantUser();
+  if (!WALKIN_ACCESS.canManageWalkins(ru)) {
+    return { error: "You don't have permission to open walk-ins." };
+  }
+  const service = createServiceClient();
+
+  const usedNumbers = async (): Promise<Set<number>> => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: raced } = await (service as any)
+    const { data } = await (service as any)
       .from("sessions")
-      .select("id")
+      .select("walk_in_no")
       .eq("restaurant_id", ru.restaurant_id)
       .eq("type", "walk_in")
       .eq("status", "active")
-      .eq("walk_in_no", no)
-      .maybeSingle();
-    if (raced) redirect(`/employee/session/${raced.id}`);
-    return { error: "Could not open the walk-in. Please try again." };
+      .gt("walk_in_no", WALK_IN_SLOT_COUNT);
+    return new Set(((data ?? []) as { walk_in_no: number }[]).map((r) => r.walk_in_no));
+  };
+
+  // First lookup and the PIN together — one round trip.
+  const [firstUsed, customer_pin] = await Promise.all([
+    usedNumbers(),
+    pinForNewSession(service, ru.restaurant_id),
+  ]);
+
+  // Two devices adding at the same moment can pick the same number; the partial unique
+  // index on (restaurant_id, walk_in_no) refuses the second, which then simply takes
+  // the next free one. A few tries is plenty.
+  let used = firstUsed;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) used = await usedNumbers();
+    if (used.size >= EXTRA_WALK_IN_MAX) {
+      return { error: `You can have up to ${EXTRA_WALK_IN_MAX} extra walk-ins open at once. Finish one first.` };
+    }
+    let no = WALK_IN_SLOT_COUNT + 1;
+    while (used.has(no)) no++;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: session, error } = await (service as any)
+      .from("sessions")
+      .insert({ restaurant_id: ru.restaurant_id, type: "walk_in", walk_in_no: no, customer_pin })
+      .select("id")
+      .single();
+    if (!error) return { sessionId: session.id };
+    // 23505 = that number was just taken by another device — go round again.
+    if (error.code !== "23505") break;
   }
-  redirect(`/employee/session/${session.id}`);
+  return { error: "Could not add a walk-in. Please try again." };
 }
 
 // Save the optional customer details on a walk-in (takeaway / phone / delivery). Editable

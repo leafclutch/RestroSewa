@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useRouter, usePathname, unstable_rethrow } from "next/navigation";
-import { memo, useCallback, useEffect, useState, useTransition } from "react";
-import { getMyTables, openTableSession, markTableClean } from "@/app/actions/pos";
+import { memo, useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { fetchFloor } from "@/lib/floor-client";
+import { openTableSession, markTableClean } from "@/app/actions/pos";
 import type { TableStatus } from "@/app/actions/pos";
 import { STATUS_STYLE, cleaningFor } from "@/lib/status-colors";
 import { SECTION_ACCENT } from "@/lib/section-colors";
@@ -229,7 +230,6 @@ export function TablesGrid({
   const [error, setError] = useState<string | null>(null);
   const [shifting, setShifting] = useState<TableStatus | null>(null);
   const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
-  const [, startTransition] = useTransition();
 
   // Which table is "current" — a blue ring on its card — read straight off the
   // URL rather than passed down as a prop. This grid now lives in a layout
@@ -243,10 +243,15 @@ export function TablesGrid({
     ? pathname.split("/")[3]
     : undefined;
 
+  // A plain fetch, not a server action: server actions run one at a time in the same
+  // queue as navigation, so every realtime event used to hold up any tap that navigates.
+  // `seq` drops a response that lands after a newer one was asked for.
+  const seq = useRef(0);
   const resync = useCallback(() => {
-    startTransition(async () => {
-      setTables(await getMyTables());
-    });
+    const mine = ++seq.current;
+    fetchFloor<TableStatus[]>("tables")
+      .then((t) => { if (mine === seq.current) setTables(t); })
+      .catch(() => { /* keep the last list */ });
   }, []);
 
   useRealtime(["tables", "orders"], resync);
