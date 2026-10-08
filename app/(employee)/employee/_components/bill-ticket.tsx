@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Printer, X } from "lucide-react";
 import { mergeLines, billLineKey } from "@/lib/billing/merge-lines";
+import { formatPercent } from "@/lib/billing/discount";
 
 // Shared, reusable receipt/ticket rendering used by both the live session screen
 // (KOT + pre-payment bill) and the Sales dashboard (reprint of a PAID bill).
@@ -497,8 +498,8 @@ export function BillTicket({
   payment?: BillPayment;
   credit?: BillCredit | null;
   customer?: BillCustomer | null;
-  /** Knocked off at payment. Only a paid bill has one — the pre-payment preview is
-   *  printed before the cashier has entered it, so it passes 0. */
+  /** Knocked off at payment. The pre-payment preview passes whatever the cashier has
+   *  typed into the payment form so far, so the customer sees it before paying. */
   discount?: number;
   /**
    * Replaces the computed total on the TOTAL line. **Only the Mock Billing screen passes
@@ -691,7 +692,9 @@ export function BillTicket({
       <Line label="Subtotal" value={rupee(subtotal)} />
       {tax > 0 && <Line label={`Tax (${taxPct}%)`} value={rupee(tax)} />}
       {service > 0 && <Line label={`Service (${svcPct}%)`} value={rupee(service)} />}
-      {discount > 0 && <Line label="Discount" value={`- ${rupee(discount)}`} />}
+      {discount > 0 && (
+        <Line label={`Discount (${formatPercent(discount, subtotal)})`} value={`- ${rupee(discount)}`} />
+      )}
       <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
       <Line label={discount > 0 ? "TOTAL PAYABLE" : "GRAND TOTAL"} value={rupee(grandTotal)} bold />
       {advancePaid > 0 && (
