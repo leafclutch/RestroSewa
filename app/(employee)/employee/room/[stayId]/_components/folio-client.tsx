@@ -31,6 +31,8 @@ import { SessionPrintButtons } from "@/app/(employee)/employee/session/(split)/[
 import type { RestaurantInfo, PrintStation } from "@/app/(employee)/employee/session/(split)/[id]/_components/print-tickets";
 import { PrintModal, BillTicket, ticketNumber } from "@/app/(employee)/employee/_components/bill-ticket";
 import { folioToBill } from "@/lib/billing/room-bill";
+import { formatPercent, resolveDiscount, type DiscountMode } from "@/lib/billing/discount";
+import { DiscountUnitToggle } from "@/app/(employee)/employee/_components/discount-unit-toggle";
 import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
 import { billMethodLabel } from "@/lib/billing/payment-method";
 import {
@@ -515,6 +517,7 @@ function EditAdvanceButton({ advance }: { advance: RoomAdvance }) {
 
 function CheckOutForm({
   view, canDiscount, canUseCredit, discountEnabled,
+  discount, setDiscount, discountMode, setDiscountMode,
 }: {
   view: RoomFolioView;
   canDiscount: boolean;
@@ -522,10 +525,14 @@ function CheckOutForm({
   /** Whether the restaurant has a discount PIN configured. No PIN = no discounts at all,
    *  so the field isn't shown. The PIN is still verified server-side at checkout. */
   discountEnabled: boolean;
+  /** The typed discount (₹ or %) — lifted to FolioClient so the unpaid bill prints it. */
+  discount: string;
+  setDiscount: (v: string) => void;
+  discountMode: DiscountMode;
+  setDiscountMode: (m: DiscountMode) => void;
 }) {
   const [state, action, pending] = useActionState(checkOutRoom, null);
   const [method, setMethod] = useState<"cash" | "online" | "card" | "mixed" | "credit">("cash");
-  const [discount, setDiscount] = useState("");
   // The admin's discount PIN authorizing that reduction. Held only long enough to submit.
   const [discountPin, setDiscountPin] = useState("");
   const [cash, setCash] = useState("");
@@ -564,9 +571,7 @@ function CheckOutForm({
   // the payable total is recomputed live from it. The SERVER rebuilds this from
   // the database regardless — this is only so the number under the cursor is right.
   // With no PIN configured there is no discount to speak of, so it's pinned to 0.
-  const disc = discountEnabled
-    ? Math.min(Math.max(parseFloat(discount) || 0, 0), f.subtotal)
-    : 0;
+  const disc = discountEnabled ? resolveDiscount(discount, discountMode, f.subtotal) : 0;
   const taxable = f.subtotal - disc;
   const total =
     Math.round((taxable * (1 + f.taxPercent / 100 + f.servicePercent / 100)) * 100) / 100;
@@ -647,6 +652,13 @@ function CheckOutForm({
     setOnline("");
   }
 
+  // Switching ₹ ↔ % reinterprets the typed number, so start the field over.
+  function handleDiscountModeChange(mode: DiscountMode) {
+    if (mode === discountMode) return;
+    setDiscountMode(mode);
+    handleDiscountChange("");
+  }
+
   const cashNum = parseFloat(cash) || 0;
   const onlineNum = parseFloat(online) || 0;
   const paidNum = parseFloat(paidNow) || 0;
@@ -718,18 +730,27 @@ function CheckOutForm({
               <label className="text-xs block mb-1.5" style={{ color: "var(--color-ink-mute)" }}>
                 Discount
               </label>
-              <input
-                type="number"
-                min="0"
-                max={f.subtotal}
-                step="0.01"
-                inputMode="decimal"
-                value={discount}
-                onChange={(e) => handleDiscountChange(e.target.value)}
-                placeholder="0.00"
-                className="w-full h-10 rounded-sm border px-3 text-sm tabular"
-                style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
-              />
+              <div className="flex items-center gap-2">
+                <DiscountUnitToggle mode={discountMode} onChange={handleDiscountModeChange} />
+                <input
+                  type="number"
+                  min="0"
+                  max={discountMode === "percent" ? 100 : f.subtotal}
+                  step="0.01"
+                  inputMode="decimal"
+                  value={discount}
+                  onChange={(e) => handleDiscountChange(e.target.value)}
+                  placeholder={discountMode === "percent" ? "0" : "0.00"}
+                  className="w-full h-10 rounded-sm border px-3 text-sm tabular"
+                  style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+                />
+              </div>
+              {/* The other unit, so the receptionist sees both ₹ and % whichever they typed. */}
+              {disc > 0 && (
+                <p className="text-xs mt-1.5 text-right tabular" style={{ color: "var(--color-ink-mute)" }}>
+                  {discountMode === "percent" ? `= ₹${disc.toFixed(2)}` : `= ${formatPercent(disc, f.subtotal)}`}
+                </p>
+              )}
             </div>
 
             {/* Only asked for once there's actually something to authorize. */}
@@ -1167,6 +1188,13 @@ export function FolioClient({
   // so the document a guest is shown before paying and the one filed after are one thing.
   const bill = folioToBill({ folio: f, roomType: view.type_name, advanceCash, advanceOnline });
 
+  // The checkout form's discount, held here so the unpaid bill preview prints what the
+  // receptionist has typed so far — the guest sees the reduction before paying.
+  const [discountAmt, setDiscountAmt] = useState("");
+  const [discountMode, setDiscountMode] = useState<DiscountMode>("amount");
+  const liveDiscount =
+    discountEnabled && canDiscount ? resolveDiscount(discountAmt, discountMode, f.subtotal) : 0;
+
   // Once the guest has checked out the SAME document is a receipt, not a bill: it has to
   // say PAID (or what is still owed), how it was tendered and who took the money. It used
   // to keep printing "Status: UNPAID" for a settled stay, because the folio screen had no
@@ -1560,6 +1588,10 @@ export function FolioClient({
             canDiscount={canDiscount}
             canUseCredit={canUseCredit}
             discountEnabled={discountEnabled}
+            discount={discountAmt}
+            setDiscount={setDiscountAmt}
+            discountMode={discountMode}
+            setDiscountMode={setDiscountMode}
           />
         </div>
       )}
@@ -1650,11 +1682,14 @@ export function FolioClient({
           items={[]}
           sections={bill.sections}
           stay={bill.stay}
-          discount={bill.discount}
+          // Unpaid with a discount typed at checkout: print that one. The folio's own
+          // balanceDue was worked out without it, so leave it undefined and let BillTicket
+          // derive grandTotal − advance from the discounted total instead.
+          discount={!paid && liveDiscount > 0 ? liveDiscount : bill.discount}
           // Undefined-equivalent (0) for every stay with no deposit, so those bills print
           // exactly as they did before — and a table bill never passes these at all.
           advancePaid={bill.advancePaid}
-          balanceDue={bill.balanceDue}
+          balanceDue={!paid && liveDiscount > 0 ? undefined : bill.balanceDue}
           advanceCash={bill.advanceCash}
           advanceOnline={bill.advanceOnline}
           payment={

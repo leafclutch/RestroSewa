@@ -318,6 +318,7 @@ export function SessionPrintButtons({
   workstations,
   canPrintTickets,
   canPrintBill,
+  discount = 0,
 }: {
   session: SessionDetail;
   restaurant: RestaurantInfo;
@@ -327,6 +328,9 @@ export function SessionPrintButtons({
   /** Ticket generation — a billing/order-management action (Cashier/Receptionist), NOT any waiter. */
   canPrintTickets: boolean;
   canPrintBill: boolean;
+  /** What the cashier has typed into the payment form so far — printed on the unpaid
+   *  bill so the customer sees the reduction before paying. */
+  discount?: number;
 }) {
   const router = useRouter();
   // Which docket's preview is open (station key), or "bill", or a `reprint:<id>`, or null.
@@ -700,6 +704,7 @@ export function SessionPrintButtons({
             location={locationLabel(session)}
             at={at}
             items={billItems}
+            discount={discount}
             customer={
               // Walk-in carries name/phone/address; a table bill's own customer
               // block is name-only (see updateTableCustomerName) — the other two

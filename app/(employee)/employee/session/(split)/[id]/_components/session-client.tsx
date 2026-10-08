@@ -20,6 +20,8 @@ import { Check, ChevronRight, Plus, Receipt, User, X, Pencil, Lock } from "lucid
 import { OrderItem } from "@/app/(employee)/employee/_components/order-item";
 import { SessionPrintButtons } from "./print-tickets";
 import type { RestaurantInfo, PrintStation } from "./print-tickets";
+import { DiscountUnitToggle } from "@/app/(employee)/employee/_components/discount-unit-toggle";
+import { formatPercent, resolveDiscount, type DiscountMode } from "@/lib/billing/discount";
 
 
 type PaymentMethod = "cash" | "online" | "card" | "mixed" | "credit";
@@ -46,12 +48,21 @@ function PaymentForm({
   session,
   canUseCredit,
   discountEnabled,
+  discountAmt,
+  setDiscountAmt,
+  discountMode,
+  setDiscountMode,
 }: {
   session: SessionDetail;
   canUseCredit: boolean;
   /** Whether the restaurant has a discount PIN configured. No PIN = no discounts at all,
    *  so the field isn't shown. The PIN is still verified server-side at payment. */
   discountEnabled: boolean;
+  /** Lifted to SessionClient so the unpaid-bill preview prints the same discount. */
+  discountAmt: string;
+  setDiscountAmt: (v: string) => void;
+  discountMode: DiscountMode;
+  setDiscountMode: (m: DiscountMode) => void;
 }) {
   // A directly-controlled submit rather than `useActionState` + native `<form
   // action>` — that combination relies on `pending` reliably flipping
@@ -92,8 +103,8 @@ function PaymentForm({
   const [cashAmt, setCashAmt]     = useState("");
   const [onlineAmt, setOnlineAmt] = useState("");
   // Knocked off at payment ("Rs 1020 → just give me 1000"). Everything below tenders,
-  // validates and submits against the PAYABLE, never the raw order total.
-  const [discountAmt, setDiscountAmt] = useState("");
+  // validates and submits against the PAYABLE, never the raw order total. The typed value
+  // (₹ or %) is held by SessionClient — see the props.
   // The admin's discount PIN authorizing that reduction. Held only long enough to submit.
   const [discountPin, setDiscountPin] = useState("");
 
@@ -145,9 +156,7 @@ function PaymentForm({
   // Capped at the order total so the payable can never go negative — the server
   // refuses that anyway, but the cashier should see it clamp as they type. With no PIN
   // configured there is no discount to speak of, so it's pinned to 0.
-  const discount = discountEnabled
-    ? Math.min(Math.max(parseFloat(discountAmt) || 0, 0), orderTotal)
-    : 0;
+  const discount = discountEnabled ? resolveDiscount(discountAmt, discountMode, orderTotal) : 0;
   const payable = Math.max(0, orderTotal - discount);
   // The server is the real gate; this just stops an obviously-incomplete submit.
   const discountPinValid = discount === 0 || /^\d{4}$/.test(discountPin);
@@ -174,6 +183,13 @@ function PaymentForm({
     setDiscountAmt(val);
     setCashAmt("");
     setOnlineAmt("");
+  }
+
+  // Switching ₹ ↔ % reinterprets the typed number, so start the field over.
+  function handleDiscountModeChange(mode: DiscountMode) {
+    if (mode === discountMode) return;
+    setDiscountMode(mode);
+    handleDiscountChange("");
   }
 
   const bothFilled = cashAmt !== "" && onlineAmt !== "";
@@ -273,20 +289,32 @@ function PaymentForm({
           <>
             <div className="flex items-center justify-between gap-3">
               <label htmlFor="discount_input" className="text-sm shrink-0" style={{ color: "var(--color-ink-mute)" }}>
-                Discount (₹)
+                Discount
               </label>
-              <Input
-                id="discount_input"
-                type="number"
-                min="0"
-                max={orderTotal}
-                step="0.01"
-                placeholder="0.00"
-                value={discountAmt}
-                onChange={(e) => handleDiscountChange(e.target.value)}
-                className="max-w-[140px] text-right"
-              />
+              <div className="flex items-center gap-2">
+                <DiscountUnitToggle mode={discountMode} onChange={handleDiscountModeChange} />
+                <Input
+                  id="discount_input"
+                  type="number"
+                  min="0"
+                  max={discountMode === "percent" ? 100 : orderTotal}
+                  step="0.01"
+                  placeholder={discountMode === "percent" ? "0" : "0.00"}
+                  value={discountAmt}
+                  onChange={(e) => handleDiscountChange(e.target.value)}
+                  className="max-w-[120px] text-right"
+                />
+              </div>
             </div>
+
+            {/* The other unit, so the cashier sees both ₹ and % whichever they typed. */}
+            {discount > 0 && (
+              <p className="text-xs text-right tabular" style={{ color: "var(--color-ink-mute)" }}>
+                {discountMode === "percent"
+                  ? `= ₹${discount.toFixed(2)}`
+                  : `= ${formatPercent(discount, orderTotal)}`}
+              </p>
+            )}
 
             {/* Only asked for once there's actually something to authorize. */}
             {discount > 0 && (
@@ -1008,6 +1036,10 @@ export function SessionClient({
   const router = useRouter();
   const [forceClosing, startForceClose] = useTransition();
   const [forceError, setForceError] = useState<string | null>(null);
+  // The payment form's discount, held here so the unpaid-bill preview prints it too.
+  const [discountAmt, setDiscountAmt] = useState("");
+  const [discountMode, setDiscountMode] = useState<DiscountMode>("amount");
+  const discount = discountEnabled ? resolveDiscount(discountAmt, discountMode, session.total) : 0;
   const hasOrders = session.items.length > 0;
   const pendingItems = session.items.filter((i) => i.item_status !== "served");
   const servedItems  = session.items.filter((i) => i.item_status === "served");
@@ -1132,6 +1164,7 @@ export function SessionClient({
               workstations={workstations}
               canPrintTickets={canPrintTickets}
               canPrintBill={canCloseBills}
+              discount={discount}
             />
           )}
 
@@ -1141,7 +1174,15 @@ export function SessionClient({
               one place. `closeSessionWithPayment` still refuses a room stay
               server-side, in case anyone posts to it directly. */}
           {canCloseBills && (
-            <PaymentForm session={session} canUseCredit={canUseCredit} discountEnabled={discountEnabled} />
+            <PaymentForm
+              session={session}
+              canUseCredit={canUseCredit}
+              discountEnabled={discountEnabled}
+              discountAmt={discountAmt}
+              setDiscountAmt={setDiscountAmt}
+              discountMode={discountMode}
+              setDiscountMode={setDiscountMode}
+            />
           )}
 
           {!canCreateOrders && !canCloseBills && (
