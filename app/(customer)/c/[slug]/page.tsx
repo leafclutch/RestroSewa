@@ -10,6 +10,7 @@ import { getCustomerNotifState, getCustomerActivationState } from "@/app/actions
 import type { ActivationStatus } from "@/app/actions/customer";
 import { CustomerMenu } from "./_components/customer-menu";
 import { QrSplash } from "./_components/qr-splash";
+import { getMenuImages } from "@/app/actions/menu-images";
 import { CurrencyProvider } from "@/components/currency-provider";
 import { normalizeCurrency } from "@/lib/currency";
 
@@ -159,7 +160,10 @@ export default async function CustomerMenuPage({
 
   // Only AVAILABLE variants come back, so a size that has run out simply isn't
   // offered — the guest never picks something that would be refused on submit.
-  const variants = await getAvailableVariants(restaurant.id);
+  const [variants, menuImages] = await Promise.all([
+    getAvailableVariants(restaurant.id),
+    getMenuImages(restaurant.id),
+  ]);
 
   return (
     <CurrencyProvider code={normalizeCurrency(restaurant.settings?.currency)}>
@@ -181,6 +185,7 @@ export default async function CustomerMenuPage({
         categories={categoriesWithItems}
         items={allItems}
         variants={variants}
+        menuImages={menuImages}
         initialNotifState={initialNotifState}
         initialActivationStatus={initialActivationStatus}
       />

@@ -53,6 +53,8 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { useCurrency } from "@/components/currency-provider";
+import { MenuImagesPanel } from "./menu-images-panel";
+import type { MenuImage } from "@/app/actions/menu-images";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1384,11 +1386,14 @@ export function MenuClient({
   items,
   workstations,
   restaurantId,
+  images,
 }: {
   categories: CategoryRow[];
   items: MenuItemRow[];
   workstations: WorkstationRow[];
   restaurantId: string;
+  /** Menu card photos — shown to guests from the QR menu's right-edge button. */
+  images: MenuImage[];
 }) {
   const [addingCategory, setAddingCategory] = useState(false);
 
@@ -1401,6 +1406,7 @@ export function MenuClient({
     // of its card while every other section (Tables, Rooms, Sales) filled the width. Full width
     // now; the rows below manage their own layout at every size.
     <div className="flex flex-col gap-4 w-full">
+      <MenuImagesPanel images={images} />
       <div className="flex items-center justify-between">
         <p className="text-base" style={{ color: "var(--color-ink-mute)" }}>
           {categories.length} categories · {items.length} items

@@ -228,6 +228,15 @@ export async function deleteRestaurantSetup(
       .remove(files.map((f) => `${restaurantId}/${f.name}`));
   }
 
+  // Menu card photos — same `${restaurantId}/…` layout. The rows went with the
+  // restaurant (ON DELETE CASCADE); the files have to be removed by hand.
+  const { data: menuFiles } = await service.storage.from("menu-images").list(restaurantId, { limit: 1000 });
+  if (menuFiles?.length) {
+    await service.storage
+      .from("menu-images")
+      .remove(menuFiles.map((f) => `${restaurantId}/${f.name}`));
+  }
+
   revalidateEverything(restaurantId);
   revalidatePath("/superadmin/settings");
 

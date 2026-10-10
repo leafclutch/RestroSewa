@@ -81,6 +81,8 @@ import {
 } from "lucide-react";
 import { useCurrency } from "@/components/currency-provider";
 import { allergyFlagsForCart, type AllergyFlag } from "@/lib/allergy";
+import { MenuPhotos } from "./menu-photos";
+import type { MenuImage } from "@/app/actions/menu-images";
 
 // ─── Config ─────────────────────────────────────────────────────────────────────
 
@@ -1419,6 +1421,7 @@ export function CustomerMenu({
   categories,
   items,
   variants,
+  menuImages,
   initialNotifState,
   initialActivationStatus,
 }: {
@@ -1435,6 +1438,8 @@ export function CustomerMenu({
   categories: CategoryRow[];
   items: MenuItemRow[];
   variants: VariantRow[];
+  /** Menu card photos. The right-edge "Menu card" button exists only when there are some. */
+  menuImages: MenuImage[];
   initialNotifState: CustomerNotifState;
   initialActivationStatus: ActivationStatus;
 }) {
@@ -1530,8 +1535,12 @@ export function CustomerMenu({
     });
   }, [activeSessionId]);
 
+  // Only with a session: without one the stream has nothing to scope a guest to and
+  // the server answers 401 — which EventSource then retries forever, a red console
+  // error on every QR menu opened before the table is. The page's poll covers that
+  // window; the stream starts as soon as a session id exists.
   useRealtime(
-    ["orders", "notifications", "tables", "menu"],
+    activeSessionId ? ["orders", "notifications", "tables", "menu"] : [],
     useCallback(
       (topic) => {
         pollRef.current?.();
@@ -2418,6 +2427,8 @@ export function CustomerMenu({
           onClose={() => setBillDialog(null)}
         />
       )}
+
+      {menuImages.length > 0 && <MenuPhotos images={menuImages} />}
     </div>
   );
 }
