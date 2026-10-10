@@ -24,6 +24,13 @@ test("letter symbols are spaced from the number, glyph symbols are not", () => {
   assert.equal(currencyFormatter("GBP").money(500), "£500");
 });
 
+test("money keeps decimals when the amount has them, and hides .00 when it doesn't", () => {
+  assert.equal(currencyFormatter("NPR").money(250.5), "Rs. 250.50");
+  assert.equal(currencyFormatter("USD").money(1234.75), "$1,234.75");
+  assert.equal(currencyFormatter("USD").money(1234.004), "$1,234");
+  assert.equal(currencyFormatter("USD").money(0.1 + 0.2), "$0.30");
+});
+
 test("signed2 puts the minus before the symbol", () => {
   assert.equal(currencyFormatter("INR").signed2(-1500), "−₹1,500.00");
   assert.equal(currencyFormatter("INR").signed2(1500), "₹1,500.00");

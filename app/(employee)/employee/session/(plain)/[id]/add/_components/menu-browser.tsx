@@ -316,7 +316,7 @@ export function MenuBrowser({
           </p>
         )}
         <p className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>
-          {hasVariants && <span className="text-xs">from </span>}{cur.prefix}{from.toFixed(0)}
+          {hasVariants && <span className="text-xs">from </span>}{cur.money(from)}
         </p>
 
         <div className="flex items-center gap-2 mt-auto">
@@ -555,7 +555,7 @@ export function MenuBrowser({
                       {v.name}
                     </span>
                     <span className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>
-                      {cur.prefix}{Number(v.price).toFixed(0)}
+                      {cur.money(Number(v.price))}
                     </span>
                     {inCart === 0 ? (
                       <button
@@ -710,7 +710,7 @@ export function MenuBrowser({
                     {qty} × {labelOf(itemId, variantId)}
                   </span>
                   <span className="tabular" style={{ color: "var(--color-ink-mute)" }}>
-                    {cur.prefix}{(priceOf(itemId, variantId) * qty).toFixed(0)}
+                    {cur.money(priceOf(itemId, variantId) * qty)}
                   </span>
                   <button
                     type="button"
@@ -740,7 +740,7 @@ export function MenuBrowser({
                   )}
                 </span>
                 <span className="tabular" style={{ color: "var(--color-ink-mute)" }}>
-                  {cur.prefix}{((parseFloat(l.price) || 0) * l.quantity).toFixed(0)}
+                  {cur.money((parseFloat(l.price) || 0) * l.quantity)}
                 </span>
                 <button
                   type="button"
@@ -761,7 +761,7 @@ export function MenuBrowser({
                 {totalCount} item{totalCount !== 1 ? "s" : ""}
               </span>
               <span className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>
-                · {cur.prefix}{grandTotal.toFixed(0)}
+                · {cur.money(grandTotal)}
               </span>
             </div>
             {state?.error && (

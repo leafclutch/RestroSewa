@@ -121,7 +121,7 @@ export function OrderItem({
 
       {/* The line's share of the bill — active units only, so it matches the total. */}
       <p className="text-sm tabular shrink-0" style={{ color: "var(--color-ink-mute)" }}>
-        {cur.prefix}{(Number(item.item_price) * active).toFixed(0)}
+        {cur.money(Number(item.item_price) * active)}
       </p>
 
       <span

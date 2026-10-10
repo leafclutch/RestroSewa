@@ -460,7 +460,7 @@ function PaymentForm({
 
           {bothFilled && !mixedValid && (
             <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
-              The combined Cash and Online amounts must equal the total payable amount ({cur.prefix}{payable.toFixed(0)}).
+              The combined Cash and Online amounts must equal the total payable amount ({cur.money(payable)}).
             </p>
           )}
           {bothFilled && mixedValid && (
@@ -565,7 +565,7 @@ function PaymentForm({
                         className="text-sm tabular-nums shrink-0"
                         style={{ color: m.balance > 0 ? "var(--color-danger)" : "var(--color-ink-mute)" }}
                       >
-                        {m.balance > 0 ? `${cur.prefix}${m.balance.toFixed(0)}` : "settled"}
+                        {m.balance > 0 ? `${cur.money(m.balance)}` : "settled"}
                       </span>
                     </button>
                   ))}
@@ -804,7 +804,7 @@ function PaymentForm({
         {pending
           ? "Closing…"
           : method === "credit"
-          ? `Close & record ${cur.prefix}${creditAmount.toFixed(0)} credit`
+          ? `Close & record ${cur.money(creditAmount)} credit`
           : "Complete & close session"}
       </Button>
     </form>
@@ -1134,7 +1134,7 @@ export function SessionClient({
           >
             <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Total</span>
             <span className="text-sm font-medium tabular" style={{ color: "var(--color-ink)" }}>
-              {cur.prefix}{session.total.toFixed(0)}
+              {cur.money(session.total)}
             </span>
           </div>
         </div>
