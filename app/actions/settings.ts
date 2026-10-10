@@ -16,6 +16,7 @@ import {
 } from "@/lib/reports/daily-summary";
 import { sendDailySummary } from "@/lib/reports/daily-summary-send";
 import { historyPeriodDateBounds, type HistoryPeriod } from "@/lib/history-period";
+import { normalizeCurrency } from "@/lib/currency";
 
 export type ActionResult = { error: string } | { ok: true } | null;
 
@@ -257,6 +258,59 @@ export async function updateBusinessDaySettings(
   ]) {
     revalidatePath(p);
   }
+  return { ok: true };
+}
+
+// ─── Currency ─────────────────────────────────────────────────────────────────
+// The symbol every amount in the app is shown with — menu, bills, finance, reports.
+// Display only: amounts are stored as plain numbers, so switching currency relabels
+// them without converting anything.
+
+export async function getCurrencySetting(): Promise<string> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("restaurants")
+    .select("settings")
+    .eq("id", restaurantUser.restaurant_id)
+    .maybeSingle();
+
+  return normalizeCurrency(data?.settings?.currency);
+}
+
+export async function updateCurrencySetting(
+  _prev: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+  const service = createServiceClient();
+
+  const raw = ((formData.get("currency") as string) || "").trim().toUpperCase();
+  // normalizeCurrency would quietly turn a bad code into the default — refuse instead.
+  if (normalizeCurrency(raw) !== raw) return { error: "Choose a currency from the list." };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: rest } = await (service as any)
+    .from("restaurants")
+    .select("settings")
+    .eq("id", restaurantUser.restaurant_id)
+    .maybeSingle();
+
+  const settings = { ...(rest?.settings ?? {}), currency: raw };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("restaurants")
+    .update({ settings })
+    .eq("id", restaurantUser.restaurant_id);
+
+  if (error) return { error: error.message };
+
+  revalidateRestaurantInfo(restaurantUser.restaurant_id);
+  // Every money figure on every surface (admin, staff, customer menu) changes, so drop
+  // the whole route cache rather than chase a list of paths that would go stale.
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 

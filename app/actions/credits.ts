@@ -6,6 +6,7 @@ import { NAV_ACCESS, STOCK_ACCESS, hasPermission, PERMISSIONS } from "@/lib/perm
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { computeCreditStats } from "@/lib/credits";
 import { resolveSplit } from "@/lib/payment-split";
+import { getCurrencyFor } from "@/lib/currency-server";
 import { businessPeriodBounds } from "@/lib/business-day";
 import { getRestaurantConfig } from "@/lib/restaurant-info";
 import type { CreditStats, CreditStatus } from "@/lib/credits";
@@ -405,7 +406,8 @@ export async function addCreditPayment(
     method,
     amount,
     formData.get("cash_amount") as string | null,
-    formData.get("online_amount") as string | null
+    formData.get("online_amount") as string | null,
+    (await getCurrencyFor(ru.restaurant_id)).money2
   );
   if (!split.ok) return { error: split.error };
 

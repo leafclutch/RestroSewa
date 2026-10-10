@@ -21,6 +21,7 @@ import { QrCode, Trash2, X, Download, Pencil, RefreshCw, UserRound } from "lucid
 
 export type EmployeeOption = { id: string; display_name: string };
 import dynamic from "next/dynamic";
+import { useCurrency } from "@/components/currency-provider";
 
 // The QR canvas only ever renders INSIDE the print dialog — a modal most admins open
 // rarely and many never open at all. Loading its library on the initial page render
@@ -463,6 +464,7 @@ function RoomTypeSection({
   assignedByRoomType: Record<string, string[]>;
   onQrClick: (room: RoomRow) => void;
 }) {
+  const cur = useCurrency();
   const [editingType, setEditingType] = useState(false);
   const [, startDelete] = useTransition();
   const [editState, editAction, editPending] = useActionState<ActionResult, FormData>(updateRoomType, null);
@@ -525,7 +527,7 @@ function RoomTypeSection({
               />
             </div>
             <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
-              NPR {type.base_price.toLocaleString()} / night
+              {cur.money(type.base_price)} / night
               {type.description && ` · ${type.description}`}
             </p>
           </div>

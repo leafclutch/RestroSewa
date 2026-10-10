@@ -26,13 +26,7 @@ import { CreditReceiptButton } from "./credit-receipt";
 import { ChevronRight, Loader2, Plus, Search, X } from "lucide-react";
 import { PaidBillButton } from "@/app/(employee)/employee/sales/_components/paid-bill";
 import { SecurityPinDialog } from "@/components/security-pin-dialog";
-
-function money(n: number) {
-  return `₹${Math.round(n).toLocaleString("en-IN")}`;
-}
-function money2(n: number) {
-  return `₹${n.toFixed(2)}`;
-}
+import { useCurrency } from "@/components/currency-provider";
 
 const METHOD_LABEL: Record<string, string> = {
   cash: "Cash",
@@ -80,6 +74,7 @@ function CustomerCard({
   onOpen: () => void;
   highlight?: boolean;
 }) {
+  const cur = useCurrency();
   const settled = customer.balance <= 0;
   return (
     <button
@@ -123,7 +118,7 @@ function CustomerCard({
             className="text-sm font-medium tabular-nums"
             style={{ color: settled ? "var(--color-ink-mute)" : "#dc2626" }}
           >
-            {settled ? "Settled" : money(customer.balance)}
+            {settled ? "Settled" : cur.money(customer.balance)}
           </p>
           {!settled && (
             <p className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>outstanding</p>
@@ -153,6 +148,7 @@ function AddChargeButton({
   customerName: string;
   onAdded: () => void;
 }) {
+  const cur = useCurrency();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
@@ -176,7 +172,7 @@ function AddChargeButton({
         onSuccess={() => { setOpen(false); reset(); onAdded(); }}
         title="Add a charge"
         description={`Adds to what ${customerName} owes. It is not counted as a sale.`}
-        confirmLabel={amountNum > 0 ? `Add ${money2(amountNum)}` : "Add charge"}
+        confirmLabel={amountNum > 0 ? `Add ${cur.money2(amountNum)}` : "Add charge"}
         extraValid={valid}
         onConfirm={(pin) =>
           addCreditCharge(pin, customerId, {
@@ -192,7 +188,7 @@ function AddChargeButton({
         <div className="flex flex-col gap-3">
           <label className="flex flex-col gap-1.5">
             <span className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
-              Amount (₹)
+              Amount ({cur.symbol})
             </span>
             <Input
               type="number"
@@ -233,6 +229,7 @@ function AddChargeButton({
 // it opens that bill exactly as it printed (same view as Sales' reprint), so staff
 // can see what the customer actually had. A hand-added charge has no bill behind it.
 function CreditBillRow({ bill: b, first }: { bill: CreditBill; first: boolean }) {
+  const cur = useCurrency();
   const content = (
     <>
       <div className="flex-1 min-w-0">
@@ -258,14 +255,14 @@ function CreditBillRow({ bill: b, first }: { bill: CreditBill; first: boolean })
       </div>
       <div className="text-right shrink-0">
         <p className="text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>
-          {money2(b.bill_amount)}
+          {cur.money2(b.bill_amount)}
         </p>
         <p
           className="text-[10px] uppercase tracking-wide"
           style={{ color: CREDIT_STATUS_COLOR[b.status], letterSpacing: "0.06em" }}
         >
           {CREDIT_STATUS_LABEL[b.status]}
-          {b.balance > 0 && ` · ${money(b.balance)} left`}
+          {b.balance > 0 && ` · ${cur.money(b.balance)} left`}
         </p>
       </div>
     </>
@@ -310,6 +307,7 @@ function CustomerDetailModal({
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const cur = useCurrency();
   const [detail, setDetail] = useState<CreditCustomerDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
@@ -430,13 +428,13 @@ function CustomerDetailModal({
                 <div className="flex items-center justify-between text-sm">
                   <span style={{ color: "var(--color-ink-mute)" }}>Billed on credit</span>
                   <span className="tabular-nums" style={{ color: "var(--color-ink)" }}>
-                    {money2(detail.total_billed)}
+                    {cur.money2(detail.total_billed)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span style={{ color: "var(--color-ink-mute)" }}>Paid so far</span>
                   <span className="tabular-nums" style={{ color: "var(--color-ink)" }}>
-                    − {money2(detail.total_paid)}
+                    − {cur.money2(detail.total_paid)}
                   </span>
                 </div>
                 <div
@@ -450,7 +448,7 @@ function CustomerDetailModal({
                     className="text-lg font-medium tabular-nums"
                     style={{ color: settled ? "var(--color-success)" : "#9a3412" }}
                   >
-                    {money2(detail.balance)}
+                    {cur.money2(detail.balance)}
                   </span>
                 </div>
               </div>
@@ -505,16 +503,16 @@ function CustomerDetailModal({
                         className="text-xs uppercase tracking-wide"
                         style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
                       >
-                        Amount received (₹)
+                        Amount received ({cur.symbol})
                       </label>
                       <div className="relative">
                         <span
                           className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
                           style={{ color: "var(--color-ink-mute)" }}
                         >
-                          ₹
+                          {cur.symbol}
                         </span>
-                        <Input
+                        <Input style={{ paddingLeft: cur.inputPad }}
                           id="credit_pay_amount"
                           name="amount"
                           type="number"
@@ -536,16 +534,16 @@ function CustomerDetailModal({
                         className="text-xs uppercase tracking-wide"
                         style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
                       >
-                        Discount (₹)
+                        Discount ({cur.symbol})
                       </label>
                       <div className="relative">
                         <span
                           className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
                           style={{ color: "var(--color-ink-mute)" }}
                         >
-                          ₹
+                          {cur.symbol}
                         </span>
-                        <Input
+                        <Input style={{ paddingLeft: cur.inputPad }}
                           id="credit_pay_discount"
                           name="discount"
                           type="number"
@@ -572,7 +570,7 @@ function CustomerDetailModal({
                       className="text-xs underline"
                       style={{ color: "var(--color-primary)" }}
                     >
-                      Settle in full ({money2(detail.balance)})
+                      Settle in full ({cur.money2(detail.balance)})
                     </button>
                   </div>
 
@@ -608,21 +606,21 @@ function CustomerDetailModal({
                     >
                       <div className="flex justify-between">
                         <span style={{ color: "var(--color-ink-mute)" }}>Amount received:</span>
-                        <span className="font-medium" style={{ color: "var(--color-ink)" }}>{money2(amountNum)}</span>
+                        <span className="font-medium" style={{ color: "var(--color-ink)" }}>{cur.money2(amountNum)}</span>
                       </div>
                       {discountNum > 0 && (
                         <div className="flex justify-between">
                           <span style={{ color: "var(--color-ink-mute)" }}>Discount given:</span>
-                          <span className="font-medium" style={{ color: "var(--color-primary)" }}>− {money2(discountNum)}</span>
+                          <span className="font-medium" style={{ color: "var(--color-primary)" }}>− {cur.money2(discountNum)}</span>
                         </div>
                       )}
                       <div className="flex justify-between border-t pt-1 font-medium" style={{ borderColor: "var(--color-hairline)" }}>
                         <span style={{ color: "var(--color-ink)" }}>Total credit cleared:</span>
-                        <span style={{ color: "var(--color-success)" }}>{money2(totalCleared)}</span>
+                        <span style={{ color: "var(--color-success)" }}>{cur.money2(totalCleared)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span style={{ color: "var(--color-ink-mute)" }}>Remaining credit balance:</span>
-                        <span>{money2(Math.max(0, balance - totalCleared))}</span>
+                        <span>{cur.money2(Math.max(0, balance - totalCleared))}</span>
                       </div>
                     </div>
                   )}
@@ -654,7 +652,7 @@ function CustomerDetailModal({
 
                   {totalCleared > balance + 0.005 && (
                     <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
-                      That clears more than the {money2(balance)} they owe.
+                      That clears more than the {cur.money2(balance)} they owe.
                     </p>
                   )}
 
@@ -674,7 +672,7 @@ function CustomerDetailModal({
                   )}
 
                   <Button type="submit" variant="primary" disabled={pending || !amountValid}>
-                    {pending ? "Recording…" : `Clear ${totalCleared > 0 ? money2(totalCleared) : "credit"}`}
+                    {pending ? "Recording…" : `Clear ${totalCleared > 0 ? cur.money2(totalCleared) : "credit"}`}
                   </Button>
                 </form>
               )}
@@ -730,7 +728,7 @@ function CustomerDetailModal({
                             {METHOD_LABEL[p.method] ?? p.method}
                             {p.discount_amount > 0 && (
                               <span className="ml-2 text-xs px-1.5 py-0.5 rounded font-normal" style={{ background: "rgba(99,102,241,0.1)", color: "var(--color-primary)" }}>
-                                Discount {money2(p.discount_amount)}
+                                Discount {cur.money2(p.discount_amount)}
                               </span>
                             )}
                           </p>
@@ -750,11 +748,11 @@ function CustomerDetailModal({
                         </div>
                         <div className="text-right shrink-0">
                           <p className="text-sm font-medium tabular-nums" style={{ color: "var(--color-success)" }}>
-                            {money2(p.amount)}
+                            {cur.money2(p.amount)}
                           </p>
                           {p.discount_amount > 0 && (
                             <p className="text-[10px] tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
-                              Cleared {money2(p.amount + p.discount_amount)}
+                              Cleared {cur.money2(p.amount + p.discount_amount)}
                             </p>
                           )}
                         </div>
@@ -795,6 +793,7 @@ export function CreditsView({
   canDiscount?: boolean;
   embedded?: boolean;
 }) {
+  const cur = useCurrency();
   const [customers, setCustomers] = useState(initialCredits);
   const [summary, setSummary] = useState(initialSummary);
   const [search, setSearch] = useState("");
@@ -849,7 +848,7 @@ export function CreditsView({
       <p className="text-sm mb-5" style={{ color: "var(--color-ink-mute)" }}>
         {summary.openCount === 0
           ? "No one owes anything — everything is settled."
-          : `${summary.openCount} customer${summary.openCount !== 1 ? "s" : ""} owe ${money(summary.outstanding)}`}
+          : `${summary.openCount} customer${summary.openCount !== 1 ? "s" : ""} owe ${cur.money(summary.outstanding)}`}
         {loading && <span className="ml-2">Updating…</span>}
       </p>
 
@@ -859,10 +858,10 @@ export function CreditsView({
       >
         <StatTile
           label="Outstanding"
-          value={money(summary.outstanding)}
+          value={cur.money(summary.outstanding)}
           tone={summary.outstanding > 0 ? "#dc2626" : undefined}
         />
-        <StatTile label="Collected today" value={money(summary.collected)} tone="#1a7a4a" />
+        <StatTile label="Collected today" value={cur.money(summary.collected)} tone="#1a7a4a" />
         <StatTile label="Customers owing" value={String(summary.pendingCount)} />
         <StatTile label="Settled" value={String(summary.fullyPaidCount)} />
       </div>

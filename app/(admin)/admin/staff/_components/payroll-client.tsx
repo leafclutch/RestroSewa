@@ -44,10 +44,7 @@ import {
   Loader2,
   Wallet,
 } from "lucide-react";
-
-const money = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
-const money2 = (n: number) =>
-  `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+import { useCurrency } from "@/components/currency-provider";
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
@@ -86,6 +83,7 @@ function SalaryForm({
   month: string;
   onDone: () => void;
 }) {
+  const cur = useCurrency();
   const [state, action, pending] = useActionState<ActionResult, FormData>(setStaffSalary, null);
 
   const wasPending = useRef(false);
@@ -110,7 +108,7 @@ function SalaryForm({
           className="text-xs uppercase tracking-wide"
           style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
         >
-          Monthly salary (₹)
+          Monthly salary ({cur.symbol})
         </label>
         <Input
           id="p_salary"
@@ -211,6 +209,7 @@ function PaymentForm({
   kind: PaymentKind;
   onDone: () => void;
 }) {
+  const cur = useCurrency();
   const [state, action, pending] = useActionState<ActionResult, FormData>(recordSalaryPayment, null);
   const [method, setMethod] = useState<PayMethod>("cash");
   // Controlled so the split has something to reconcile against — an
@@ -241,13 +240,13 @@ function PaymentForm({
         {[
           {
             label: `Payable · ${dayLabel(row.cycle_start)} → ${dayLabel(row.cycle_end)}`,
-            value: money2(row.payableAmount),
+            value: cur.money2(row.payableAmount),
           },
           ...(row.advancePaid > 0
-            ? [{ label: "Advance already paid", value: `− ${money2(row.advancePaid)}` }]
+            ? [{ label: "Advance already paid", value: `− ${cur.money2(row.advancePaid)}` }]
             : []),
           ...(row.salaryPaid > 0
-            ? [{ label: "Salary already paid", value: `− ${money2(row.salaryPaid)}` }]
+            ? [{ label: "Salary already paid", value: `− ${cur.money2(row.salaryPaid)}` }]
             : []),
         ].map((r, i) => (
           <div
@@ -270,7 +269,7 @@ function PaymentForm({
             className="text-base font-medium tabular-nums"
             style={{ color: "var(--color-primary)" }}
           >
-            {money2(row.remaining)}
+            {cur.money2(row.remaining)}
           </span>
         </div>
       </div>
@@ -281,7 +280,7 @@ function PaymentForm({
           className="text-xs uppercase tracking-wide"
           style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
         >
-          {kind === "advance" ? "Advance amount (₹)" : "Amount to pay (₹)"}
+          {kind === "advance" ? `Advance amount (${cur.symbol})` : `Amount to pay (${cur.symbol})`}
         </label>
         <Input
           id="pay_amount"
@@ -299,7 +298,7 @@ function PaymentForm({
           onChange={(e) => setAmount(e.target.value)}
         />
         <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-          At most {money2(row.remaining)} — the rest of this month&apos;s salary.
+          At most {cur.money2(row.remaining)} — the rest of this month&apos;s salary.
         </p>
       </div>
 
@@ -366,6 +365,7 @@ function PaymentForm({
 // payment history to render a list.
 
 function History({ staffId }: { staffId: string }) {
+  const cur = useCurrency();
   const [months, setMonths] = useState<PayrollHistoryMonth[] | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -411,14 +411,14 @@ function History({ staffId }: { staffId: string }) {
                 "No salary set"
               ) : (
                 <>
-                  Salary {money(m.monthly_salary)} · Paid{" "}
-                  <span style={{ color: "var(--color-ink)" }}>{money(m.totalPaid)}</span>
+                  Salary {cur.money(m.monthly_salary)} · Paid{" "}
+                  <span style={{ color: "var(--color-ink)" }}>{cur.money(m.totalPaid)}</span>
                   {m.remaining > 0.005 && (
                     <>
                       {" "}
                       · Remaining{" "}
                       <span style={{ color: PAYROLL_STATUS_COLOR.partial }}>
-                        {money(m.remaining)}
+                        {cur.money(m.remaining)}
                       </span>
                     </>
                   )}
@@ -457,7 +457,7 @@ function History({ staffId }: { staffId: string }) {
                     className="tabular-nums shrink-0"
                     style={{ color: p.kind === "advance" ? PAYROLL_STATUS_COLOR.partial : "var(--color-ink)" }}
                   >
-                    {money2(p.amount)}
+                    {cur.money2(p.amount)}
                   </span>
                 </div>
               ))}
@@ -492,6 +492,7 @@ function PayrollLine({
   onSetCycle: () => void;
   onChanged: () => void;
 }) {
+  const cur = useCurrency();
   const noSalary = row.monthly_salary == null;
   const settled = row.remaining <= 0.005;
 
@@ -549,7 +550,7 @@ function PayrollLine({
                   Salary
                 </span>
                 <span className="block text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>
-                  {money(row.monthly_salary ?? 0)}
+                  {cur.money(row.monthly_salary ?? 0)}
                 </span>
               </span>
               <span className="text-right hidden sm:block">
@@ -564,7 +565,7 @@ function PayrollLine({
                       : "var(--color-ink-mute)",
                   }}
                 >
-                  {row.advancePaid > 0 ? money(row.advancePaid) : "—"}
+                  {row.advancePaid > 0 ? cur.money(row.advancePaid) : "—"}
                 </span>
               </span>
               <span className="text-right">
@@ -579,7 +580,7 @@ function PayrollLine({
                       : "var(--color-ink-mute)",
                   }}
                 >
-                  {row.totalPaid > 0 ? money(row.totalPaid) : "—"}
+                  {row.totalPaid > 0 ? cur.money(row.totalPaid) : "—"}
                 </span>
               </span>
               <span className="text-right">
@@ -590,7 +591,7 @@ function PayrollLine({
                   className="block text-sm tabular-nums font-medium"
                   style={{ color: settled ? PAYROLL_STATUS_COLOR.paid : "var(--color-ink)" }}
                 >
-                  {money(row.remaining)}
+                  {cur.money(row.remaining)}
                 </span>
               </span>
             </>
@@ -665,6 +666,7 @@ export function PayrollClient({
   initial: PayrollCycleSheet;
   canManage: boolean;
 }) {
+  const cur = useCurrency();
   const [sheet, setSheet] = useState(initial);
   // The sheet is now keyed to a DAY, not a month: each staff member can be on
   // their own cycle, so there is no single month that describes everybody. This
@@ -793,7 +795,7 @@ export function PayrollClient({
           >
             <p className="text-xs mb-1" style={{ color: "var(--color-ink-mute)" }}>{c.label}</p>
             <p className="text-lg font-medium tabular-nums" style={{ color: c.tone }}>
-              {money(c.value)}
+              {cur.money(c.value)}
             </p>
           </div>
         ))}

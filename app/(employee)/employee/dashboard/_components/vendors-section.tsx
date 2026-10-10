@@ -3,8 +3,7 @@ import { Truck, Wallet, Users, ArrowRight } from "lucide-react";
 import { getVendorSummary } from "@/app/actions/vendors";
 import { accentOf } from "@/lib/section-colors";
 
-const rupee = (n: number) =>
-  "₹" + Number(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+import { getCurrentCurrency } from "@/lib/currency-server";
 
 /**
  * Vendors, as a summary on the staff dashboard.
@@ -15,12 +14,13 @@ const rupee = (n: number) =>
  * only mounted for staff who can see vendors, and the full page enforces `manage_vendors`.
  */
 export async function VendorsSection() {
+  const cur = await getCurrentCurrency();
   const s = await getVendorSummary();
   const accent = accentOf("vendors");
 
   const tiles: { label: string; value: string; tone: string; Icon: typeof Truck }[] = [
     { label: "Vendors", value: String(s.activeCount), tone: "var(--color-ink)", Icon: Users },
-    { label: "We owe", value: rupee(s.outstanding), tone: s.outstanding > 0 ? "var(--color-ruby)" : "var(--color-ink)", Icon: Wallet },
+    { label: "We owe", value: cur.money(s.outstanding), tone: s.outstanding > 0 ? "var(--color-ruby)" : "var(--color-ink)", Icon: Wallet },
     { label: "Owed vendors", value: String(s.owingCount), tone: "var(--color-warning)", Icon: Truck },
   ];
 

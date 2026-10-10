@@ -38,9 +38,7 @@ import { billMethodLabel } from "@/lib/billing/payment-method";
 import {
   BedDouble, ChevronLeft, Clock, Lock, Pencil, Plus, Printer, Trash2, User, UtensilsCrossed, Wallet, X, XCircle,
 } from "lucide-react";
-
-const rupee = (n: number) =>
-  "₹" + Number(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { useCurrency } from "@/components/currency-provider";
 
 // Pinned to the restaurant's zone — a check-in stamp on a bill has to say the
 // wall-clock time at the hotel, not the time in whatever region the server is in.
@@ -57,6 +55,7 @@ function Line({
   onRemove?: () => void;
   muted?: boolean;
 }) {
+  const cur = useCurrency();
   return (
     <div className="flex items-baseline gap-3 px-4 py-2.5">
       <div className="flex-1 min-w-0">
@@ -68,7 +67,7 @@ function Line({
         )}
       </div>
       <span className="text-sm tabular shrink-0" style={{ color: "var(--color-ink)" }}>
-        {rupee(amount)}
+        {cur.money2(amount)}
       </span>
       {onRemove && (
         <button
@@ -531,6 +530,7 @@ function CheckOutForm({
   discountMode: DiscountMode;
   setDiscountMode: (m: DiscountMode) => void;
 }) {
+  const cur = useCurrency();
   const [state, action, pending] = useActionState(checkOutRoom, null);
   const [method, setMethod] = useState<"cash" | "online" | "card" | "mixed" | "credit">("cash");
   // The admin's discount PIN authorizing that reduction. Held only long enough to submit.
@@ -748,7 +748,7 @@ function CheckOutForm({
               {/* The other unit, so the receptionist sees both ₹ and % whichever they typed. */}
               {disc > 0 && (
                 <p className="text-xs mt-1.5 text-right tabular" style={{ color: "var(--color-ink-mute)" }}>
-                  {discountMode === "percent" ? `= ₹${disc.toFixed(2)}` : `= ${formatPercent(disc, f.subtotal)}`}
+                  {discountMode === "percent" ? `= ${cur.prefix}${disc.toFixed(2)}` : `= ${formatPercent(disc, f.subtotal)}`}
                 </p>
               )}
             </div>
@@ -803,12 +803,12 @@ function CheckOutForm({
         >
           <div className="flex items-baseline justify-between">
             <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Bill total</span>
-            <span className="text-sm tabular" style={{ color: "var(--color-ink)" }}>{rupee(total)}</span>
+            <span className="text-sm tabular" style={{ color: "var(--color-ink)" }}>{cur.money2(total)}</span>
           </div>
           <div className="flex items-baseline justify-between">
             <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Advance received</span>
             <span className="text-sm tabular" style={{ color: "var(--color-ink)" }}>
-              - {rupee(applied)}
+              - {cur.money2(applied)}
             </span>
           </div>
         </div>
@@ -823,14 +823,14 @@ function CheckOutForm({
           >
             <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Refund due</span>
             <span className="text-xl tabular" style={{ color: "var(--color-ink)", fontWeight: 300 }}>
-              {rupee(refundDue)}
+              {cur.money2(refundDue)}
             </span>
           </div>
           {/* How the deposit actually arrived. A receptionist about to hand ₹1,500 back
               needs to know only ₹1,000 of it ever came in as cash. */}
           <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-            Held as {rupee(heldCash)} cash
-            {heldOnline > 0 ? ` + ${rupee(heldOnline)} online` : ""}
+            Held as {cur.money2(heldCash)} cash
+            {heldOnline > 0 ? ` + ${cur.money2(heldOnline)} online` : ""}
           </p>
 
           <div className="flex flex-wrap gap-1.5">
@@ -892,7 +892,7 @@ function CheckOutForm({
               ))}
               {!refundSplitOk && (
                 <p className="col-span-2 text-xs" style={{ color: "var(--color-ruby)" }}>
-                  Cash and Online must add up to {rupee(refundDue)}.
+                  Cash and Online must add up to {cur.money2(refundDue)}.
                 </p>
               )}
             </div>
@@ -909,7 +909,7 @@ function CheckOutForm({
           {applied > 0 ? "Balance payable" : "Payable now"}
         </span>
         <span className="text-xl tabular" style={{ color: "var(--color-primary)", fontWeight: 300 }}>
-          {rupee(balance)}
+          {cur.money2(balance)}
         </span>
       </div>
 
@@ -948,7 +948,7 @@ function CheckOutForm({
           ))}
           {!mixedOk && (
             <p className="col-span-2 text-xs" style={{ color: "var(--color-ruby)" }}>
-              Cash and Online must add up to {rupee(balance)}.
+              Cash and Online must add up to {cur.money2(balance)}.
             </p>
           )}
         </div>
@@ -966,7 +966,7 @@ function CheckOutForm({
                   {picked.name} · {picked.customer_code}
                 </p>
                 <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                  Already owes {rupee(picked.balance)}
+                  Already owes {cur.money2(picked.balance)}
                 </p>
               </div>
               <button type="button" onClick={() => { setPicked(null); setQuery(""); }} style={{ color: "var(--color-ink-mute)" }}>
@@ -997,7 +997,7 @@ function CheckOutForm({
                     >
                       <span className="text-sm block" style={{ color: "var(--color-ink)" }}>{r.name}</span>
                       <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                        {r.customer_code} · owes {rupee(r.balance)}
+                        {r.customer_code} · owes {cur.money2(r.balance)}
                       </span>
                     </button>
                   ))}
@@ -1078,7 +1078,7 @@ function CheckOutForm({
                     })}
                     {!downSplitValid && (
                       <p className="col-span-2 text-xs" style={{ color: "var(--color-ruby)" }}>
-                        Cash and Online together must equal {rupee(paidNum)}.
+                        Cash and Online together must equal {cur.money2(paidNum)}.
                       </p>
                     )}
                   </div>
@@ -1092,7 +1092,7 @@ function CheckOutForm({
             style={{ borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)", background: "var(--color-warning-bg)" }}
           >
             <span className="text-sm" style={{ color: "var(--color-warning)" }}>Left on credit</span>
-            <span className="text-sm tabular font-medium" style={{ color: "var(--color-warning)" }}>{rupee(owed)}</span>
+            <span className="text-sm tabular font-medium" style={{ color: "var(--color-warning)" }}>{cur.money2(owed)}</span>
           </div>
         </div>
       )}
@@ -1112,8 +1112,8 @@ function CheckOutForm({
         {pending
           ? "Checking out…"
           : refundDue > 0
-          ? `Check out · refund ${rupee(refundDue)}`
-          : `Check out · ${rupee(balance)}`}
+          ? `Check out · refund ${cur.money2(refundDue)}`
+          : `Check out · ${cur.money2(balance)}`}
       </Button>
     </form>
   );
@@ -1164,6 +1164,7 @@ export function FolioClient({
    */
   canCancelStay?: boolean;
 }) {
+  const cur = useCurrency();
   const [adding, setAdding] = useState(false);
   const [addingAdvance, setAddingAdvance] = useState(false);
   const [billOpen, setBillOpen] = useState(false);
@@ -1316,7 +1317,7 @@ export function FolioClient({
                 ? `Orders · ${pendingItems.length} pending`
                 : "Orders"
             }
-            total={rupee(f.foodTotal)}
+            total={cur.money2(f.foodTotal)}
           />
 
           {items.length === 0 ? (
@@ -1381,7 +1382,7 @@ export function FolioClient({
         className="rounded-2xl border overflow-hidden"
         style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
       >
-        <GroupHeader icon={<BedDouble size={13} />} title="Room" total={rupee(f.roomTotal)} />
+        <GroupHeader icon={<BedDouble size={13} />} title="Room" total={cur.money2(f.roomTotal)} />
         <Line label={f.room.label} detail={f.room.detail} amount={f.room.amount} />
         {/* When this bill next grows, and the courtesy that can push it later.
             Directly under the room charge because that is the number it explains. */}
@@ -1398,7 +1399,7 @@ export function FolioClient({
         <GroupHeader
           icon={<Plus size={13} />}
           title="Extras & services"
-          total={rupee(f.extrasTotal)}
+          total={cur.money2(f.extrasTotal)}
         />
         {f.extras.length === 0 ? (
           <p className="px-4 py-2.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>
@@ -1442,7 +1443,7 @@ export function FolioClient({
         <GroupHeader
           icon={<UtensilsCrossed size={13} />}
           title="Food & beverage"
-          total={rupee(f.foodTotal)}
+          total={cur.money2(f.foodTotal)}
         />
         {f.food.length === 0 ? (
           <p className="px-4 py-2.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>
@@ -1464,7 +1465,7 @@ export function FolioClient({
           >
             <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Grand total</span>
             <span className="text-lg tabular" style={{ color: "var(--color-ink)", fontWeight: 400 }}>
-              {rupee(f.grandTotal)}
+              {cur.money2(f.grandTotal)}
             </span>
           </div>
 
@@ -1475,8 +1476,8 @@ export function FolioClient({
               <Line
                 label="Advance received"
                 detail={[
-                  advanceCash > 0 ? `Cash ${rupee(advanceCash)}` : null,
-                  advanceOnline > 0 ? `Online ${rupee(advanceOnline)}` : null,
+                  advanceCash > 0 ? `Cash ${cur.money2(advanceCash)}` : null,
+                  advanceOnline > 0 ? `Online ${cur.money2(advanceOnline)}` : null,
                 ]
                   .filter(Boolean)
                   .join(" · ") || undefined}
@@ -1494,7 +1495,7 @@ export function FolioClient({
                   className="text-lg tabular"
                   style={{ color: "var(--color-primary)", fontWeight: 400 }}
                 >
-                  {rupee(f.refundDue > 0 ? f.refundDue : f.balanceDue)}
+                  {cur.money2(f.refundDue > 0 ? f.refundDue : f.balanceDue)}
                 </span>
               </div>
             </>
@@ -1512,7 +1513,7 @@ export function FolioClient({
           <GroupHeader
             icon={<Wallet size={13} />}
             title="Advance payments"
-            total={rupee(f.advancePaid)}
+            total={cur.money2(f.advancePaid)}
           />
           {view.advances.length === 0 ? (
             <p className="px-4 py-2.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>
@@ -1539,7 +1540,7 @@ export function FolioClient({
                   </p>
                 </div>
                 <span className="text-sm tabular" style={{ color: "var(--color-ink)" }}>
-                  {rupee(a.amount)}
+                  {cur.money2(a.amount)}
                 </span>
                 {open && canEditAdvance && (
                   <div className="flex items-center gap-2">

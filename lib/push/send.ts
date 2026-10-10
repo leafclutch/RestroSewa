@@ -11,6 +11,7 @@ import type { StaffViewer } from "@/lib/assignments";
 import { hasAnyPermission, PERMISSIONS } from "@/lib/permissions";
 import type { Permission } from "@/lib/permissions";
 import { buildPushPayload } from "./payload";
+import { getCurrencyFor } from "@/lib/currency-server";
 import type { PushPayload, NotifiableRow } from "./payload";
 import { categoryOf } from "./categories";
 import type { NotificationCategory } from "./categories";
@@ -310,7 +311,7 @@ export async function notifyStaff(
   }
 ): Promise<void> {
   try {
-    const payload = buildPushPayload(notif);
+    const payload = buildPushPayload(notif, (await getCurrencyFor(restaurantId)).money);
     if (!payload) return; // this type doesn't earn an interruption
 
     // Three ways to be a recipient, and an event uses exactly one of them:

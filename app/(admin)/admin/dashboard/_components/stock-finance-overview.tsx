@@ -10,8 +10,8 @@ import {
   TriangleAlert,
   PackageX,
 } from "lucide-react";
+import { getCurrentCurrency } from "@/lib/currency-server";
 
-const money = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 
 const METHOD_LABEL: Record<string, string> = {
   cash: "Cash",
@@ -70,9 +70,10 @@ function Card({
   );
 }
 
-export function StockFinanceOverview({ data }: { data: DashboardAnalytics }) {
+export async function StockFinanceOverview({ data }: { data: DashboardAnalytics }) {
   const { stats, canSeeMoney, recentPurchases, recentSales } = data;
   if (!stats) return null;
+  const { money } = await getCurrentCurrency();
 
   // How much of today's revenue we actually know the cost of. Anything above it
   // earned revenue with no cost, so "profit" is optimistic by that much — say so

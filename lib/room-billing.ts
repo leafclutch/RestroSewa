@@ -18,6 +18,7 @@ import {
 } from "./business-day.ts";
 // Zero imports of its own, so it's reachable from `node --test` too (see above).
 import { mergeLines } from "./billing/merge-lines.ts";
+import { currencyFormatter } from "./currency.ts";
 
 export type { RoomDayRule };
 
@@ -145,6 +146,8 @@ export type FolioConfig = {
    * so the check-in snapshot always beats the live setting.
    */
   roomDay?: RoomDayRule;
+  /** The restaurant's currency code, for the "2 × ₹2,500" detail lines. Absent = default. */
+  currency?: string;
   /**
    * Net advance already received against this stay — the sum of the stay's SIGNED
    * `room_advances` rows, so a refund has already been netted off by the caller.
@@ -195,7 +198,6 @@ export type RoomFolio = {
 };
 
 const money = (n: number) => Math.round(n * 100) / 100;
-const rupees = (n: number) => "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 
 /**
  * The whole bill, in one object.
@@ -219,6 +221,7 @@ export function buildFolio(
   config: FolioConfig = {},
   now: Date = new Date()
 ): RoomFolio {
+  const rupees = currencyFormatter(config.currency).moneyUpTo2;
   const open = !stay.check_out_at;
   const checkOut = stay.check_out_at ?? now.toISOString();
 

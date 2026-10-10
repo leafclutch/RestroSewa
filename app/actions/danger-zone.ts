@@ -3,6 +3,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { revalidatePath } from "next/cache";
+import { getRestaurantConfig } from "@/lib/restaurant-info";
 
 export type ActionResult = { error: string } | null;
 
@@ -14,6 +15,8 @@ const LOGO_BUCKET = "restaurant-logos";
 // reads. A generic "this cannot be undone" is one they click through.
 export type RestaurantSummary = {
   restaurant: { id: string; name: string; slug: string; logo_url: string | null };
+  /** The restaurant's display currency code, so the summary reads in its own money. */
+  currency: string;
   financial: {
     sessions: number;
     orders: number;
@@ -76,7 +79,8 @@ export async function getRestaurantSummary(
   });
 
   if (error || !data?.restaurant) return null;
-  return data as RestaurantSummary;
+  const { currency } = await getRestaurantConfig(restaurantId);
+  return { ...(data as Omit<RestaurantSummary, "currency">), currency };
 }
 
 // ─── 1. Reset finance & sales ────────────────────────────────────────────────

@@ -51,6 +51,7 @@ import {
   X,
   Loader2,
 } from "lucide-react";
+import { useCurrency } from "@/components/currency-provider";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -185,6 +186,7 @@ function AddItemForm({
   categoryId: string;
   onClose: () => void;
 }) {
+  const cur = useCurrency();
   const [state, action, pending] = useActionState<ActionResult, FormData>(createMenuItem, null);
   const [submitted, setSubmitted] = useState(false);
   const [foodType, setFoodType] = useState<FoodType>("veg");
@@ -207,9 +209,9 @@ function AddItemForm({
         <Input name="name" placeholder="Item name" required className="flex-1" />
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: "var(--color-ink-mute)" }}>
-            ₹
+            {cur.symbol}
           </span>
-          <Input name="price" type="number" min="0" step="0.01" placeholder="0" required className="pl-7 w-full sm:w-28" />
+          <Input style={{ paddingLeft: cur.inputPad }} name="price" type="number" min="0" step="0.01" placeholder="0" required className="pl-7 w-full sm:w-28" />
         </div>
       </div>
       <div className="flex flex-col gap-1.5">
@@ -247,6 +249,7 @@ function VariantLine({
   onChanged: () => void;
   onDelete: () => void;
 }) {
+  const cur = useCurrency();
   const [editing, setEditing] = useState(false);
   const [state, dispatch, pending] = useActionState<ActionResult, FormData>(updateVariant, null);
   const [submitted, setSubmitted] = useState(false);
@@ -277,8 +280,8 @@ function VariantLine({
         <input type="hidden" name="is_available" value={String(variant.is_available)} />
         <Input name="name" defaultValue={variant.name} required className="flex-1 h-8 text-sm" />
         <div className="relative w-full sm:w-24">
-          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--color-ink-mute)" }}>₹</span>
-          <Input
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--color-ink-mute)" }}>{cur.symbol}</span>
+          <Input style={{ paddingLeft: cur.inputPad }}
             name="price"
             type="number"
             min="0"
@@ -324,7 +327,7 @@ function VariantLine({
         {variant.name}
       </span>
       <span className="text-sm tabular-nums shrink-0" style={{ color: "var(--color-ink-mute)" }}>
-        ₹{Number(variant.price).toFixed(0)}
+        {cur.prefix}{Number(variant.price).toFixed(0)}
       </span>
 
       {/* Out-of-stock is a variant-level fact: the Large can run out while the
@@ -426,6 +429,7 @@ function ItemEditPanel({
   item: MenuItemRow;
   onClose: () => void;
 }) {
+  const cur = useCurrency();
   const router = useRouter();
   const [tab, setTab] = useState<EditTab>("basic");
   const [fields, setFields] = useState<FieldState>(() => itemToFields(item));
@@ -597,7 +601,7 @@ function ItemEditPanel({
             </div>
             <div className="flex gap-3">
               <div className="flex-1">
-                <label className={labelCls} style={labelStyle}>Price (₹) *</label>
+                <label className={labelCls} style={labelStyle}>Price ({cur.symbol}) *</label>
                 <input
                   type="number"
                   min="0"
@@ -870,8 +874,8 @@ function ItemEditPanel({
                 <input type="hidden" name="menu_item_id" value={item.id} />
                 <Input name="name" placeholder="e.g. Large" required className="flex-1" />
                 <div className="relative w-full sm:w-24">
-                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--color-ink-mute)" }}>₹</span>
-                  <Input name="price" type="number" min="0" step="0.01" placeholder="0" required className="pl-6 w-full" />
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--color-ink-mute)" }}>{cur.symbol}</span>
+                  <Input style={{ paddingLeft: cur.inputPad }} name="price" type="number" min="0" step="0.01" placeholder="0" required className="pl-6 w-full" />
                 </div>
                 <Button type="submit" variant="primary" disabled={createVarPending} className="text-xs px-3 h-9">
                   {createVarPending ? "…" : "Add"}
@@ -896,7 +900,7 @@ function ItemEditPanel({
             <>
               {addons.length === 0 && (
                 <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                  No add-ons yet. Add optional extras customers can choose (e.g. Extra Cheese +₹30).
+                  No add-ons yet. Add optional extras customers can choose (e.g. Extra Cheese +{cur.prefix}30).
                 </p>
               )}
               {addons.map(a => (
@@ -912,7 +916,7 @@ function ItemEditPanel({
                     )}
                   </span>
                   <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
-                    {Number(a.price) > 0 ? `+₹${Number(a.price).toFixed(0)}` : "Free"}
+                    {Number(a.price) > 0 ? `+${cur.prefix}${Number(a.price).toFixed(0)}` : "Free"}
                   </span>
                   <button
                     type="button"
@@ -937,8 +941,8 @@ function ItemEditPanel({
                 <input type="hidden" name="menu_item_id" value={item.id} />
                 <Input name="name" placeholder="e.g. Extra Cheese" required className="flex-1" />
                 <div className="relative w-24">
-                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--color-ink-mute)" }}>+₹</span>
-                  <Input name="price" type="number" min="0" step="0.01" placeholder="0" className="pl-8 w-full" />
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--color-ink-mute)" }}>+{cur.symbol}</span>
+                  <Input style={{ paddingLeft: `calc(${cur.inputPad} + 0.5rem)` }} name="price" type="number" min="0" step="0.01" placeholder="0" className="pl-8 w-full" />
                 </div>
                 <Button type="submit" variant="primary" disabled={createAddonPending} className="text-xs px-3 h-9">
                   {createAddonPending ? "…" : "Add"}
@@ -966,6 +970,7 @@ function ItemCard({
   isFirst?: boolean;
   isLast?: boolean;
 }) {
+  const cur = useCurrency();
   const [editing, setEditing] = useState(false);
   const [, startToggle] = useTransition();
   const [, startDelete] = useTransition();
@@ -1026,7 +1031,7 @@ function ItemCard({
         <StatusBadge status={item.availability_status} />
 
         <p className="text-sm tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
-          ₹{Number(item.price).toFixed(0)}
+          {cur.prefix}{Number(item.price).toFixed(0)}
         </p>
 
         <button

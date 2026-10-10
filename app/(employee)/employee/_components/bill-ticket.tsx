@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Printer, X } from "lucide-react";
 import { mergeLines, billLineKey } from "@/lib/billing/merge-lines";
 import { formatPercent } from "@/lib/billing/discount";
+import { useCurrency } from "@/components/currency-provider";
 
 // Shared, reusable receipt/ticket rendering used by both the live session screen
 // (KOT + pre-payment bill) and the Sales dashboard (reprint of a PAID bill).
@@ -57,8 +58,6 @@ export function ticketNumber(prefix: string, seedId: string, at: Date) {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${prefix}-${shortId(seedId)}-${p(at.getHours())}${p(at.getMinutes())}${p(at.getSeconds())}`;
 }
-
-const rupee = (n: number) => `₹${n.toFixed(2)}`;
 
 // ── print stylesheet (hides the app chrome, prints only the ticket) ────────────
 // Thermal-first: the page IS the printable strip of the roll (see PRINTABLE_MM below —
@@ -530,6 +529,7 @@ export function BillTicket({
   advanceCash?: number;
   advanceOnline?: number;
 }) {
+  const cur = useCurrency();
   const hasCustomer = !!(
     customer &&
     (customer.name || customer.phone || customer.address || customer.idNumber)
@@ -568,7 +568,7 @@ export function BillTicket({
       ].filter((p) => p.v > 0)
     : [];
   const tenderSplit =
-    parts.length > 1 ? parts.map((p) => `${p.label} ${rupee(p.v)}`).join(" · ") : null;
+    parts.length > 1 ? parts.map((p) => `${p.label} ${cur.money2(p.v)}`).join(" · ") : null;
 
   // Unlike the checkout tender above, nothing else on this receipt names how the
   // advance arrived — so this prints even for a single method, not just a mix.
@@ -577,7 +577,7 @@ export function BillTicket({
     { label: "Online", v: advanceOnline },
   ].filter((p) => p.v > 0);
   const advanceSplit =
-    advanceParts.length > 0 ? advanceParts.map((p) => `${p.label} ${rupee(p.v)}`).join(" · ") : null;
+    advanceParts.length > 0 ? advanceParts.map((p) => `${p.label} ${cur.money2(p.v)}`).join(" · ") : null;
 
   return (
     <>
@@ -617,7 +617,7 @@ export function BillTicket({
             label="Check-out"
             value={new Date(stay.checkOut).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
           />
-          <Line label="Nights" value={`${stay.nights} × ${rupee(stay.rate)}`} />
+          <Line label="Nights" value={`${stay.nights} × ${cur.money2(stay.rate)}`} />
         </>
       )}
       {payment?.cashier && <Line label="Cashier" value={payment.cashier} />}
@@ -689,22 +689,22 @@ export function BillTicket({
       )}
       <Divider />
 
-      <Line label="Subtotal" value={rupee(subtotal)} />
-      {tax > 0 && <Line label={`Tax (${taxPct}%)`} value={rupee(tax)} />}
-      {service > 0 && <Line label={`Service (${svcPct}%)`} value={rupee(service)} />}
+      <Line label="Subtotal" value={cur.money2(subtotal)} />
+      {tax > 0 && <Line label={`Tax (${taxPct}%)`} value={cur.money2(tax)} />}
+      {service > 0 && <Line label={`Service (${svcPct}%)`} value={cur.money2(service)} />}
       {discount > 0 && (
-        <Line label={`Discount (${formatPercent(discount, subtotal)})`} value={`- ${rupee(discount)}`} />
+        <Line label={`Discount (${formatPercent(discount, subtotal)})`} value={`- ${cur.money2(discount)}`} />
       )}
       <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
-      <Line label={discount > 0 ? "TOTAL PAYABLE" : "GRAND TOTAL"} value={rupee(grandTotal)} bold />
+      <Line label={discount > 0 ? "TOTAL PAYABLE" : "GRAND TOTAL"} value={cur.money2(grandTotal)} bold />
       {advancePaid > 0 && (
         <>
-          <Line label="Advance received" value={`- ${rupee(advancePaid)}`} />
+          <Line label="Advance received" value={`- ${cur.money2(advancePaid)}`} />
           {advanceSplit && <div style={{ fontSize: 11, textAlign: "right" }}>{advanceSplit}</div>}
           <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
           <Line
             label="BALANCE PAYABLE"
-            value={rupee(balanceDue ?? Math.max(0, grandTotal - advancePaid))}
+            value={cur.money2(balanceDue ?? Math.max(0, grandTotal - advancePaid))}
             bold
           />
         </>
@@ -720,10 +720,10 @@ export function BillTicket({
             value={credit.tendered > 0 ? "PARTIALLY PAID" : "ON CREDIT"}
             bold
           />
-          {credit.tendered > 0 && <Line label="Paid at billing" value={rupee(credit.tendered)} />}
+          {credit.tendered > 0 && <Line label="Paid at billing" value={cur.money2(credit.tendered)} />}
           {tenderSplit && <div style={{ fontSize: 11, textAlign: "right" }}>{tenderSplit}</div>}
           <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
-          <Line label="BALANCE DUE" value={rupee(credit.balance)} bold />
+          <Line label="BALANCE DUE" value={cur.money2(credit.balance)} bold />
           {credit.customer_phone && (
             <div style={{ fontSize: 11, marginTop: 4 }}>Ph: {credit.customer_phone}</div>
           )}
@@ -788,6 +788,7 @@ export function CreditReceiptTicket({
   history: CreditReceiptEntry[];
   notes: string | null;
 }) {
+  const cur = useCurrency();
   const settled = balance <= 0;
 
   return (
@@ -810,10 +811,10 @@ export function CreditReceiptTicket({
       <Line label="Opened" value={openedAt.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} />
       <Divider />
 
-      <Line label="Original bill" value={rupee(billAmount)} />
-      <Line label="Total paid" value={rupee(paidAmount)} />
+      <Line label="Original bill" value={cur.money2(billAmount)} />
+      <Line label="Total paid" value={cur.money2(paidAmount)} />
       <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
-      <Line label={settled ? "BALANCE" : "BALANCE DUE"} value={rupee(balance)} bold />
+      <Line label={settled ? "BALANCE" : "BALANCE DUE"} value={cur.money2(balance)} bold />
       <Divider />
 
       <div style={{ fontWeight: 700, fontSize: 11, marginBottom: 4 }}>Payment history</div>
@@ -829,7 +830,7 @@ export function CreditReceiptTicket({
                 {h.method}
                 {h.at_billing ? " (at billing)" : ""}
               </span>
-              <span>{rupee(h.amount)}</span>
+              <span>{cur.money2(h.amount)}</span>
             </div>
             {/* Black for the same reason as PoweredBy: grey dithers to an unreadable
                 smudge on a 1-bit thermal head. Smaller type is the only "quieter". */}

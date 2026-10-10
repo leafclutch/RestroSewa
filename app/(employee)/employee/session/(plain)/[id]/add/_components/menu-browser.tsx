@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { FoodMark } from "@/components/ui/food-mark";
 import { assignCategoryHues, styleOf } from "@/lib/category-colors";
 import { Minus, Plus, Search, ShoppingBag, SquarePen, X } from "lucide-react";
+import { useCurrency } from "@/components/currency-provider";
 
 // A staff-typed off-menu line held in the cart before submit. `price` is a string while
 // being typed; it's parsed to a number only when the order is placed. `workstation_id` null
@@ -79,6 +80,7 @@ export function MenuBrowser({
    */
   returnHref?: string;
 }) {
+  const cur = useCurrency();
   const router = useRouter();
   // Opens on "All", like the customer site — the whole menu, grouped by category,
   // before narrowing it down.
@@ -307,7 +309,7 @@ export function MenuBrowser({
           </p>
         </div>
         <p className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>
-          {hasVariants && <span className="text-xs">from </span>}₹{from.toFixed(0)}
+          {hasVariants && <span className="text-xs">from </span>}{cur.prefix}{from.toFixed(0)}
         </p>
 
         <div className="flex items-center gap-2 mt-auto">
@@ -546,7 +548,7 @@ export function MenuBrowser({
                       {v.name}
                     </span>
                     <span className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>
-                      ₹{Number(v.price).toFixed(0)}
+                      {cur.prefix}{Number(v.price).toFixed(0)}
                     </span>
                     {inCart === 0 ? (
                       <button
@@ -625,7 +627,7 @@ export function MenuBrowser({
 
             <div className="flex gap-2">
               <label className="flex flex-col gap-1 flex-1">
-                <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Price (₹)</span>
+                <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Price ({cur.symbol})</span>
                 <Input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0" value={cPrice} onChange={(e) => setCPrice(e.target.value)} />
               </label>
               <label className="flex flex-col gap-1 w-28">
@@ -701,7 +703,7 @@ export function MenuBrowser({
                     {qty} × {labelOf(itemId, variantId)}
                   </span>
                   <span className="tabular" style={{ color: "var(--color-ink-mute)" }}>
-                    ₹{(priceOf(itemId, variantId) * qty).toFixed(0)}
+                    {cur.prefix}{(priceOf(itemId, variantId) * qty).toFixed(0)}
                   </span>
                   <button
                     type="button"
@@ -731,7 +733,7 @@ export function MenuBrowser({
                   )}
                 </span>
                 <span className="tabular" style={{ color: "var(--color-ink-mute)" }}>
-                  ₹{((parseFloat(l.price) || 0) * l.quantity).toFixed(0)}
+                  {cur.prefix}{((parseFloat(l.price) || 0) * l.quantity).toFixed(0)}
                 </span>
                 <button
                   type="button"
@@ -752,7 +754,7 @@ export function MenuBrowser({
                 {totalCount} item{totalCount !== 1 ? "s" : ""}
               </span>
               <span className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>
-                · ₹{grandTotal.toFixed(0)}
+                · {cur.prefix}{grandTotal.toFixed(0)}
               </span>
             </div>
             {state?.error && (

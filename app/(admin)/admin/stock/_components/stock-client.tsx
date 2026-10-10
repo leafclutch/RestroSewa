@@ -76,13 +76,11 @@ import {
 import { PeriodFilter } from "@/components/ui/period-filter";
 import { SearchSelect } from "@/components/ui/search-select";
 import { HISTORY_PERIOD_LABEL, type HistoryPeriod } from "@/lib/history-period";
+import { useCurrency } from "@/components/currency-provider";
 
 
 const PAGE_SIZE = 10;
 const HISTORY_PAGE = 12;
-
-const money = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
-const money2 = (n: number) => `₹${n.toFixed(2)}`;
 
 // How the purchase behind a stock movement was settled.
 const PURCHASE_METHOD_LABEL: Record<string, string> = {
@@ -786,6 +784,7 @@ function ProductLinks({
 const STOCK_HISTORY_PERIODS: HistoryPeriod[] = ["week", "month", "year", "all"];
 
 function HistoryList({ productId, unit }: { productId: string; unit: string }) {
+  const cur = useCurrency();
   const [rows, setRows] = useState<StockMovement[] | null>(null);
   const [showAll, setShowAll] = useState(false);
   // Opens on the week: a busy product has thousands of movements over its life,
@@ -875,7 +874,7 @@ function HistoryList({ productId, unit }: { productId: string; unit: string }) {
                       </p>
                     )}
                     <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                      {m.amount != null && <>{money2(m.amount)} · </>}
+                      {m.amount != null && <>{cur.money2(m.amount)} · </>}
                       {m.method && <>Paid via {PURCHASE_METHOD_LABEL[m.method] ?? m.method} · </>}
                       {m.ref}
                     </p>
@@ -1218,6 +1217,7 @@ export function StockClient({
   today: string;
   canManage: boolean;
 }) {
+  const cur = useCurrency();
   const [rows, setRows] = useState(initialStock);
   const [summary, setSummary] = useState(initialSummary);
   const [search, setSearch] = useState("");
@@ -1392,7 +1392,7 @@ export function StockClient({
 
       {/* Stat cards */}
       <div className="grid gap-3 my-5" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
-        <StatCard label="Inventory value" value={money(summary.inventoryValue)} />
+        <StatCard label="Inventory value" value={cur.money(summary.inventoryValue)} />
         <StatCard label="Products" value={String(summary.productCount)} />
         <StatCard label="Low stock" value={String(summary.lowCount)} tone={summary.lowCount > 0 ? "#f97316" : undefined} />
         <StatCard label="Out of stock" value={String(summary.outCount)} tone={summary.outCount > 0 ? "#dc2626" : undefined} />

@@ -6,6 +6,8 @@ import type { SecurityAuditRow } from "@/lib/security/authorize";
 import { getSecurityAuditLog } from "@/app/actions/security";
 import { PeriodFilter } from "@/components/ui/period-filter";
 import type { HistoryPeriod } from "@/lib/history-period";
+import { useCurrency } from "@/components/currency-provider";
+import type { CurrencyFormatter } from "@/lib/currency";
 
 // Read-only "Security activity" log for the owner: every attempt to edit a money record —
 // success, a wrong-PIN failure, or a PIN-was-right-but-refused block. The PIN itself never
@@ -31,39 +33,37 @@ function fmtTime(iso: string): string {
   });
 }
 
-const money = (n: unknown) =>
-  n == null || Number.isNaN(Number(n)) ? "—" : `Rs ${Number(n).toLocaleString()}`;
-
 // A compact one-line "what changed" for a successful edit. Best-effort: unknown shapes
 // simply render nothing rather than breaking the row.
-function changeSummary(row: SecurityAuditRow): string | null {
+function changeSummary(row: SecurityAuditRow, cur: CurrencyFormatter): string | null {
   if (row.outcome !== "success" || !row.detail?.after) return null;
   // Every operation except the FIRST opening-balance set always has a `before` —
   // there is no prior balance to compare against the very first time one is seeded.
   if (!row.detail?.before && row.operation !== "set_opening_balance" && row.operation !== "add_credit_charge") return null;
   const b = row.detail.before, a = row.detail.after;
   if (row.operation === "edit_payment_tender") {
-    return `${b.payment_method} → ${a.payment_method}  ·  cash ${money(b.cash_amount)}→${money(a.cash_amount)}, online ${money(b.online_amount)}→${money(a.online_amount)}, card ${money(b.card_amount)}→${money(a.card_amount)}`;
+    return `${b.payment_method} → ${a.payment_method}  ·  cash ${cur.money(b.cash_amount)}→${cur.money(a.cash_amount)}, online ${cur.money(b.online_amount)}→${cur.money(a.online_amount)}, card ${cur.money(b.card_amount)}→${cur.money(a.card_amount)}`;
   }
   if (row.operation === "edit_purchase") {
     const parts: string[] = [];
-    if (String(b.total_amount) !== String(a.total_amount)) parts.push(`total ${money(b.total_amount)}→${money(a.total_amount)}`);
+    if (String(b.total_amount) !== String(a.total_amount)) parts.push(`total ${cur.money(b.total_amount)}→${cur.money(a.total_amount)}`);
     if (b.payment_method !== a.payment_method) parts.push(`${b.payment_method}→${a.payment_method}`);
     if (String(b.vendor_id) !== String(a.vendor_id)) parts.push("vendor changed");
     parts.push("items updated");
     return parts.join("  ·  ");
   }
   if (row.operation === "add_credit_charge") {
-    return `${a.credit_number ?? "charge"}  ·  ${money(a.amount)}  ·  ${a.description ?? ""}`;
+    return `${a.credit_number ?? "charge"}  ·  ${cur.money(a.amount)}  ·  ${a.description ?? ""}`;
   }
   if (row.operation === "set_opening_balance") {
-    const beforeLabel = b ? `cash ${money(b.cash)}, online ${money(b.online)} (from ${b.effective_from ?? "—"})` : "not set";
-    return `${beforeLabel} → cash ${money(a.cash)}, online ${money(a.online)} (from ${a.effective_from})`;
+    const beforeLabel = b ? `cash ${cur.money(b.cash)}, online ${cur.money(b.online)} (from ${b.effective_from ?? "—"})` : "not set";
+    return `${beforeLabel} → cash ${cur.money(a.cash)}, online ${cur.money(a.online)} (from ${a.effective_from})`;
   }
   return null;
 }
 
 export function SecurityActivityClient({ rows: initialRows }: { rows: SecurityAuditRow[] }) {
+  const cur = useCurrency();
   const [period, setPeriod] = useState<HistoryPeriod>("today");
   const [date, setDate] = useState("");
   const [rows, setRows] = useState(initialRows);
@@ -102,7 +102,7 @@ export function SecurityActivityClient({ rows: initialRows }: { rows: SecurityAu
         <ul className="flex flex-col divide-y" style={{ borderColor: "var(--color-hairline)" }}>
           {rows.map((r) => {
             const o = OUTCOME[r.outcome] ?? OUTCOME.blocked;
-            const change = changeSummary(r);
+            const change = changeSummary(r, cur);
             return (
               <li key={r.id} className="py-3 flex items-start gap-3">
                 <span

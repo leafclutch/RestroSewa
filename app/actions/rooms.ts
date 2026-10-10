@@ -7,6 +7,8 @@ import { hasPermission, NAV_ACCESS, PERMISSIONS, ROOM_ACCESS } from "@/lib/permi
 import { buildFolio, CHARGE_TYPES } from "@/lib/room-billing";
 import type { RoomChargeType, RoomFolio } from "@/lib/room-billing";
 import { resolveSplit } from "@/lib/payment-split";
+import { getCurrencyFor } from "@/lib/currency-server";
+import { normalizeCurrency } from "@/lib/currency";
 import { normalizeShiftHours, resolveRoomDayRule } from "@/lib/business-day";
 import { verifySecurityPin, logSecurityEvent } from "@/lib/security/authorize";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
@@ -732,6 +734,7 @@ async function loadFolioInputs(stayId: string) {
       // reaches the folio view, the checkout and the printed bill by riding
       // along with tax and service rather than being threaded separately.
       roomDay,
+      currency: normalizeCurrency(settings.currency),
     },
   };
 }
@@ -1164,7 +1167,7 @@ export async function checkOutRoom(
     return {
       error:
         refundDue > 0
-          ? `₹${refundDue.toFixed(2)} of unused advance must be refunded to the guest.`
+          ? `${(await getCurrencyFor(ru.restaurant_id)).money2(refundDue)} of unused advance must be refunded to the guest.`
           : "There is no unused advance to refund.",
     };
   }
@@ -1194,7 +1197,7 @@ export async function checkOutRoom(
       return { error: "Nothing would be left on credit. Settle it in full instead." };
     }
   } else if (Math.abs(paid - balance) > 0.01) {
-    return { error: `The amount tendered must equal the balance of ₹${balance.toFixed(2)}.` };
+    return { error: `The amount tendered must equal the balance of ${(await getCurrencyFor(ru.restaurant_id)).money2(balance)}.` };
   }
 
   const { error } = await svc.rpc("check_out_room", {

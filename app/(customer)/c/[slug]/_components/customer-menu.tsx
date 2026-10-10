@@ -78,6 +78,7 @@ import {
   Hourglass,
   XCircle,
 } from "lucide-react";
+import { useCurrency } from "@/components/currency-provider";
 
 // ─── Config ─────────────────────────────────────────────────────────────────────
 
@@ -118,8 +119,6 @@ const CATEGORY_ICONS: { test: RegExp; Icon: React.ComponentType<{ size?: number 
 function iconForCategory(name: string): React.ComponentType<{ size?: number }> {
   return CATEGORY_ICONS.find((c) => c.test.test(name))?.Icon ?? UtensilsCrossed;
 }
-
-const rupee = (n: number) => `₹${n.toFixed(0)}`;
 
 function isSpicy(item: MenuItemRow): boolean {
   return item.badges?.some((b) => /spic|hot|chilli|chili/i.test(b)) ?? false;
@@ -563,6 +562,7 @@ function OrdersSheet({
   onRequestBill: () => void;
   billState: NotificationStatus;
 }) {
+  const cur = useCurrency();
   const grandTotal = orders.reduce((s, o) => s + o.total, 0);
   return (
     <Sheet open={open} onClose={onClose} maxWidth={520} label="Your orders">
@@ -589,7 +589,7 @@ function OrdersSheet({
                     <p className="text-sm font-semibold" style={{ color: meta.color }}>{meta.label}</p>
                     <p className="text-xs flex items-center gap-1" style={{ color: "var(--color-ink-mute)" }}><Clock size={10} /> {time}</p>
                   </div>
-                  <span className="text-sm font-medium tabular" style={{ color: "var(--color-ink)" }}>{rupee(o.total)}</span>
+                  <span className="text-sm font-medium tabular" style={{ color: "var(--color-ink)" }}>{cur.money(o.total)}</span>
                 </div>
                 <div className="px-4 pt-3 pb-3">
                   {o.items.map((it) => (
@@ -612,7 +612,7 @@ function OrdersSheet({
         <div className="px-4 py-4 border-t flex items-center gap-3" style={{ borderColor: "var(--color-hairline)" }}>
           <div className="flex-1">
             <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Total so far</p>
-            <p className="text-lg font-semibold tabular" style={{ color: "var(--color-ink)" }}>{rupee(grandTotal)}</p>
+            <p className="text-lg font-semibold tabular" style={{ color: "var(--color-ink)" }}>{cur.money(grandTotal)}</p>
           </div>
           <button
             type="button"
@@ -876,6 +876,7 @@ function VariantSheet({
   onRemove: (key: LineKey) => void;
   onClose: () => void;
 }) {
+  const cur = useCurrency();
   if (!item) return null;
 
   const chosen = variants.reduce(
@@ -914,7 +915,7 @@ function VariantSheet({
                   {v.name}
                 </p>
                 <p className="text-xs tabular" style={{ color: "var(--color-ink-mute)" }}>
-                  {rupee(Number(v.price))}
+                  {cur.money(Number(v.price))}
                 </p>
               </div>
 
@@ -991,6 +992,7 @@ function ItemCard({
   onAdd: () => void;
   onRemove: () => void;
 }) {
+  const cur = useCurrency();
   const soldOut = item.availability_status !== "available" || !item.is_available;
   const spicy = isSpicy(item);
   const orderable = canOrder && !soldOut;
@@ -1023,7 +1025,7 @@ function ItemCard({
               from
             </span>
           )}
-          {rupee(displayPrice)}
+          {cur.money(displayPrice)}
         </span>
       </div>
       {item.description && (
@@ -1122,6 +1124,7 @@ function CartDrawer({
   onPlace: () => void;
   placing: boolean;
 }) {
+  const cur = useCurrency();
   return (
     <Sheet open={open} onClose={onClose} maxWidth={480} label="Your cart">
       <SheetHeader
@@ -1158,7 +1161,7 @@ function CartDrawer({
                         {variant.name}
                       </span>
                     )}
-                    {rupee(unit)} each
+                    {cur.money(unit)} each
                   </p>
                 </div>
                 <div className="flex items-center gap-1 rounded-xl p-0.5" style={{ background: "var(--color-canvas)" }}>
@@ -1170,7 +1173,7 @@ function CartDrawer({
                     <Plus size={15} />
                   </button>
                 </div>
-                <p className="w-14 text-right text-sm font-semibold tabular" style={{ color: "var(--color-ink)" }}>{rupee(unit * qty)}</p>
+                <p className="w-14 text-right text-sm font-semibold tabular" style={{ color: "var(--color-ink)" }}>{cur.money(unit * qty)}</p>
               </div>
             );
           })
@@ -1180,7 +1183,7 @@ function CartDrawer({
         <div className="px-4 py-4 border-t flex flex-col gap-3" style={{ borderColor: "var(--color-hairline)" }}>
           <div className="flex items-center justify-between text-sm">
             <span style={{ color: "var(--color-ink-mute)" }}>Subtotal</span>
-            <span className="tabular font-semibold" style={{ color: "var(--color-ink)" }}>{rupee(total)}</span>
+            <span className="tabular font-semibold" style={{ color: "var(--color-ink)" }}>{cur.money(total)}</span>
           </div>
           <button
             type="button"
@@ -1189,7 +1192,7 @@ function CartDrawer({
             className="w-full py-3.5 rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-white rs-press"
             style={{ background: "linear-gradient(135deg,var(--color-primary),var(--color-primary-deep))" }}
           >
-            {placing ? <><Loader2 size={17} className="animate-spin" /> Placing order…</> : <>Place order · {rupee(total)}</>}
+            {placing ? <><Loader2 size={17} className="animate-spin" /> Placing order…</> : <>Place order · {cur.money(total)}</>}
           </button>
         </div>
       )}
@@ -1354,6 +1357,7 @@ export function CustomerMenu({
   initialNotifState: CustomerNotifState;
   initialActivationStatus: ActivationStatus;
 }) {
+  const cur = useCurrency();
   const isRoom = !!roomId;
   const contextId = tableId ?? roomId ?? null;
   const noPin = qrMode === "ordering_no_pin";
@@ -1770,7 +1774,7 @@ export function CustomerMenu({
     for (const o of orders) {
       const time = new Date(o.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
       const meta = ORDER_STATUS_META[o.status];
-      const body = `${o.items.reduce((n, i) => n + i.quantity, 0)} item${o.items.length !== 1 ? "s" : ""} · ${rupee(o.total)}`;
+      const body = `${o.items.reduce((n, i) => n + i.quantity, 0)} item${o.items.length !== 1 ? "s" : ""} · ${cur.money(o.total)}`;
       list.push({
         id: `order-${o.id}`,
         title: o.status === "served" ? "Order served" : "Order in the kitchen",
@@ -1938,7 +1942,7 @@ export function CustomerMenu({
               className="hidden lg:flex items-center gap-2 h-10 px-4 rounded-full text-sm font-medium text-white rs-press"
               style={{ background: "linear-gradient(135deg,var(--color-primary),var(--color-primary-deep))" }}
             >
-              <ShoppingBag size={16} /> {cartCount > 0 ? `${cartCount} · ${rupee(cartTotal)}` : "Cart"}
+              <ShoppingBag size={16} /> {cartCount > 0 ? `${cartCount} · ${cur.money(cartTotal)}` : "Cart"}
             </button>
           )}
         </div>
@@ -2200,7 +2204,7 @@ export function CustomerMenu({
             </span>
             <span className="flex-1 text-left">
               <span className="block text-xs" style={{ color: "rgba(255,255,255,0.8)" }}>{cartCount} item{cartCount !== 1 ? "s" : ""} in cart</span>
-              <span className="block text-sm font-semibold tabular">{rupee(cartTotal)}</span>
+              <span className="block text-sm font-semibold tabular">{cur.money(cartTotal)}</span>
             </span>
             <span className="flex items-center gap-1 text-sm font-medium">View cart <ChevronRight size={16} /></span>
           </button>
