@@ -11,6 +11,7 @@ import { getWorkstations } from "@/app/actions/workstations";
 import { SalesView } from "../sales/_components/sales-view";
 import { CreditsView } from "../credits/_components/credits-view";
 import { MenuClient } from "@/app/(admin)/admin/menu/_components/menu-client";
+import { getMenuImages } from "@/app/actions/menu-images";
 import { TablesSection } from "./_components/tables-section";
 import { WalkInsSection } from "./_components/walkins-section";
 import { RoomsSection } from "./_components/rooms-section";
@@ -83,10 +84,11 @@ async function MenuBody({ ru }: { ru: RestaurantUserContext }) {
   // Was: fetch the categories, then one query PER CATEGORY for its items — 25
   // categories meant 25 round-trips to build a list that was flattened back into
   // one array anyway. Now it is one query, and it runs alongside the others.
-  const [categories, workstations, items] = await Promise.all([
+  const [categories, workstations, items, images] = await Promise.all([
     getMenuCategories(ru.restaurant_id),
     getWorkstations(ru.restaurant_id),
     getAllMenuItems(ru.restaurant_id),
+    getMenuImages(ru.restaurant_id),
   ]);
   return (
     <MenuClient
@@ -94,6 +96,7 @@ async function MenuBody({ ru }: { ru: RestaurantUserContext }) {
       items={items}
       workstations={workstations}
       restaurantId={ru.restaurant_id}
+      images={images}
     />
   );
 }

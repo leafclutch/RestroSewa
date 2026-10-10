@@ -50,8 +50,11 @@ import {
   Check,
   X,
   Loader2,
+  TriangleAlert,
 } from "lucide-react";
 import { useCurrency } from "@/components/currency-provider";
+import { MenuImagesPanel } from "./menu-images-panel";
+import type { MenuImage } from "@/app/actions/menu-images";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -219,6 +222,7 @@ function AddItemForm({
         <FoodTypePicker value={foodType} onChange={setFoodType} />
       </div>
       <Input name="description" placeholder="Description (optional)" />
+      <Input name="allergy_info" maxLength={300} placeholder="Allergy info (optional) — e.g. Contains peanuts, dairy, gluten" />
       {state?.error && (
         <p className="text-xs" style={{ color: "var(--color-ruby)" }}>{state.error}</p>
       )}
@@ -381,6 +385,7 @@ type EditTab = "basic" | "availability" | "schedule" | "variants" | "addons";
 type FieldState = {
   name: string;
   description: string;
+  allergy_info: string;
   price: string;
   food_type: string;
   availability_status: string;
@@ -401,6 +406,7 @@ function itemToFields(item: MenuItemRow): FieldState {
   return {
     name: item.name,
     description: item.description ?? "",
+    allergy_info: item.allergy_info ?? "",
     price: String(item.price),
     food_type: item.food_type ?? "veg",
     availability_status: item.availability_status ?? "available",
@@ -561,6 +567,7 @@ function ItemEditPanel({
         {/* All fields as hidden inputs so they submit from any tab */}
         <input type="hidden" name="name" value={fields.name} />
         <input type="hidden" name="description" value={fields.description} />
+        <input type="hidden" name="allergy_info" value={fields.allergy_info} />
         <input type="hidden" name="price" value={fields.price} />
         <input type="hidden" name="food_type" value={fields.food_type} />
         <input type="hidden" name="availability_status" value={fields.availability_status} />
@@ -598,6 +605,22 @@ function ItemEditPanel({
                 value={fields.description}
                 onChange={e => setField("description", e.target.value)}
               />
+            </div>
+            <div>
+              <label className={labelCls} style={labelStyle}>Allergy info</label>
+              <textarea
+                rows={2}
+                className="w-full rounded border px-2.5 py-1.5 text-sm resize-none"
+                style={{ ...inputStyle, lineHeight: 1.5 }}
+                placeholder="e.g. Contains peanuts, dairy, gluten"
+                maxLength={300}
+                value={fields.allergy_info}
+                onChange={e => setField("allergy_info", e.target.value)}
+              />
+              <p className="text-xs mt-1" style={{ color: "var(--color-ink-mute)" }}>
+                Shown to customers on the QR menu. Before ordering this item they must confirm
+                they are not allergic. Leave blank if there is nothing to warn about.
+              </p>
             </div>
             <div className="flex gap-3">
               <div className="flex-1">
@@ -1070,6 +1093,17 @@ function ItemCard({
         </button>
       </div>
 
+      {/* The same note customers see, so whoever manages the menu can check it at a glance. */}
+      {item.allergy_info && (
+        <p
+          className="-mt-1 mb-1 ml-9 mr-3 text-xs flex items-start gap-1.5"
+          style={{ color: "var(--color-ruby)", opacity: isAvailable ? 1 : 0.6 }}
+        >
+          <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+          <span><span className="font-medium">Allergy:</span> {item.allergy_info}</span>
+        </p>
+      )}
+
       {editing && (
         <ItemEditPanel
           item={item}
@@ -1352,11 +1386,14 @@ export function MenuClient({
   items,
   workstations,
   restaurantId,
+  images,
 }: {
   categories: CategoryRow[];
   items: MenuItemRow[];
   workstations: WorkstationRow[];
   restaurantId: string;
+  /** Menu card photos — shown to guests from the QR menu's right-edge button. */
+  images: MenuImage[];
 }) {
   const [addingCategory, setAddingCategory] = useState(false);
 
@@ -1369,6 +1406,7 @@ export function MenuClient({
     // of its card while every other section (Tables, Rooms, Sales) filled the width. Full width
     // now; the rows below manage their own layout at every size.
     <div className="flex flex-col gap-4 w-full">
+      <MenuImagesPanel images={images} />
       <div className="flex items-center justify-between">
         <p className="text-base" style={{ color: "var(--color-ink-mute)" }}>
           {categories.length} categories · {items.length} items

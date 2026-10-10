@@ -77,8 +77,12 @@ import {
   MapPin,
   Hourglass,
   XCircle,
+  TriangleAlert,
 } from "lucide-react";
 import { useCurrency } from "@/components/currency-provider";
+import { allergyFlagsForCart, type AllergyFlag } from "@/lib/allergy";
+import { MenuPhotos } from "./menu-photos";
+import type { MenuImage } from "@/app/actions/menu-images";
 
 // ─── Config ─────────────────────────────────────────────────────────────────────
 
@@ -750,6 +754,71 @@ function ActionDialog({
   );
 }
 
+// ─── Allergy check ───────────────────────────────────────────────────────────────
+
+/**
+ * Asked before an order containing any item with allergy info is sent.
+ *
+ * "Yes, I'm allergic" is the safe answer, so it is the one that does NOT place the order —
+ * the guest goes back to the cart to remove the item or ask staff. Only an explicit "No"
+ * sends it to the kitchen.
+ */
+function AllergyDialog({
+  items,
+  onAllergic,
+  onNotAllergic,
+}: {
+  items: AllergyFlag[];
+  onAllergic: () => void;
+  onNotAllergic: () => void;
+}) {
+  return (
+    <Sheet open onClose={onAllergic} maxWidth={420} label="Allergy check">
+      <div className="px-6 pt-3 pb-7 flex flex-col gap-4">
+        <div className="flex flex-col items-center text-center gap-3">
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: "var(--c-danger-bg)", color: "var(--c-danger)" }}>
+            <TriangleAlert size={30} />
+          </div>
+          <div>
+            <p className="text-lg" style={{ color: "var(--color-ink)", fontWeight: 500 }}>Allergy alert</p>
+            <p className="text-sm mt-1" style={{ color: "var(--color-ink-mute)" }}>
+              Your order has items with allergy information. Are you allergic to any of these?
+            </p>
+          </div>
+        </div>
+
+        <ul className="flex flex-col gap-2 overflow-y-auto" style={{ maxHeight: "40vh" }}>
+          {items.map((it) => (
+            <li key={it.name} className="rounded-xl px-3 py-2.5" style={{ background: "var(--c-danger-bg)" }}>
+              <p className="text-sm font-semibold" style={{ color: "var(--color-ink)" }}>{it.name}</p>
+              <p className="text-[13px] mt-0.5" style={{ color: "var(--c-danger)" }}>{it.allergy}</p>
+            </li>
+          ))}
+        </ul>
+
+        <div className="flex gap-2.5 w-full mt-1">
+          <button
+            type="button"
+            onClick={onAllergic}
+            className="flex-1 h-12 rounded-2xl text-sm font-medium rs-press"
+            style={{ background: "var(--c-danger)", color: "#fff" }}
+          >
+            Yes, I&apos;m allergic
+          </button>
+          <button
+            type="button"
+            onClick={onNotAllergic}
+            className="flex-1 h-12 rounded-2xl text-sm font-medium rs-press"
+            style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink)" }}
+          >
+            No, place order
+          </button>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
 // ─── Info sheet ──────────────────────────────────────────────────────────────────
 
 function InfoSheet({
@@ -1033,6 +1102,15 @@ function ItemCard({
           {item.description}
         </p>
       )}
+      {item.allergy_info && (
+        <p
+          className="mt-2 text-[12.5px] leading-snug rounded-lg px-2.5 py-1.5 flex items-start gap-1.5"
+          style={{ background: "var(--c-danger-bg)", color: "var(--c-danger)" }}
+        >
+          <TriangleAlert size={13} className="mt-[2px] shrink-0" />
+          <span><strong className="font-semibold">Allergy info:</strong> {item.allergy_info}</span>
+        </p>
+      )}
 
       {/* Badge row */}
       <div className="flex flex-wrap items-center gap-1.5 mt-3">
@@ -1152,6 +1230,11 @@ function CartDrawer({
                 <span className="shrink-0"><DietMark type={item.food_type as FoodKey} /></span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate" style={{ color: "var(--color-ink)" }}>{item.name}</p>
+                  {item.allergy_info && (
+                    <p className="text-[11.5px] truncate flex items-center gap-1" style={{ color: "var(--c-danger)" }}>
+                      <TriangleAlert size={11} className="shrink-0" /> {item.allergy_info}
+                    </p>
+                  )}
                   <p className="text-xs tabular" style={{ color: "var(--color-ink-mute)" }}>
                     {variant && (
                       <span
@@ -1338,6 +1421,7 @@ export function CustomerMenu({
   categories,
   items,
   variants,
+  menuImages,
   initialNotifState,
   initialActivationStatus,
 }: {
@@ -1354,6 +1438,8 @@ export function CustomerMenu({
   categories: CategoryRow[];
   items: MenuItemRow[];
   variants: VariantRow[];
+  /** Menu card photos. The right-edge "Menu card" button exists only when there are some. */
+  menuImages: MenuImage[];
   initialNotifState: CustomerNotifState;
   initialActivationStatus: ActivationStatus;
 }) {
@@ -1406,6 +1492,8 @@ export function CustomerMenu({
   const [picking, setPicking] = useState<MenuItemRow | null>(null);
   const [placing, setPlacing] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(false);
+  // Items in the cart that carry allergy info, while the allergy check is open.
+  const [allergyCheck, setAllergyCheck] = useState<AllergyFlag[] | null>(null);
 
   const variantsOf = useMemo(() => {
     const m = new Map<string, VariantRow[]>();
@@ -1447,8 +1535,12 @@ export function CustomerMenu({
     });
   }, [activeSessionId]);
 
+  // Only with a session: without one the stream has nothing to scope a guest to and
+  // the server answers 401 — which EventSource then retries forever, a red console
+  // error on every QR menu opened before the table is. The page's poll covers that
+  // window; the stream starts as soon as a session id exists.
   useRealtime(
-    ["orders", "notifications", "tables", "menu"],
+    activeSessionId ? ["orders", "notifications", "tables", "menu"] : [],
     useCallback(
       (topic) => {
         pollRef.current?.();
@@ -1678,6 +1770,16 @@ export function CustomerMenu({
       const { itemId, variantId } = parseKey(key);
       return { menu_item_id: itemId, variant_id: variantId, quantity };
     });
+  }
+
+  // The cart's "Place order". Any item with allergy info must be confirmed first —
+  // see AllergyDialog; only "No, I'm not allergic" goes on to placeOrder().
+  function requestPlaceOrder() {
+    if (cartCount === 0 || placing) return;
+    if (noPin && activationStatus === "rejected") return; // same gate as placeOrder
+    const flagged = allergyFlagsForCart(cartEntries.map(([key]) => parseKey(key).itemId), items);
+    if (flagged.length > 0) setAllergyCheck(flagged);
+    else placeOrder();
   }
 
   async function placeOrder() {
@@ -2245,7 +2347,9 @@ export function CustomerMenu({
 
       <CartDrawer
         open={showCart}
-        onClose={() => setShowCart(false)}
+        // Escape reaches every open sheet; while the allergy check is up it must close
+        // only that, not the cart behind it.
+        onClose={() => { if (!allergyCheck) setShowCart(false); }}
         entries={cartEntries}
         items={items}
         variantsOf={variantsOf}
@@ -2253,9 +2357,28 @@ export function CustomerMenu({
         count={cartCount}
         onAdd={addByKey}
         onRemove={removeByKey}
-        onPlace={placeOrder}
+        onPlace={requestPlaceOrder}
         placing={placing}
       />
+
+      {allergyCheck && (
+        <AllergyDialog
+          items={allergyCheck}
+          onAllergic={() => {
+            setAllergyCheck(null);
+            pushToast({
+              tone: "info",
+              title: "Order not placed",
+              body: "Remove the item from your cart, or ask staff about it",
+              Icon: TriangleAlert,
+            });
+          }}
+          onNotAllergic={() => {
+            setAllergyCheck(null);
+            placeOrder();
+          }}
+        />
+      )}
 
       <OrdersSheet open={showOrders} orders={orders} onClose={() => setShowOrders(false)} onRequestBill={openBill} billState={serviceNotif.request_bill} />
 
@@ -2304,6 +2427,8 @@ export function CustomerMenu({
           onClose={() => setBillDialog(null)}
         />
       )}
+
+      {menuImages.length > 0 && <MenuPhotos images={menuImages} />}
     </div>
   );
 }

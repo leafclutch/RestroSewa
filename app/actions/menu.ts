@@ -27,6 +27,8 @@ export type MenuItemRow = {
   id: string;
   name: string;
   description: string | null;
+  /** Allergens, written by the restaurant. Null = no note. Shown on the customer menu. */
+  allergy_info: string | null;
   price: number;
   food_type: FoodType;
   availability_status: AvailabilityStatus;
@@ -69,7 +71,7 @@ export type AddonRow = {
 };
 
 const ITEM_COLUMNS = `
-  id, name, description, price,
+  id, name, description, allergy_info, price,
   food_type, availability_status, is_available, has_variants,
   category_id, workstation_id, sort_order,
   preparation_time, tax_percent, sku,
@@ -83,6 +85,7 @@ function normalizeItem(raw: Record<string, unknown>): MenuItemRow {
     id: raw.id as string,
     name: raw.name as string,
     description: (raw.description as string) ?? null,
+    allergy_info: (raw.allergy_info as string) ?? null,
     price: Number(raw.price),
     food_type: (raw.food_type as FoodType) ?? "veg",
     availability_status: (raw.availability_status as AvailabilityStatus) ?? "available",
@@ -361,10 +364,12 @@ export async function createMenuItem(
   const categoryId   = formData.get("category_id") as string;
   const name         = (formData.get("name") as string)?.trim();
   const description  = (formData.get("description") as string)?.trim() || null;
+  const allergyInfo  = (formData.get("allergy_info") as string)?.trim() || null;
   const price        = parseFloat(formData.get("price") as string);
   const foodType     = (formData.get("food_type") as string) || "veg";
 
   if (!name || !categoryId) return { error: "Name and category are required." };
+  if (allergyInfo && allergyInfo.length > 300) return { error: "Allergy info must be 300 characters or fewer." };
   if (isNaN(price) || price < 0) return { error: "Price must be a non-negative number." };
 
   const service = createServiceClient();
@@ -399,6 +404,7 @@ export async function createMenuItem(
     workstation_id: cat.workstation_id,
     name,
     description,
+    allergy_info: allergyInfo,
     price,
     food_type: foodType,
     availability_status: "available",
@@ -423,6 +429,7 @@ export async function updateMenuItem(
 
   const name         = (formData.get("name") as string)?.trim();
   const description  = (formData.get("description") as string)?.trim() || null;
+  const allergyInfo  = (formData.get("allergy_info") as string)?.trim() || null;
   const price        = parseFloat(formData.get("price") as string);
   const foodType     = formData.get("food_type") as string;
   const status       = formData.get("availability_status") as string;
@@ -445,6 +452,7 @@ export async function updateMenuItem(
 
   if (!name) return { error: "Name is required." };
   if (isNaN(price) || price < 0) return { error: "Price must be non-negative." };
+  if (allergyInfo && allergyInfo.length > 300) return { error: "Allergy info must be 300 characters or fewer." };
 
   const validFoodTypes = ["veg", "non_veg", "vegan", "egg"];
   if (!validFoodTypes.includes(foodType)) return { error: "Invalid food type." };
@@ -457,6 +465,7 @@ export async function updateMenuItem(
   const { error } = await (service as any).from("menu_items").update({
     name,
     description,
+    allergy_info: allergyInfo,
     price,
     food_type: foodType,
     availability_status: status,
