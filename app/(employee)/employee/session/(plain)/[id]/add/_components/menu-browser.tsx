@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FoodMark } from "@/components/ui/food-mark";
 import { assignCategoryHues, styleOf } from "@/lib/category-colors";
-import { Minus, Plus, Search, ShoppingBag, SquarePen, X } from "lucide-react";
+import { Minus, Plus, Search, ShoppingBag, SquarePen, TriangleAlert, X } from "lucide-react";
 import { useCurrency } from "@/components/currency-provider";
 
 // A staff-typed off-menu line held in the cart before submit. `price` is a string while
@@ -308,6 +308,13 @@ export function MenuBrowser({
             {item.name}
           </p>
         </div>
+        {/* A guest may ask the waiter, not read the QR menu — so the note is here too. */}
+        {item.allergy_info && (
+          <p className="text-xs leading-snug flex items-start gap-1" style={{ color: "var(--color-ruby)" }}>
+            <TriangleAlert size={11} className="mt-0.5 shrink-0" />
+            <span>{item.allergy_info}</span>
+          </p>
+        )}
         <p className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>
           {hasVariants && <span className="text-xs">from </span>}{cur.prefix}{from.toFixed(0)}
         </p>
