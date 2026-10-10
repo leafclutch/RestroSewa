@@ -331,7 +331,7 @@ function VariantLine({
         {variant.name}
       </span>
       <span className="text-sm tabular-nums shrink-0" style={{ color: "var(--color-ink-mute)" }}>
-        {cur.prefix}{Number(variant.price).toFixed(0)}
+        {cur.money(Number(variant.price))}
       </span>
 
       {/* Out-of-stock is a variant-level fact: the Large can run out while the
@@ -939,7 +939,7 @@ function ItemEditPanel({
                     )}
                   </span>
                   <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
-                    {Number(a.price) > 0 ? `+${cur.prefix}${Number(a.price).toFixed(0)}` : "Free"}
+                    {Number(a.price) > 0 ? `+${cur.money(Number(a.price))}` : "Free"}
                   </span>
                   <button
                     type="button"
@@ -1054,7 +1054,7 @@ function ItemCard({
         <StatusBadge status={item.availability_status} />
 
         <p className="text-sm tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
-          {cur.prefix}{Number(item.price).toFixed(0)}
+          {cur.money(Number(item.price))}
         </p>
 
         <button

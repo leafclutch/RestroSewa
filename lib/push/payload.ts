@@ -90,10 +90,10 @@ function describeItems(items: { name: string; quantity: number }[]): string {
  * default, not the exception. Every alert that isn't worth interrupting someone for
  * teaches them to ignore the ones that are.
  */
-/** `money` is the restaurant's whole-unit formatter (lib/currency.ts → `money`). */
+/** `money` is the restaurant's formatter (lib/currency.ts → `money`). */
 export function buildPushPayload(
   n: NotifiableRow,
-  money: (n: number) => string = (v) => String(Math.round(v))
+  money: (n: number) => string = (v) => String(Math.round(v * 100) / 100)
 ): PushPayload | null {
   const rupee = money;
   const place = where(n);

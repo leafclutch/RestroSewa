@@ -76,7 +76,7 @@ export function reportMoney(code: unknown): (n: number) => string {
 export type CurrencyFormatter = CurrencyInfo & {
   /** What goes in front of a number: "₹", "$", or "Rs. " — letter symbols get a space. */
   prefix: string;
-  /** Whole units, grouped: "₹1,500". */
+  /** Grouped; whole amounts drop decimals, fractional ones keep two: "₹1,500" / "₹1,500.50". */
   money: (n: number) => string;
   /** Two decimals, grouped: "₹1,500.00". */
   money2: (n: number) => string;
@@ -101,7 +101,11 @@ export function currencyFormatter(code: unknown): CurrencyFormatter {
   return {
     ...info,
     prefix,
-    money: (n) => prefix + group(Math.round(Number(n) || 0), 0, 0),
+    money: (n) => {
+      // Round to paisa/cents first so float noise (12.4999…) can't leak into the output.
+      const v = Math.round((Number(n) || 0) * 100) / 100;
+      return prefix + (Number.isInteger(v) ? group(v, 0, 0) : group(v, 2, 2));
+    },
     money2: (n) => prefix + group(n, 2, 2),
     moneyUpTo2: (n) => prefix + group(n, 0, 2),
     signed2: (n) => `${n < 0 ? "−" : ""}${prefix}${group(Math.abs(n), 2, 2)}`,

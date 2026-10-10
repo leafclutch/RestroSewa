@@ -154,7 +154,7 @@ function OrderCard({
       {/* Footer total */}
       <div className="flex justify-between px-4 py-2 border-t" style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}>
         <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>{order.items.length} item{order.items.length !== 1 ? "s" : ""}</span>
-        <span className="text-xs font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>{cur.prefix}{order.total.toFixed(0)}</span>
+        <span className="text-xs font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>{cur.money(order.total)}</span>
       </div>
     </div>
   );
