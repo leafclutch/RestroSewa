@@ -22,6 +22,7 @@ import { SessionPrintButtons } from "./print-tickets";
 import type { RestaurantInfo, PrintStation } from "./print-tickets";
 import { DiscountUnitToggle } from "@/app/(employee)/employee/_components/discount-unit-toggle";
 import { formatPercent, resolveDiscount, type DiscountMode } from "@/lib/billing/discount";
+import { useCurrency } from "@/components/currency-provider";
 
 
 type PaymentMethod = "cash" | "online" | "card" | "mixed" | "credit";
@@ -64,6 +65,7 @@ function PaymentForm({
   discountMode: DiscountMode;
   setDiscountMode: (m: DiscountMode) => void;
 }) {
+  const cur = useCurrency();
   // A directly-controlled submit rather than `useActionState` + native `<form
   // action>` — that combination relies on `pending` reliably flipping
   // true→false in the same render cycle a `wasPending` ref effect can catch,
@@ -282,7 +284,7 @@ function PaymentForm({
       >
         <div className="flex items-center justify-between text-sm">
           <span style={{ color: "var(--color-ink-mute)" }}>Order total</span>
-          <span className="tabular" style={{ color: "var(--color-ink)" }}>₹{orderTotal.toFixed(2)}</span>
+          <span className="tabular" style={{ color: "var(--color-ink)" }}>{cur.prefix}{orderTotal.toFixed(2)}</span>
         </div>
 
         {discountEnabled ? (
@@ -311,7 +313,7 @@ function PaymentForm({
             {discount > 0 && (
               <p className="text-xs text-right tabular" style={{ color: "var(--color-ink-mute)" }}>
                 {discountMode === "percent"
-                  ? `= ₹${discount.toFixed(2)}`
+                  ? `= ${cur.prefix}${discount.toFixed(2)}`
                   : `= ${formatPercent(discount, orderTotal)}`}
               </p>
             )}
@@ -357,7 +359,7 @@ function PaymentForm({
         >
           <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Final payable</span>
           <span className="text-lg font-medium tabular" style={{ color: "var(--color-primary)" }}>
-            ₹{payable.toFixed(2)}
+            {cur.prefix}{payable.toFixed(2)}
           </span>
         </div>
       </div>
@@ -412,11 +414,11 @@ function PaymentForm({
               className="text-xs uppercase tracking-wide"
               style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
             >
-              Cash amount (₹)
+              Cash amount ({cur.symbol})
             </label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>₹</span>
-              <Input
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>{cur.symbol}</span>
+              <Input style={{ paddingLeft: cur.inputPad }}
                 id="cash_amount"
                 name="cash_amount"
                 type="number"
@@ -437,11 +439,11 @@ function PaymentForm({
               className="text-xs uppercase tracking-wide"
               style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
             >
-              Online amount (₹)
+              Online amount ({cur.symbol})
             </label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>₹</span>
-              <Input
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>{cur.symbol}</span>
+              <Input style={{ paddingLeft: cur.inputPad }}
                 id="online_amount"
                 name="online_amount"
                 type="number"
@@ -458,7 +460,7 @@ function PaymentForm({
 
           {bothFilled && !mixedValid && (
             <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
-              The combined Cash and Online amounts must equal the total payable amount (₹{payable.toFixed(0)}).
+              The combined Cash and Online amounts must equal the total payable amount ({cur.prefix}{payable.toFixed(0)}).
             </p>
           )}
           {bothFilled && mixedValid && (
@@ -494,7 +496,7 @@ function PaymentForm({
                 </p>
                 {picked.balance > 0 && (
                   <p className="text-xs mt-1" style={{ color: "var(--color-warning)" }}>
-                    Already owes ₹{picked.balance.toFixed(2)} — this bill will be added to it.
+                    Already owes {cur.prefix}{picked.balance.toFixed(2)} — this bill will be added to it.
                   </p>
                 )}
               </div>
@@ -563,7 +565,7 @@ function PaymentForm({
                         className="text-sm tabular-nums shrink-0"
                         style={{ color: m.balance > 0 ? "var(--color-danger)" : "var(--color-ink-mute)" }}
                       >
-                        {m.balance > 0 ? `₹${m.balance.toFixed(0)}` : "settled"}
+                        {m.balance > 0 ? `${cur.prefix}${m.balance.toFixed(0)}` : "settled"}
                       </span>
                     </button>
                   ))}
@@ -652,11 +654,11 @@ function PaymentForm({
               className="text-xs uppercase tracking-wide"
               style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
             >
-              Paying now (₹) — leave blank for full credit
+              Paying now ({cur.symbol}) — leave blank for full credit
             </label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>₹</span>
-              <Input
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>{cur.symbol}</span>
+              <Input style={{ paddingLeft: cur.inputPad }}
                 id="paid_now"
                 type="number"
                 min="0"
@@ -708,11 +710,11 @@ function PaymentForm({
                     return (
                       <div key={side} className="flex flex-col gap-1">
                         <label className="text-[11px] uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
-                          {side === "cash" ? "Cash (₹)" : "Online (₹)"}
+                          {side === "cash" ? `Cash (${cur.symbol})` : `Online (${cur.symbol})`}
                         </label>
                         <div className="relative">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>₹</span>
-                          <Input
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>{cur.symbol}</span>
+                          <Input style={{ paddingLeft: cur.inputPad }}
                             type="number"
                             min="0"
                             max={paidNowNum}
@@ -733,7 +735,7 @@ function PaymentForm({
                   })}
                   {!downSplitValid && (
                     <p className="col-span-2 text-xs" style={{ color: "var(--color-ruby)" }}>
-                      Cash and online together must equal ₹{paidNowNum.toFixed(2)}.
+                      Cash and online together must equal {cur.prefix}{paidNowNum.toFixed(2)}.
                     </p>
                   )}
                 </div>
@@ -768,16 +770,16 @@ function PaymentForm({
           >
             <div className="flex items-center justify-between text-sm">
               <span style={{ color: "var(--color-warning)" }}>Payable</span>
-              <span className="tabular" style={{ color: "var(--color-warning)" }}>₹{payable.toFixed(2)}</span>
+              <span className="tabular" style={{ color: "var(--color-warning)" }}>{cur.prefix}{payable.toFixed(2)}</span>
             </div>
             <div className="flex items-center justify-between text-sm">
               <span style={{ color: "var(--color-warning)" }}>Paying now</span>
-              <span className="tabular" style={{ color: "var(--color-warning)" }}>− ₹{paidNowNum.toFixed(2)}</span>
+              <span className="tabular" style={{ color: "var(--color-warning)" }}>− {cur.prefix}{paidNowNum.toFixed(2)}</span>
             </div>
             <div className="flex items-center justify-between pt-1.5 border-t" style={{ borderColor: "color-mix(in srgb, var(--color-warning) 20%, transparent)" }}>
               <span className="text-sm font-medium" style={{ color: "var(--color-warning)" }}>Goes on credit</span>
               <span className="text-lg font-medium tabular" style={{ color: "var(--color-warning)" }}>
-                ₹{creditAmount.toFixed(2)}
+                {cur.prefix}{creditAmount.toFixed(2)}
               </span>
             </div>
           </div>
@@ -786,7 +788,7 @@ function PaymentForm({
             <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
               {paidNowNum >= payable
                 ? `That settles the whole bill — use Cash, Online or Card instead.`
-                : `Enter an amount between ₹0 and ₹${payable.toFixed(2)}.`}
+                : `Enter an amount between ${cur.prefix}0 and ${cur.prefix}${payable.toFixed(2)}.`}
             </p>
           )}
         </div>
@@ -802,7 +804,7 @@ function PaymentForm({
         {pending
           ? "Closing…"
           : method === "credit"
-          ? `Close & record ₹${creditAmount.toFixed(0)} credit`
+          ? `Close & record ${cur.prefix}${creditAmount.toFixed(0)} credit`
           : "Complete & close session"}
       </Button>
     </form>
@@ -1033,6 +1035,7 @@ export function SessionClient({
   discountEnabled?: boolean;
   canCancelOrders?: boolean;
 }) {
+  const cur = useCurrency();
   const router = useRouter();
   const [forceClosing, startForceClose] = useTransition();
   const [forceError, setForceError] = useState<string | null>(null);
@@ -1131,7 +1134,7 @@ export function SessionClient({
           >
             <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Total</span>
             <span className="text-sm font-medium tabular" style={{ color: "var(--color-ink)" }}>
-              ₹{session.total.toFixed(0)}
+              {cur.prefix}{session.total.toFixed(0)}
             </span>
           </div>
         </div>

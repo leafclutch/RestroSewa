@@ -43,14 +43,9 @@ import {
   ChevronRight,
   ArrowUpFromLine,
 } from "lucide-react";
+import { useCurrency } from "@/components/currency-provider";
 
 const PERIODS: FinancePeriod[] = ["today", "yesterday", "week", "month", "year"];
-
-const money2 = (n: number) =>
-  `${n < 0 ? "−" : ""}₹${Math.abs(n).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
 
 const METHOD_LABEL: Record<string, string> = {
   cash: "Cash",
@@ -84,6 +79,7 @@ function AmountAndTender({
   initialOnline?: string;
   onValidChange?: (valid: boolean) => void;
 }) {
+  const cur = useCurrency();
   const [amount, setAmount] = useState(initialAmount);
   const [method, setMethod] = useState(initialMethod);
   const [cash, setCash] = useState(initialCash);
@@ -203,7 +199,7 @@ function AmountAndTender({
           ))}
           {!mixedOk && (
             <p className="col-span-2 text-xs" style={{ color: "var(--color-ruby)" }}>
-              Cash and Online must add up to {money2(amountNum)}.
+              Cash and Online must add up to {cur.signed2(amountNum)}.
             </p>
           )}
         </div>
@@ -395,6 +391,7 @@ function WithdrawSavingForm({
   titles: SavingTitle[];
   onDone: () => void;
 }) {
+  const cur = useCurrency();
   const [valid, setValid] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -435,13 +432,13 @@ function WithdrawSavingForm({
         >
           {funded.map((t) => (
             <option key={t.id} value={t.id}>
-              {t.name} — {money2(t.total)}
+              {t.name} — {cur.signed2(t.total)}
             </option>
           ))}
         </select>
         {pot && (
           <p className="text-xs mt-1.5" style={{ color: "var(--color-ink-mute)" }}>
-            Holds {money2(pot.total)} — {money2(pot.cash)} cash + {money2(pot.online)} online.
+            Holds {cur.signed2(pot.total)} — {cur.signed2(pot.cash)} cash + {cur.signed2(pot.online)} online.
           </p>
         )}
       </div>
@@ -581,6 +578,7 @@ function SavingPot({
   onEditEntry: (e: ExtraExpense) => void;
   onChanged: () => void;
 }) {
+  const cur = useCurrency();
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(title.name);
@@ -702,7 +700,7 @@ function SavingPot({
                   // unlabelled number here would read as the pot's size.
                   title.entryCount === 0
                   ? "Nothing added today"
-                  : `${title.entryCount} today · ${money2(title.cash)} cash + ${money2(
+                  : `${title.entryCount} today · ${cur.signed2(title.cash)} cash + ${cur.signed2(
                       title.online
                     )} online`
                 : title.entryCount === 0 && title.openingAmount === 0
@@ -713,9 +711,9 @@ function SavingPot({
                       // Named explicitly, because the balance otherwise refuses
                       // to equal cash + online and looks like an arithmetic bug.
                       title.openingAmount > 0 &&
-                        `${money2(title.openingAmount)} already collected`,
+                        `${cur.signed2(title.openingAmount)} already collected`,
                       title.entryCount > 0 &&
-                        `${money2(title.cash)} cash + ${money2(title.online)} online since`,
+                        `${cur.signed2(title.cash)} cash + ${cur.signed2(title.online)} online since`,
                     ]
                       .filter(Boolean)
                       .join(" · ")}
@@ -724,7 +722,7 @@ function SavingPot({
         </button>
         <span className="shrink-0 text-right">
           <span className="text-base tabular-nums block" style={{ color: "var(--color-ink)" }}>
-            {money2(title.total)}
+            {cur.signed2(title.total)}
           </span>
           {title.todayOnly && (
             <span className="text-xs block" style={{ color: "var(--color-ink-mute)" }}>
@@ -772,7 +770,7 @@ function SavingPot({
                     className="text-xs tabular-nums"
                     style={{ color: e.amount < 0 ? "#1a7a4a" : "#dc2626" }}
                   >
-                    {e.amount < 0 ? `+${money2(Math.abs(e.amount))}` : money2(e.amount)}
+                    {e.amount < 0 ? `+${cur.signed2(Math.abs(e.amount))}` : cur.signed2(e.amount)}
                   </span>
                   {canEdit && securityEnabled && (
                     <button
@@ -904,6 +902,7 @@ function EditExpenseForm({
   titles: SavingTitle[];
   onDone: () => void;
 }) {
+  const cur = useCurrency();
   // A saving stays a saving: it swaps the category picker for a pot picker. The
   // server refuses to convert between the two, and a DB constraint makes the
   // mismatched state unrepresentable anyway.
@@ -1018,7 +1017,7 @@ function EditExpenseForm({
           }}
         >
           <p className="text-xs" style={{ color: "var(--color-warning)" }}>
-            Delete this {money2(Math.abs(expense.amount))}{" "}
+            Delete this {cur.signed2(Math.abs(expense.amount))}{" "}
             {expense.amount < 0 ? "withdrawal" : "expense"}? Cash for that day goes back{" "}
             {expense.amount < 0 ? "down" : "up"} by the same amount
             {expense.amount < 0 ? ", and the saving regains it" : ""}. Only the audit log will
@@ -1087,6 +1086,7 @@ export function ExpensesClient({
    */
   todayOnly?: boolean;
 }) {
+  const cur = useCurrency();
   const mayAdd = canAdd ?? canManage;
   const [tab, setTab] = useState<"expenses" | "saving">("expenses");
   const [expenses, setExpenses] = useState(initialExpenses);
@@ -1308,7 +1308,7 @@ export function ExpensesClient({
                   fontWeight: i === 2 ? 500 : 400,
                 }}
               >
-                {money2(value)}
+                {cur.signed2(value)}
               </p>
             </div>
           ))}
@@ -1393,13 +1393,13 @@ export function ExpensesClient({
                   })}
                   {" · "}
                   {METHOD_LABEL[e.method] ?? e.method}
-                  {e.method === "mixed" && ` (${money2(e.cash)} + ${money2(e.online)})`}
+                  {e.method === "mixed" && ` (${cur.signed2(e.cash)} + ${cur.signed2(e.online)})`}
                   {e.createdByName ? ` · ${e.createdByName}` : ""}
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <span className="text-sm tabular-nums" style={{ color: "#dc2626" }}>
-                  {money2(e.amount)}
+                  {cur.signed2(e.amount)}
                 </span>
                 {canEdit && securityEnabled && (
                   <button
@@ -1459,7 +1459,7 @@ export function ExpensesClient({
           editing
             ? `${editing.savingTitleName ?? editing.categoryLabel}${
                 editing.amount < 0 ? " · withdrawal" : ""
-              } · ${money2(Math.abs(editing.amount))}`
+              } · ${cur.signed2(Math.abs(editing.amount))}`
             : undefined
         }
         onClose={() => setEditing(null)}

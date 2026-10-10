@@ -17,11 +17,9 @@ import {
 import { StationChips } from "@/components/station-chips";
 import { Input } from "@/components/ui/input";
 import { ChevronLeft, ChevronRight, TriangleAlert } from "lucide-react";
+import { useCurrency } from "@/components/currency-provider";
 
 const PAGE_SIZE = 15;
-
-const money = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
-const money2 = (n: number) => `₹${n.toFixed(2)}`;
 
 const PERIODS: FinancePeriod[] = ["today", "yesterday", "week", "month", "year"];
 
@@ -60,6 +58,7 @@ export function DeductionsClient({
   initialReport: DeductionReport;
   workstations: WorkstationRow[];
 }) {
+  const cur = useCurrency();
   const [report, setReport] = useState(initialReport);
   const [period, setPeriod] = useState<FinancePeriod>(initialReport.period);
   const [customFrom, setCustomFrom] = useState("");
@@ -194,13 +193,13 @@ export function DeductionsClient({
       <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
         <StatCard
           label={`Value removed${scopeLabel}`}
-          value={money(summary.valueRemoved)}
+          value={cur.money(summary.valueRemoved)}
           tone={summary.valueRemoved > 0 ? "#dc2626" : undefined}
         />
         <StatCard label="Movements" value={String(summary.movements)} />
         <StatCard
           label="Put back by corrections"
-          value={money(summary.valueAdded)}
+          value={cur.money(summary.valueAdded)}
           note="Not netted off the loss"
         />
       </div>
@@ -254,7 +253,7 @@ export function DeductionsClient({
                 <div className="flex items-center justify-between gap-3 text-sm">
                   <span style={{ color: "var(--color-ink)" }}>{reasonLabel(b.kind)}</span>
                   <span className="tabular-nums shrink-0" style={{ color: "var(--color-ink-mute)" }}>
-                    {money2(b.value)} · {Math.round(share)}%
+                    {cur.money2(b.value)} · {Math.round(share)}%
                   </span>
                 </div>
                 <div className="h-1 rounded-full mt-1.5" style={{ background: "var(--color-canvas-soft)" }}>
@@ -344,7 +343,7 @@ export function DeductionsClient({
                       {r.qty < 0 ? "−" : "+"}{qty(Math.abs(r.qty))} {r.unit}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums font-medium" style={{ color: "var(--color-ink)" }}>
-                      {money2(r.value)}
+                      {cur.money2(r.value)}
                     </td>
                   </tr>
                 ))}
@@ -382,7 +381,7 @@ export function DeductionsClient({
                       {r.qty < 0 ? "−" : "+"}{qty(Math.abs(r.qty))} {r.unit}
                     </p>
                     <p className="text-xs tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
-                      {money(r.value)}
+                      {cur.money(r.value)}
                     </p>
                   </div>
                 </div>

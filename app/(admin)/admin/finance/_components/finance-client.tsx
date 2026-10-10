@@ -39,13 +39,7 @@ import { PaymentMethodPicker, splitIsValid } from "@/components/ui/payment-metho
 import { Plus, Settings2, TriangleAlert, UserPlus, Pencil, X } from "lucide-react";
 import { ImportCreditForm } from "./import-credit-form";
 import { formatDateTime } from "@/lib/format-time";
-
-const money = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
-const money2 = (n: number) =>
-  `${n < 0 ? "−" : ""}₹${Math.abs(n).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+import { useCurrency } from "@/components/currency-provider";
 
 const PERIODS: FinancePeriod[] = ["today", "yesterday", "week", "month", "year"];
 
@@ -84,6 +78,7 @@ function Section({
   total?: { label: string; value: number; tone?: string };
   children?: React.ReactNode;
 }) {
+  const cur = useCurrency();
   return (
     <section
       className="rounded-xl border overflow-hidden"
@@ -131,7 +126,7 @@ function Section({
             className={(r.sub ? "text-xs" : "text-sm") + " tabular-nums shrink-0"}
             style={{ color: r.tone ?? "var(--color-ink)", opacity: r.sub ? 0.8 : 1 }}
           >
-            {r.display ?? money2(r.value)}
+            {r.display ?? cur.signed2(r.value)}
           </span>
         </div>
       ))}
@@ -148,7 +143,7 @@ function Section({
             className="text-lg font-medium tabular-nums"
             style={{ color: total.tone ?? "var(--color-ink)" }}
           >
-            {money2(total.value)}
+            {cur.signed2(total.value)}
           </span>
         </div>
       )}
@@ -162,6 +157,7 @@ function Section({
 // figures above it, with a small status pill (the same pill the Stock and Vendors
 // screens already use). No icon tile: it is a line item, not a headline.
 function PurchaseLine({ p }: { p: FinancePurchase }) {
+  const cur = useCurrency();
   const tone = PURCHASE_STATUS_COLOR[p.status];
   const time = new Date(p.created_at).toLocaleTimeString("en-IN", {
     hour: "numeric",
@@ -188,12 +184,12 @@ function PurchaseLine({ p }: { p: FinancePurchase }) {
 
       <span className="text-right shrink-0">
         <span className="block text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>
-          {money2(p.total)}
+          {cur.signed2(p.total)}
         </span>
         <span className="block text-xs" style={{ color: tone }}>
           {PURCHASE_STATUS_LABEL[p.status]}
           {p.status === "partial" && (
-            <span style={{ color: "var(--color-ink-mute)" }}> · {money(p.creditAmount)} owed</span>
+            <span style={{ color: "var(--color-ink-mute)" }}> · {cur.money(p.creditAmount)} owed</span>
           )}
         </span>
       </span>
@@ -212,6 +208,7 @@ function PurchaseLine({ p }: { p: FinancePurchase }) {
  * report could not show.
  */
 function LedgerRow({ t, showRooms }: { t: FinanceTransaction; showRooms: boolean }) {
+  const cur = useCurrency();
   // Shared with the CSV export, so the two cannot name the same row differently.
   // It also distinguishes a refund from the deposit it reverses, and a saving
   // withdrawal from the saving it takes back — see `txLabel`.
@@ -261,12 +258,12 @@ function LedgerRow({ t, showRooms }: { t: FinanceTransaction; showRooms: boolean
         <span className="text-sm tabular-nums shrink-0 text-right">
           <span style={{ color: tone }}>
             {moved
-              ? `${flow > 0 ? "+" : "−"}${money2(Math.abs(flow))}`
-              : money2(face)}
+              ? `${flow > 0 ? "+" : "−"}${cur.signed2(Math.abs(flow))}`
+              : cur.signed2(face)}
           </span>
           {differs && (
             <span className="block text-xs" style={{ color: "var(--color-ink-mute)" }}>
-              of {money2(face)}
+              of {cur.signed2(face)}
             </span>
           )}
           {!moved && (
@@ -282,9 +279,9 @@ function LedgerRow({ t, showRooms }: { t: FinanceTransaction; showRooms: boolean
           {legs.map((l) => (
             <span key={l.label} className="text-xs tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
               {l.label}{" "}
-              <span style={{ opacity: 0.8 }}>{money2(l.before)}</span>
+              <span style={{ opacity: 0.8 }}>{cur.signed2(l.before)}</span>
               {" → "}
-              <span style={{ color: "var(--color-ink)" }}>{money2(l.after)}</span>
+              <span style={{ color: "var(--color-ink)" }}>{cur.signed2(l.after)}</span>
             </span>
           ))}
         </div>
@@ -354,6 +351,7 @@ function LedgerSection({
 // ── Opening balance ───────────────────────────────────────────────────────────
 
 function OpeningForm({ current, onDone }: { current: OpeningBalance; onDone: () => void }) {
+  const cur = useCurrency();
   const defaultDate = current
     ? new Date(current.effective_from).toISOString().slice(0, 10)
     : new Date().toISOString().slice(0, 10);
@@ -392,13 +390,13 @@ function OpeningForm({ current, onDone }: { current: OpeningBalance; onDone: () 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
           <label htmlFor="f_cash" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
-            Cash in hand (₹)
+            Cash in hand ({cur.symbol})
           </label>
           <Input id="f_cash" type="number" min="0" step="0.01" placeholder="0.00" value={cash} onChange={(e) => setCash(e.target.value)} />
         </div>
         <div className="flex flex-col gap-1.5">
           <label htmlFor="f_online" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
-            Bank / online (₹)
+            Bank / online ({cur.symbol})
           </label>
           <Input id="f_online" type="number" min="0" step="0.01" placeholder="0.00" value={online} onChange={(e) => setOnline(e.target.value)} />
         </div>
@@ -467,6 +465,7 @@ function OpeningForm({ current, onDone }: { current: OpeningBalance; onDone: () 
 type IncomeMethod = "cash" | "online" | "card" | "mixed";
 
 function AddIncomeForm({ onDone }: { onDone: () => void }) {
+  const cur = useCurrency();
   const [state, action, pending] = useActionState<ActionResult, FormData>(addExtraIncome, null);
   const [method, setMethod] = useState<IncomeMethod>("cash");
   const [amount, setAmount] = useState("");
@@ -494,7 +493,7 @@ function AddIncomeForm({ onDone }: { onDone: () => void }) {
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor="i_amount" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
-          Amount (₹)
+          Amount ({cur.symbol})
         </label>
         <Input
           id="i_amount"
@@ -573,6 +572,7 @@ function AddIncomeForm({ onDone }: { onDone: () => void }) {
  * re-shaped for a flat amount instead of a room stay's advance.
  */
 function IncomeRow({ entry, canManage, onChanged }: { entry: ExtraIncome; canManage: boolean; onChanged: () => void }) {
+  const cur = useCurrency();
   const [editing, setEditing] = useState(false);
   const [removing, setRemoving] = useState(false);
 
@@ -627,7 +627,7 @@ function IncomeRow({ entry, canManage, onChanged }: { entry: ExtraIncome; canMan
         </p>
       </div>
       <span className="text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>
-        {money2(entry.amount)}
+        {cur.signed2(entry.amount)}
       </span>
       {canManage && (
         <div className="flex items-center gap-1.5 shrink-0">
@@ -784,6 +784,7 @@ export function FinanceClient({
    *  and so no room sales and no deposits — the blocks are not rendered at all. */
   showRooms?: boolean;
 }) {
+  const cur = useCurrency();
   const [report, setReport] = useState(initial);
   const [opening, setOpening] = useState(initialOpening);
   const [purchases, setPurchases] = useState(initialPurchases);
@@ -1012,11 +1013,11 @@ export function FinanceClient({
       <div className="grid gap-3 mb-6" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
         <div className="rounded-xl border px-4 py-3" style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}>
           <p className="text-xs mb-1" style={{ color: "var(--color-ink-mute)" }}>Closing cash</p>
-          <p className="text-lg font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>{money(report.closingCash)}</p>
+          <p className="text-lg font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>{cur.money(report.closingCash)}</p>
         </div>
         <div className="rounded-xl border px-4 py-3" style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}>
           <p className="text-xs mb-1" style={{ color: "var(--color-ink-mute)" }}>Closing online / bank</p>
-          <p className="text-lg font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>{money(report.closingOnline)}</p>
+          <p className="text-lg font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>{cur.money(report.closingOnline)}</p>
         </div>
         {/* The two credit positions sit alongside cash, not buried further down:
             an owner reading "Net balance ₹5,000" needs to see in the same glance
@@ -1024,22 +1025,22 @@ export function FinanceClient({
         <div className="rounded-xl border px-4 py-3" style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}>
           <p className="text-xs mb-1" style={{ color: "var(--color-ink-mute)" }}>Credit to us</p>
           <p className="text-lg font-medium tabular-nums" style={{ color: report.closingCreditToUs > 0 ? OWED_TO_US : "var(--color-ink)" }}>
-            {money(report.closingCreditToUs)}
+            {cur.money(report.closingCreditToUs)}
           </p>
           <p className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>Customers owe us</p>
         </div>
         <div className="rounded-xl border px-4 py-3" style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}>
           <p className="text-xs mb-1" style={{ color: "var(--color-ink-mute)" }}>Credit by us</p>
           <p className="text-lg font-medium tabular-nums" style={{ color: report.closingCreditByUs > 0 ? WE_OWE : "var(--color-ink)" }}>
-            {money(report.closingCreditByUs)}
+            {cur.money(report.closingCreditByUs)}
           </p>
           <p className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>We owe vendors</p>
         </div>
         <div className="rounded-xl border px-4 py-3" style={{ background: "var(--color-primary)", borderColor: "var(--color-primary)" }}>
           <p className="text-xs mb-1" style={{ color: "rgba(255,255,255,0.75)" }}>Net balance</p>
-          <p className="text-lg font-medium tabular-nums" style={{ color: "#fff" }}>{money(report.closingNet)}</p>
+          <p className="text-lg font-medium tabular-nums" style={{ color: "#fff" }}>{cur.money(report.closingNet)}</p>
           <p className="text-[10px] tabular-nums" style={{ color: "rgba(255,255,255,0.7)" }}>
-            {netMovement >= 0 ? "+" : "−"}{money(Math.abs(netMovement))} this period
+            {netMovement >= 0 ? "+" : "−"}{cur.money(Math.abs(netMovement))} this period
           </p>
         </div>
       </div>

@@ -10,6 +10,8 @@ import { getCustomerNotifState, getCustomerActivationState } from "@/app/actions
 import type { ActivationStatus } from "@/app/actions/customer";
 import { CustomerMenu } from "./_components/customer-menu";
 import { QrSplash } from "./_components/qr-splash";
+import { CurrencyProvider } from "@/components/currency-provider";
+import { normalizeCurrency } from "@/lib/currency";
 
 // Whether an item belongs on the menu *right now*. This intentionally keeps
 // `out_of_stock` items (they render as disabled "Sold out" cards) and only hides
@@ -52,7 +54,7 @@ export default async function CustomerMenuPage({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: restaurant } = await (service as any)
     .from("restaurants")
-    .select("id, name, logo_url, is_active, customer_ordering_enabled, qr_mode")
+    .select("id, name, logo_url, is_active, customer_ordering_enabled, qr_mode, settings")
     .eq("slug", slug)
     .maybeSingle();
 
@@ -160,7 +162,7 @@ export default async function CustomerMenuPage({
   const variants = await getAvailableVariants(restaurant.id);
 
   return (
-    <>
+    <CurrencyProvider code={normalizeCurrency(restaurant.settings?.currency)}>
       {/* The HRestroSewa moment. Overlays the menu while it renders underneath, so
           the guest waits once, not twice. */}
       <QrSplash slug={slug} />
@@ -182,6 +184,6 @@ export default async function CustomerMenuPage({
         initialNotifState={initialNotifState}
         initialActivationStatus={initialActivationStatus}
       />
-    </>
+    </CurrencyProvider>
   );
 }

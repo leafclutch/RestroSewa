@@ -14,8 +14,7 @@ import { formatShort } from "@/lib/format-time";
 import { TransferModal } from "@/app/(employee)/employee/_components/transfer-modal";
 import { AdvanceFields } from "@/app/(employee)/employee/_components/advance-fields";
 import { BedDouble, Clock, LogIn, MoveRight, Plus, Receipt, Sparkles, User, Users, UtensilsCrossed, X } from "lucide-react";
-
-const rupee = (n: number) => "₹" + Number(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+import { useCurrency } from "@/components/currency-provider";
 
 // How long until the next night ticks over — the number a receptionist wants when
 // a guest asks "if I leave now, what do I pay?".
@@ -59,6 +58,7 @@ const STATUS = STATUS_STYLE;
 // ─── Check in ────────────────────────────────────────────────────────────────
 
 function CheckInModal({ room, onClose }: { room: RoomOverview; onClose: () => void }) {
+  const cur = useCurrency();
   const [state, action, pending] = useActionState(checkInRoom, null);
   // Only ever false while a Cash + Online deposit doesn't add up. The server validates
   // the same thing; this just stops an obviously-incomplete submit.
@@ -106,7 +106,7 @@ function CheckInModal({ room, onClose }: { room: RoomOverview; onClose: () => vo
               {room.type_name}
             </span>
             <span className="text-sm tabular" style={{ color: "var(--color-ink)" }}>
-              {rupee(room.base_price)} <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>per night</span>
+              {cur.money(room.base_price)} <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>per night</span>
             </span>
           </div>
 
@@ -225,7 +225,7 @@ function CheckInModal({ room, onClose }: { room: RoomOverview; onClose: () => vo
           </div>
 
           <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-            The nightly rate is fixed at {rupee(room.base_price)} for this stay — a later price
+            The nightly rate is fixed at {cur.money(room.base_price)} for this stay — a later price
             change won&rsquo;t re-bill this guest.
           </p>
 
@@ -257,6 +257,7 @@ const RoomCard = memo(function RoomCard({ room, canCheckIn, canShift, onCheckIn,
   const s = STATUS[room.status];
   const stay = room.stay;
   const now = useNow();
+  const cur = useCurrency();
   const [cleaning, startClean] = useTransition();
 
   // The header strip carries the room's identity; the info body stays on the plain canvas so
@@ -337,7 +338,7 @@ const RoomCard = memo(function RoomCard({ room, canCheckIn, canShift, onCheckIn,
               <div>
                 <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Nights so far</p>
                 <p className="text-xs" style={{ color: "var(--color-ink)" }}>
-                  {stay.nights_so_far} × {rupee(stay.room_rate)}
+                  {stay.nights_so_far} × {cur.money(stay.room_rate)}
                 </p>
               </div>
             </div>
@@ -382,14 +383,14 @@ const RoomCard = memo(function RoomCard({ room, canCheckIn, canShift, onCheckIn,
             >
               <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Current bill</span>
               <span className="text-sm tabular font-medium" style={{ color: "var(--color-ink)" }}>
-                {rupee(stay.running_total)}
+                {cur.money(stay.running_total)}
               </span>
             </div>
           </>
         ) : (
           <>
             <p className="text-sm tabular" style={{ color: "var(--color-ink)" }}>
-              {rupee(room.base_price)}
+              {cur.money(room.base_price)}
               <span className="text-xs ml-1" style={{ color: "var(--color-ink-mute)" }}>per night</span>
             </p>
             <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>

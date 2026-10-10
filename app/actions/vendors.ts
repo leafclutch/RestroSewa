@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { STOCK_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { resolveSplit, WITH_MIXED } from "@/lib/payment-split";
+import { getCurrencyFor } from "@/lib/currency-server";
 
 export type ActionResult = { error: string } | null;
 
@@ -498,7 +499,8 @@ export async function payVendor(
     method,
     amount,
     formData.get("cash_amount") as string | null,
-    formData.get("online_amount") as string | null
+    formData.get("online_amount") as string | null,
+    (await getCurrencyFor(ru.restaurant_id)).money2
   );
   if (!split.ok) return { error: split.error };
 

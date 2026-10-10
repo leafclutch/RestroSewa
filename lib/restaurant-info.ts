@@ -2,6 +2,7 @@ import "server-only";
 import { createServiceClient } from "@/lib/supabase/service";
 import { tenantCache, revalidateTenant, CACHE } from "@/lib/cache/tenant-cache";
 import { normalizeBusinessType, type BusinessType } from "@/lib/business-type";
+import { normalizeCurrency } from "@/lib/currency";
 
 /**
  * The restaurant's own header/config, cached across requests.
@@ -33,6 +34,8 @@ export type RestaurantConfig = {
   bill_number_label: "bill" | "order";
   tax_percent: number | undefined;
   service_charge_percent: number | undefined;
+  /** ISO currency code every amount is displayed in (see lib/currency.ts). */
+  currency: string;
   /** Whether an admin has set a discount PIN. The hash itself never leaves the server. */
   discountEnabled: boolean;
   /** Whether an admin has set a Security PIN — sensitive edits are possible only when true.
@@ -77,6 +80,7 @@ export async function getRestaurantConfig(restaurantId: string): Promise<Restaur
         bill_number_label: s?.bill_number_label === "order" ? "order" : "bill",
         tax_percent: numFromSettings(s, "tax_percent", "tax_rate", "gst_percent"),
         service_charge_percent: numFromSettings(s, "service_charge_percent", "service_charge"),
+        currency: normalizeCurrency(s?.currency),
         discountEnabled: !!rest?.discount_pin_hash,
         securityEnabled: !!rest?.security_pin_hash,
       } satisfies RestaurantConfig;

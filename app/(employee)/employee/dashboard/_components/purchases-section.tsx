@@ -3,8 +3,7 @@ import { ShoppingCart, Coins, Clock, ArrowRight } from "lucide-react";
 import { getPurchaseSummary } from "@/app/actions/purchases";
 import { accentOf } from "@/lib/section-colors";
 
-const rupee = (n: number) =>
-  "₹" + Number(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+import { getCurrentCurrency } from "@/lib/currency-server";
 
 /**
  * Purchases, as a summary on the staff dashboard.
@@ -15,13 +14,14 @@ const rupee = (n: number) =>
  * see purchases, and the full page enforces `manage_purchases` for writes.
  */
 export async function PurchasesSection() {
+  const cur = await getCurrentCurrency();
   const s = await getPurchaseSummary();
   const accent = accentOf("purchases");
 
   const tiles: { label: string; value: string; tone: string; Icon: typeof ShoppingCart }[] = [
     { label: "Today", value: String(s.purchaseCount), tone: "var(--color-ink)", Icon: ShoppingCart },
-    { label: "Spent today", value: rupee(s.totalPurchases), tone: "var(--color-ink)", Icon: Coins },
-    { label: "On credit", value: rupee(s.creditPurchases), tone: "var(--color-warning)", Icon: Clock },
+    { label: "Spent today", value: cur.money(s.totalPurchases), tone: "var(--color-ink)", Icon: Coins },
+    { label: "On credit", value: cur.money(s.creditPurchases), tone: "var(--color-warning)", Icon: Clock },
   ];
 
   return (

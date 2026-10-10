@@ -35,6 +35,7 @@ import type {
   MockDownTender,
   MockPaymentMethod,
 } from "@/lib/mock-bill/draft";
+import { useCurrency } from "@/components/currency-provider";
 
 /**
  * ── THE MOCK BILLING WORKSPACE ────────────────────────────────────────────────
@@ -53,8 +54,6 @@ import type {
  * string (`markBillNumber` → "1024 · M"), so `BillTicket` stays entirely unaware that mock
  * bills exist.
  */
-
-const rupee = (n: number) => `₹${n.toFixed(2)}`;
 
 const CARD_STYLE = { background: "var(--color-canvas)", borderColor: "var(--color-hairline)" };
 const HAIRLINE = { borderColor: "var(--color-hairline)" };
@@ -221,6 +220,7 @@ function ChipRow<T extends string>({
 // ── the editor ────────────────────────────────────────────────────────────────
 
 export function MockBillEditor({ seed, staffName }: { seed: MockBillSeed; staffName: string }) {
+  const cur = useCurrency();
   const fresh = (): MockBillDraft => ({ ...emptyDraft(seed), cashier: staffName });
 
   const [draft, setDraft] = useState<MockBillDraft>(fresh);
@@ -405,7 +405,7 @@ export function MockBillEditor({ seed, staffName }: { seed: MockBillSeed; staffN
                       className={`w-24 ${inputSm}`}
                     />
                     <span className="ml-auto text-sm font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>
-                      {rupee(line.qty * line.price)}
+                      {cur.money2(line.qty * line.price)}
                     </span>
                   </div>
                 </div>
@@ -424,7 +424,7 @@ export function MockBillEditor({ seed, staffName }: { seed: MockBillSeed; staffN
 
           <Card title="Charges" subtitle="Discount, tax and service, exactly as a real bill applies them">
             <div className="grid grid-cols-3 gap-3">
-              <Field label="Discount (₹)">
+              <Field label={`Discount (${cur.symbol})`}>
                 <NumberInput value={draft.discount} onValue={(v) => set("discount", v)} />
               </Field>
               <Field label="Tax %">
@@ -445,7 +445,7 @@ export function MockBillEditor({ seed, staffName }: { seed: MockBillSeed; staffN
               Set the grand total manually
             </label>
             {manualTotal && (
-              <Field label="Grand total (₹)">
+              <Field label={`Grand total (${cur.symbol})`}>
                 {/* No `key` needed: ticking the box mounts this fresh, and `toggleManualTotal`
                     has already seeded `totalOverride` in the same batched update — so the
                     field opens showing the figure that was on screen. */}
@@ -459,10 +459,10 @@ export function MockBillEditor({ seed, staffName }: { seed: MockBillSeed; staffN
 
             {draft.method === "mixed" && (
               <div className="grid grid-cols-2 gap-3">
-                <Field label="Cash (₹)">
+                <Field label={`Cash (${cur.symbol})`}>
                   <NumberInput value={draft.cash} onValue={(v) => set("cash", v)} />
                 </Field>
-                <Field label="Online (₹)">
+                <Field label={`Online (${cur.symbol})`}>
                   <NumberInput value={draft.online} onValue={(v) => set("online", v)} />
                 </Field>
               </div>
@@ -497,15 +497,15 @@ export function MockBillEditor({ seed, staffName }: { seed: MockBillSeed; staffN
 
                 {draft.tenderedAs === "mixed" ? (
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Cash (₹)">
+                    <Field label={`Cash (${cur.symbol})`}>
                       <NumberInput value={draft.cash} onValue={(v) => set("cash", v)} />
                     </Field>
-                    <Field label="Online (₹)">
+                    <Field label={`Online (${cur.symbol})`}>
                       <NumberInput value={draft.online} onValue={(v) => set("online", v)} />
                     </Field>
                   </div>
                 ) : (
-                  <Field label="Paid at billing (₹)">
+                  <Field label={`Paid at billing (${cur.symbol})`}>
                     <NumberInput value={draft.tendered} onValue={(v) => set("tendered", v)} />
                   </Field>
                 )}
@@ -587,22 +587,22 @@ export function MockBillEditor({ seed, staffName }: { seed: MockBillSeed; staffN
               <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Total</p>
             </div>
             <div className="px-4 py-3.5 flex flex-col gap-1.5 text-sm">
-              <Row label="Subtotal" value={rupee(totals.subtotal)} />
-              {draft.discount > 0 && <Row label="Discount" value={`- ${rupee(draft.discount)}`} />}
-              {totals.tax > 0 && <Row label={`Tax (${draft.taxPercent}%)`} value={rupee(totals.tax)} />}
-              {totals.service > 0 && <Row label={`Service (${draft.servicePercent}%)`} value={rupee(totals.service)} />}
+              <Row label="Subtotal" value={cur.money2(totals.subtotal)} />
+              {draft.discount > 0 && <Row label="Discount" value={`- ${cur.money2(draft.discount)}`} />}
+              {totals.tax > 0 && <Row label={`Tax (${draft.taxPercent}%)`} value={cur.money2(totals.tax)} />}
+              {totals.service > 0 && <Row label={`Service (${draft.servicePercent}%)`} value={cur.money2(totals.service)} />}
               <div className="border-t my-1" style={HAIRLINE} />
               <div className="flex items-center justify-between gap-3">
                 <span className="font-medium" style={{ color: "var(--color-ink)" }}>
                   {draft.discount > 0 ? "Total payable" : "Grand total"}
                 </span>
                 <span className="text-lg font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>
-                  {rupee(totals.total)}
+                  {cur.money2(totals.total)}
                 </span>
               </div>
               {totals.overridden && (
                 <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                  Set manually. Derived figure: {rupee(totals.computedTotal)}.
+                  Set manually. Derived figure: {cur.money2(totals.computedTotal)}.
                 </p>
               )}
               {/* A credit bill is billed in full; what the customer still owes is the number
@@ -610,11 +610,11 @@ export function MockBillEditor({ seed, staffName }: { seed: MockBillSeed; staffN
                   subtract. Mirrors the BALANCE DUE line on the printed bill. */}
               {credit && (
                 <>
-                  {credit.tendered > 0 && <Row label="Paid at billing" value={rupee(credit.tendered)} />}
+                  {credit.tendered > 0 && <Row label="Paid at billing" value={cur.money2(credit.tendered)} />}
                   <div className="flex items-center justify-between gap-3">
                     <span className="font-medium" style={{ color: "var(--color-ink)" }}>Balance due</span>
                     <span className="text-lg font-medium tabular-nums" style={{ color: "var(--color-ruby)" }}>
-                      {rupee(credit.balance)}
+                      {cur.money2(credit.balance)}
                     </span>
                   </div>
                   <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>

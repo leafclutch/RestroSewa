@@ -2,6 +2,7 @@ import { requireRestaurantAdmin } from "@/lib/auth/guards";
 import {
   getBillingSettings,
   getBusinessDaySettings,
+  getCurrencySetting,
   getDailySummarySettings,
   getReportHistory,
   getWorkstationNumbering,
@@ -14,15 +15,17 @@ import { SecurityPinClient } from "./_components/security-pin-client";
 import { SecurityActivityClient } from "./_components/security-activity-client";
 import { BusinessDayClient } from "./_components/business-day-client";
 import { DailySummaryClient } from "./_components/daily-summary-client";
+import { CurrencyClient } from "./_components/currency-client";
 
 export default async function SettingsPage() {
   // Billing settings are the owner's call — staff (even with permissions) don't set them.
   await requireRestaurantAdmin();
-  const [settings, workstations, businessDay, dailySummary, reportHistory, securityPin, securityLog] =
+  const [settings, workstations, businessDay, currency, dailySummary, reportHistory, securityPin, securityLog] =
     await Promise.all([
       getBillingSettings(),
       getWorkstationNumbering(),
       getBusinessDaySettings(),
+      getCurrencySetting(),
       getDailySummarySettings(),
       getReportHistory(),
       getSecurityPinStatus(),
@@ -38,7 +41,7 @@ export default async function SettingsPage() {
         Settings
       </h1>
       <p className="text-sm mb-8" style={{ color: "var(--color-ink-mute)" }}>
-        When your business day ends, billing details that print on every bill — your PAN number,
+        When your business day ends, the currency amounts are shown in, billing details that print on every bill — your PAN number,
         how bills are numbered, each workstation&apos;s ticket numbering, and who may discount a
         bill.
       </p>
@@ -46,6 +49,7 @@ export default async function SettingsPage() {
       <div className="flex flex-col gap-8">
         {/* First: it decides what every date on every other screen means. */}
         <BusinessDayClient closingHour={businessDay.closingHour} />
+        <CurrencyClient currency={currency} />
         <SettingsClient settings={settings} />
         <DiscountPinClient pinSet={settings.discountPinSet} />
         <SecurityPinClient pinSet={securityPin.securityPinSet} />

@@ -5,15 +5,16 @@ import { Pencil } from "lucide-react";
 import { getPaymentTender, updatePaymentTender } from "@/app/actions/security";
 import { Input } from "@/components/ui/input";
 import { SecurityPinDialog } from "@/components/security-pin-dialog";
+import { useCurrency } from "@/components/currency-provider";
 
 // Admin-only, Security-PIN-gated correction of HOW a completed bill was paid — the
 // cash / online / card split. It never changes the bill's amount, only its tender, so the
 // three amounts must still add up to the total. Shown on the Sales list next to Reprint.
 
-const fmt = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 const num = (s: string) => (s.trim() === "" ? 0 : parseFloat(s));
 
 export function TenderEditButton({ paymentId, onEdited }: { paymentId: string; onEdited: () => void }) {
+  const cur = useCurrency();
   const [open, setOpen] = useState(false);
   const [total, setTotal] = useState(0);
   // What was already settled by a room advance — not editable here, so the split
@@ -85,12 +86,12 @@ export function TenderEditButton({ paymentId, onEdited }: { paymentId: string; o
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between text-sm">
               <span style={{ color: "var(--color-ink-mute)" }}>Bill total</span>
-              <span className="tabular-nums font-medium" style={{ color: "var(--color-ink)" }}>{fmt(total)}</span>
+              <span className="tabular-nums font-medium" style={{ color: "var(--color-ink)" }}>{cur.money(total)}</span>
             </div>
             {advance > 0 && (
               <div className="flex items-center justify-between text-sm">
                 <span style={{ color: "var(--color-ink-mute)" }}>Already settled by advance</span>
-                <span className="tabular-nums" style={{ color: "var(--color-ink-mute)" }}>−{fmt(advance)}</span>
+                <span className="tabular-nums" style={{ color: "var(--color-ink-mute)" }}>−{cur.money(advance)}</span>
               </div>
             )}
             <div className="flex flex-wrap gap-2">
@@ -101,9 +102,9 @@ export function TenderEditButton({ paymentId, onEdited }: { paymentId: string; o
             <p className="text-xs" style={{ color: matches ? "var(--color-ink-mute)" : "var(--color-ruby)" }}>
               {matches
                 ? advance > 0
-                  ? `Splits add up to the ${fmt(editable)} left after the advance.`
+                  ? `Splits add up to the ${cur.money(editable)} left after the advance.`
                   : "Splits add up to the total."
-                : `Cash + Online + Card must equal ${fmt(editable)}${advance > 0 ? " (the bill total less the advance)" : ""} (now ${fmt(sum)}).`}
+                : `Cash + Online + Card must equal ${cur.money(editable)}${advance > 0 ? " (the bill total less the advance)" : ""} (now ${cur.money(sum)}).`}
             </p>
           </div>
         )}

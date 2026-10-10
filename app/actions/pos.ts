@@ -22,6 +22,7 @@ import { folioToBill } from "@/lib/billing/room-bill";
 import type { BillSection, BillStay } from "@/lib/billing/room-bill";
 import { span } from "@/lib/perf/timing";
 import { getRestaurantConfig } from "@/lib/restaurant-info";
+import { normalizeCurrency } from "@/lib/currency";
 import {
   emitNewOrder,
   emitOrderCancelled,
@@ -2953,6 +2954,7 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
           // covered any of the bill — it used to always read 0, so `folioToBill`
           // never had an advance to show at all.
           advancePaid: advanceApplied,
+          currency: normalizeCurrency(rest?.settings?.currency),
           // The SAME rule the checkout charged under. The stay's snapshot is what
           // makes that true: change the restaurant's boundary hours tomorrow and
           // this reprint still shows the nights the guest actually paid for.

@@ -5,6 +5,7 @@ import { stockStatus } from "@/lib/stock";
 import { hasRooms, normalizeBusinessType } from "@/lib/business-type";
 import { expenseCategoryLabel } from "@/lib/expenses";
 import type { ExpenseCategoryTotal } from "@/lib/expenses";
+import { normalizeCurrency, reportMoney } from "@/lib/currency";
 
 // ─── Config (stored on restaurants.settings.daily_summary) ─────────────────────
 // A restaurant opts in and lists up to three recipients. This module owns the
@@ -36,6 +37,8 @@ export function normalizeDailySummaryConfig(raw: any): DailySummaryConfig {
 
 export type DailySummaryModel = {
   businessDate: string; // YYYY-MM-DD (Nepal business day)
+  /** The restaurant's currency code (restaurants.settings.currency). */
+  currency: string;
   hasOpening: boolean;
 
   openingCash: number;
@@ -193,7 +196,7 @@ export async function buildDailySummary(
     // from a hotel's report on a quiet day, and the emailed PDF would then disagree
     // with the screen — which is a support call.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (service as any).from("restaurants").select("type").eq("id", restaurantId).maybeSingle(),
+    (service as any).from("restaurants").select("type, settings").eq("id", restaurantId).maybeSingle(),
     // Per-entry list for the PDF. finance_report carries only the totals — this
     // table has no category to group by (unlike extra_expenses' by-category
     // jsonb), so each entry is its own PDF line, keyed by its own description.
@@ -251,6 +254,7 @@ export async function buildDailySummary(
 
   return {
     businessDate,
+    currency: normalizeCurrency(restRes.data?.settings?.currency),
     hasOpening: !!f?.has_opening,
 
     openingCash: num(f?.opening_cash),
@@ -352,12 +356,6 @@ export async function buildDailySummary(
 
 // ─── Email rendering ───────────────────────────────────────────────────────────
 
-const money = (n: number) =>
-  `NPR ${(Math.round(n * 100) / 100).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-
 function prettyDate(businessDate: string): string {
   // businessDate is already the Nepal business day; format it as a plain date
   // (no timezone maths — it's a wall-clock day string).
@@ -381,6 +379,7 @@ export function renderDailySummaryEmail(
   m: DailySummaryModel,
   restaurantName: string
 ): { subject: string; html: string; text: string } {
+  const money = reportMoney(m.currency);
   const date = prettyDate(m.businessDate);
   // En-dash separators, per the requested subject format.
   const subject = `Daily Financial Summary – ${restaurantName} – ${date}`;

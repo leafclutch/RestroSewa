@@ -8,6 +8,7 @@ import { periodBounds } from "@/lib/finance";
 import type { FinancePeriod } from "@/lib/finance";
 import { historyPeriodBounds, type HistoryPeriod } from "@/lib/history-period";
 import { resolveSplit } from "@/lib/payment-split";
+import { getCurrencyFor } from "@/lib/currency-server";
 import { expenseCategoryLabel, isSpendingCategory } from "@/lib/expenses";
 import type { ExpenseCategory, ExtraExpense, SavingTitle } from "@/lib/expenses";
 
@@ -502,7 +503,7 @@ export async function closeSavingTitle(id: string): Promise<ActionResult> {
   if (Math.abs(state.balance) > 0.005) {
     return {
       error:
-        `This saving still holds ₹${state.balance.toFixed(2)}. ` +
+        `This saving still holds ${(await getCurrencyFor(ru.restaurant_id)).money2(state.balance)}. ` +
         `Withdraw the balance first — closing it now would hide the money.`,
     };
   }
@@ -692,10 +693,7 @@ export async function withdrawSaving(
       error:
         held <= 0
           ? "There is nothing in this saving to take out."
-          : `This saving only holds ₹${held.toLocaleString("en-IN", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}.`,
+          : `This saving only holds ${(await getCurrencyFor(ru.restaurant_id)).money2(held)}.`,
     };
   }
 

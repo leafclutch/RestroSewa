@@ -41,15 +41,9 @@ import {
   Trash2,
   Wallet,
 } from "lucide-react";
+import { useCurrency } from "@/components/currency-provider";
 
 const PAGE_SIZE = 10;
-
-function money(n: number) {
-  return `₹${Math.round(n).toLocaleString("en-IN")}`;
-}
-function money2(n: number) {
-  return `₹${n.toFixed(2)}`;
-}
 
 const METHOD_LABEL: Record<string, string> = {
   cash: "Cash",
@@ -88,6 +82,7 @@ function VendorForm({
   vendor?: VendorRow;
   onDone: () => void;
 }) {
+  const cur = useCurrency();
   const editing = !!vendor;
   const [state, action, pending] = useActionState<ActionResult, FormData>(
     editing ? updateVendor : createVendor,
@@ -125,7 +120,7 @@ function VendorForm({
         {!editing && (
           <div className="flex flex-col gap-1.5">
             <label htmlFor="s_opening" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
-              Already owed (₹)
+              Already owed ({cur.symbol})
             </label>
             <Input id="s_opening" name="opening_credit" type="number" min="0" step="0.01" placeholder="0.00" />
           </div>
@@ -178,6 +173,7 @@ function VendorAccount({
   canManage: boolean;
   onChanged: () => void;
 }) {
+  const cur = useCurrency();
   const [detail, setDetail] = useState<VendorDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
@@ -238,11 +234,11 @@ function VendorAccount({
       >
         <div className="flex items-center justify-between text-sm">
           <span style={{ color: "var(--color-ink-mute)" }}>Total bought from them</span>
-          <span className="tabular-nums" style={{ color: "var(--color-ink)" }}>{money2(detail.total_purchased)}</span>
+          <span className="tabular-nums" style={{ color: "var(--color-ink)" }}>{cur.money2(detail.total_purchased)}</span>
         </div>
         <div className="flex items-center justify-between text-sm">
           <span style={{ color: "var(--color-ink-mute)" }}>Total paid to date</span>
-          <span className="tabular-nums" style={{ color: "var(--color-ink)" }}>{money2(detail.total_paid)}</span>
+          <span className="tabular-nums" style={{ color: "var(--color-ink)" }}>{cur.money2(detail.total_paid)}</span>
         </div>
         <div
           className="flex items-center justify-between pt-1.5 border-t"
@@ -252,7 +248,7 @@ function VendorAccount({
             {settled ? "Settled" : "We still owe"}
           </span>
           <span className="text-lg font-medium tabular-nums" style={{ color: settled ? "var(--color-success)" : "#9a3412" }}>
-            {money2(owed)}
+            {cur.money2(owed)}
           </span>
         </div>
       </div>
@@ -304,11 +300,11 @@ function VendorAccount({
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="pay_amount" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
-              Amount (₹)
+              Amount ({cur.symbol})
             </label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>₹</span>
-              <Input
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>{cur.symbol}</span>
+              <Input style={{ paddingLeft: cur.inputPad }}
                 id="pay_amount"
                 name="amount"
                 type="number"
@@ -328,7 +324,7 @@ function VendorAccount({
               className="self-start text-xs underline"
               style={{ color: "var(--color-primary)" }}
             >
-              Settle in full ({money2(owed)})
+              Settle in full ({cur.money2(owed)})
             </button>
           </div>
 
@@ -355,7 +351,7 @@ function VendorAccount({
           {amount !== "" && !amountValid && (
             <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
               {amountNum > owed
-                ? `That's more than the ${money2(owed)} outstanding.`
+                ? `That's more than the ${cur.money2(owed)} outstanding.`
                 : "Enter an amount greater than zero."}
             </p>
           )}
@@ -367,7 +363,7 @@ function VendorAccount({
           )}
 
           <Button type="submit" variant="primary" disabled={pending || !amountValid}>
-            {pending ? "Recording…" : `Pay ${amountNum > 0 ? money2(amountNum) : ""}`}
+            {pending ? "Recording…" : `Pay ${amountNum > 0 ? cur.money2(amountNum) : ""}`}
           </Button>
         </form>
       )}
@@ -418,7 +414,7 @@ function VendorAccount({
                     className="text-sm font-medium tabular-nums shrink-0"
                     style={{ color: raises ? "var(--color-warning)" : "#1a7a4a" }}
                   >
-                    {raises ? "+" : "−"}{money2(h.amount)}
+                    {raises ? "+" : "−"}{cur.money2(h.amount)}
                   </p>
                 </div>
               );
@@ -441,6 +437,7 @@ export function VendorsClient({
   initialSummary: VendorSummary;
   canManage: boolean;
 }) {
+  const cur = useCurrency();
   const [vendors, setVendors] = useState(initialVendors);
   const [summary, setSummary] = useState(initialSummary);
   const [search, setSearch] = useState("");
@@ -524,7 +521,7 @@ export function VendorsClient({
         <StatCard label="Active vendors" value={String(summary.activeCount)} />
         <StatCard
           label="Total outstanding"
-          value={money(summary.outstanding)}
+          value={cur.money(summary.outstanding)}
           tone={summary.outstanding > 0 ? "#dc2626" : undefined}
         />
         <StatCard label="Vendors owed money" value={String(summary.owingCount)} />
@@ -615,7 +612,7 @@ export function VendorsClient({
                       className="px-4 py-3 text-right tabular-nums font-medium"
                       style={{ color: s.credit_balance > 0 ? "var(--color-danger)" : "var(--color-ink-mute)" }}
                     >
-                      {s.credit_balance > 0 ? money2(s.credit_balance) : "—"}
+                      {s.credit_balance > 0 ? cur.money2(s.credit_balance) : "—"}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
@@ -695,7 +692,7 @@ export function VendorsClient({
                       className="text-sm font-medium tabular-nums"
                       style={{ color: s.credit_balance > 0 ? "var(--color-danger)" : "var(--color-ink-mute)" }}
                     >
-                      {s.credit_balance > 0 ? money(s.credit_balance) : "Settled"}
+                      {s.credit_balance > 0 ? cur.money(s.credit_balance) : "Settled"}
                     </p>
                     {s.credit_balance > 0 && (
                       <p className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>outstanding</p>

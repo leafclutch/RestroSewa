@@ -6,6 +6,8 @@ import { AdminSidebar } from "./admin/_components/admin-sidebar";
 import { OfflineGate } from "@/components/pwa/offline-gate";
 import { SubscriptionWatermark } from "@/components/subscription-watermark";
 import { subscriptionDaysRemaining } from "@/lib/subscription";
+import { CurrencyProvider } from "@/components/currency-provider";
+import { normalizeCurrency } from "@/lib/currency";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   // Layout allows any active staff member — individual pages guard their own permissions.
@@ -15,7 +17,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: restaurant, error } = await (service as any)
     .from("restaurants")
-    .select("name, logo_url, type, install_date, subscription_extra_days")
+    .select("name, logo_url, type, install_date, subscription_extra_days, settings")
     .eq("id", restaurantUser.restaurant_id)
     .single();
 
@@ -45,6 +47,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const showRooms = hasRooms(normalizeBusinessType(restaurant?.type));
 
   return (
+    // Read fresh on every request (not the 60s-cached config), so a currency change in
+    // Settings shows on the very next navigation.
+    <CurrencyProvider code={normalizeCurrency(restaurant?.settings?.currency)}>
     <div className="admin-surface flex min-h-screen" style={{ background: "var(--color-canvas-soft)" }}>
       <AdminSidebar
         restaurantName={restaurant?.name ?? "Restaurant"}
@@ -73,5 +78,6 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <OfflineGate />
       <SubscriptionWatermark daysRemaining={daysRemaining} />
     </div>
+    </CurrencyProvider>
   );
 }
