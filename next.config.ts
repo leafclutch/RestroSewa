@@ -74,6 +74,11 @@ const nextConfig: NextConfig = {
     remotePatterns: supabaseImageHost
       ? [{ ...supabaseImageHost, pathname: "/storage/v1/object/public/**" }]
       : [],
+    // Every stored image (logos, menu card photos) has a unique uuid filename and is
+    // never overwritten, so a resized copy can't go stale — keep it for 31 days instead
+    // of the 4-hour default, which made the self-hosted storage (≈1s per request) the
+    // bottleneck again several times a day.
+    minimumCacheTTL: 2678400,
   },
 
   // `pg` powers the real-time LISTEN connection (lib/realtime/bus.ts). It does
