@@ -61,7 +61,6 @@ function where(n: NotifiableRow): string {
   return "Walk-in";
 }
 
-const rupee = (v: number) => `₹${Math.round(v)}`;
 
 /**
  * What the station is actually being asked to make — in about forty characters.
@@ -91,7 +90,12 @@ function describeItems(items: { name: string; quantity: number }[]): string {
  * default, not the exception. Every alert that isn't worth interrupting someone for
  * teaches them to ignore the ones that are.
  */
-export function buildPushPayload(n: NotifiableRow): PushPayload | null {
+/** `money` is the restaurant's whole-unit formatter (lib/currency.ts → `money`). */
+export function buildPushPayload(
+  n: NotifiableRow,
+  money: (n: number) => string = (v) => String(Math.round(v))
+): PushPayload | null {
+  const rupee = money;
   const place = where(n);
 
   switch (n.type) {

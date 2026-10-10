@@ -7,6 +7,8 @@ import { PullToRefresh } from "@/components/pwa/pull-to-refresh";
 import { OfflineGate } from "@/components/pwa/offline-gate";
 import { SubscriptionWatermark } from "@/components/subscription-watermark";
 import { subscriptionDaysRemaining } from "@/lib/subscription";
+import { CurrencyProvider } from "@/components/currency-provider";
+import { normalizeCurrency } from "@/lib/currency";
 
 // Overrides the root's light theme colour for the staff surface only.
 //
@@ -25,7 +27,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: restaurant, error } = await (service as any)
     .from("restaurants")
-    .select("name, logo_url, install_date, subscription_extra_days")
+    .select("name, logo_url, install_date, subscription_extra_days, settings")
     .eq("id", restaurantUser.restaurant_id)
     .single();
 
@@ -63,6 +65,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
     // exactly the visible viewport — but a `100vh` floor on this ancestor forced
     // the page to be at least that much taller anyway, and the leftover sliver
     // between `vh` and `dvh` was exactly the "whole section is scrollable" gap.
+    <CurrencyProvider code={normalizeCurrency(restaurant?.settings?.currency)}>
     <div className="min-h-dvh" style={{ background: "var(--color-canvas-soft)" }}>
       <StaffNav
         restaurantName={restaurant?.name ?? "Restaurant"}
@@ -85,5 +88,6 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
       <OfflineGate />
       <SubscriptionWatermark daysRemaining={daysRemaining} />
     </div>
+    </CurrencyProvider>
   );
 }

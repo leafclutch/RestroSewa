@@ -18,12 +18,17 @@ export type SplitResult =
  *
  * A non-mixed method returns nulls, which the DB functions read as "derive it
  * from the method" — i.e. the behaviour they had before splits existed.
+ *
+ * `money` formats the amount in the error — pass the restaurant's currency formatter
+ * (lib/currency.ts). Without one the figure is printed bare rather than in a guessed
+ * currency.
  */
 export function resolveSplit(
   method: string,
   amount: number,
   rawCash: string | null,
-  rawOnline: string | null
+  rawOnline: string | null,
+  money: (n: number) => string = (n) => n.toFixed(2)
 ): SplitResult {
   if (method !== "mixed") return { ok: true, cash: null, online: null };
 
@@ -41,7 +46,7 @@ export function resolveSplit(
   if (Math.abs(cash + online - amount) > 0.01) {
     return {
       ok: false,
-      error: `Cash and online together must equal ₹${amount.toFixed(2)}.`,
+      error: `Cash and online together must equal ${money(amount)}.`,
     };
   }
   // Send an exact pair: the caller's two figures may each be rounded, and the

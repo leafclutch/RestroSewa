@@ -3,8 +3,7 @@ import { Receipt, Banknote, Landmark, PiggyBank, ArrowRight } from "lucide-react
 import { getExpenseSummary } from "@/app/actions/expenses";
 import { accentOf } from "@/lib/section-colors";
 
-const rupee = (n: number) =>
-  "₹" + Number(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+import { getCurrentCurrency } from "@/lib/currency-server";
 
 /**
  * Extra Expenses, as a summary on the staff dashboard.
@@ -18,24 +17,25 @@ const rupee = (n: number) =>
  * "you may not see this".
  */
 export async function ExpensesSection() {
+  const cur = await getCurrentCurrency();
   const s = await getExpenseSummary();
   const accent = accentOf("expenses");
 
   const tiles: { label: string; value: string; tone: string; Icon: typeof Receipt }[] = [
     {
       label: "Today",
-      value: rupee(s.todayTotal),
+      value: cur.money(s.todayTotal),
       tone: s.todayTotal > 0 ? "var(--color-ruby)" : "var(--color-ink)",
       Icon: Receipt,
     },
-    { label: "Cash", value: rupee(s.todayCash), tone: "var(--color-ink)", Icon: Banknote },
-    { label: "Online", value: rupee(s.todayOnline), tone: "var(--color-ink)", Icon: Landmark },
+    { label: "Cash", value: cur.money(s.todayCash), tone: "var(--color-ink)", Icon: Banknote },
+    { label: "Online", value: cur.money(s.todayOnline), tone: "var(--color-ink)", Icon: Landmark },
   ];
 
   if (s.savingsHeld !== null) {
     tiles.push({
       label: "Saved",
-      value: rupee(s.savingsHeld),
+      value: cur.money(s.savingsHeld),
       tone: "var(--color-success)",
       Icon: PiggyBank,
     });

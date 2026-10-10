@@ -1,17 +1,12 @@
 import "server-only";
 import { ReportPdf, type ReportLogo } from "./pdf/report-document";
 import type { DailySummaryModel } from "./daily-summary";
+import { reportMoney } from "@/lib/currency";
 
 // The daily report's PDF layout. All financial figures the owner asked for, grouped
 // into sections, rendered through the reusable ReportPdf chrome (branded header +
 // page-numbered HRestroSewa footer). A weekly/monthly report is the same shape with
 // its own model + groups — the chrome and page-numbering are shared.
-
-const money = (n: number) =>
-  `NPR ${(Math.round(n * 100) / 100).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
 
 function prettyDate(businessDate: string): string {
   const [y, m, d] = businessDate.split("-").map(Number);
@@ -28,6 +23,7 @@ export async function renderDailySummaryPdf(
   m: DailySummaryModel,
   opts: { restaurantName: string; logo?: ReportLogo | null }
 ): Promise<Uint8Array> {
+  const money = reportMoney(m.currency);
   const pdf = await ReportPdf.create({
     title: "Daily Financial Summary",
     restaurantName: opts.restaurantName,

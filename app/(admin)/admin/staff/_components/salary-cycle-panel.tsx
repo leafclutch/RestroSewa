@@ -36,9 +36,7 @@ import type {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CalendarDays, Check, Loader2, Lock } from "lucide-react";
-
-const money = (n: number) =>
-  `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+import { useCurrency } from "@/components/currency-provider";
 
 /** The statuses an admin can pick, in the order they are offered. */
 const CYCLE_STATUSES: AttendanceStatus[] = [
@@ -179,6 +177,7 @@ export function SalaryCyclePanel({
   row: PayrollCycleRow;
   onChanged: () => void;
 }) {
+  const cur = useCurrency();
   const [days, setDays] = useState<AttendanceDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [pending, startTransition] = useTransition();
@@ -284,9 +283,9 @@ export function SalaryCyclePanel({
           ["Present", `${payable} days`],
           ["Absent", `${Math.round(absent * 1000) / 1000} days`],
           ["Payable", `${payable} days`],
-          ["Calculated", money(calculated)],
-          ["Paid", money(row.totalPaid)],
-          ["Remaining", money(row.remaining)],
+          ["Calculated", cur.money2(calculated)],
+          ["Paid", cur.money2(row.totalPaid)],
+          ["Remaining", cur.money2(row.remaining)],
         ].map(([k, v]) => (
           <div key={k} className="flex flex-col">
             <dt

@@ -44,11 +44,9 @@ import { PeriodFilter } from "@/components/ui/period-filter";
 import type { HistoryPeriod } from "@/lib/history-period";
 import { Modal } from "../../_components/modal";
 import { ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { useCurrency } from "@/components/currency-provider";
 
 const PAGE_SIZE = 10;
-
-const money = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
-const money2 = (n: number) => `₹${n.toFixed(2)}`;
 
 type ProductOption = { id: string; name: string; unit: string };
 
@@ -267,6 +265,7 @@ function PurchaseForm({
   onDone: () => void;
   edit?: { purchaseId: string; initial: PurchaseFormInitial };
 }) {
+  const cur = useCurrency();
   const [state, action, pending] = useActionState<ActionResult, FormData>(recordPurchase, null);
   const [vendorId, setVendorId] = useState(edit?.initial.vendorId ?? "");
   const [method, setMethod] = useState<"cash" | "online" | "credit" | "mixed">(edit?.initial.method ?? "cash");
@@ -381,7 +380,7 @@ function PurchaseForm({
         </select>
         {vendor && vendor.credit_balance > 0 && (
           <p className="text-xs" style={{ color: "var(--color-warning)" }}>
-            You already owe {vendor.name} {money2(vendor.credit_balance)}.
+            You already owe {vendor.name} {cur.money2(vendor.credit_balance)}.
           </p>
         )}
         {vendors.length === 0 && (
@@ -465,7 +464,7 @@ function PurchaseForm({
                     type="number"
                     min="0"
                     step="0.01"
-                    placeholder={prod ? `Cost per ${prod.unit} (₹)` : "Cost per unit (₹)"}
+                    placeholder={prod ? `Cost per ${prod.unit} (${cur.symbol})` : `Cost per unit (${cur.symbol})`}
                     value={l.unit_cost}
                     onChange={(e) => setLine(l.key, { unit_cost: e.target.value })}
                   />
@@ -474,7 +473,7 @@ function PurchaseForm({
                     type="number"
                     min="0"
                     step="0.01"
-                    placeholder="Total cost (₹)"
+                    placeholder={`Total cost (${cur.symbol})`}
                     value={l.total_cost}
                     onChange={(e) => setLine(l.key, { total_cost: e.target.value })}
                   />
@@ -484,8 +483,8 @@ function PurchaseForm({
               {lineTotal > 0 && (
                 <p className="text-xs text-right tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
                   {l.cost_mode === "unit"
-                    ? `Line total ${money2(lineTotal)}`
-                    : `= ${money2(unit)} per ${prod?.unit ?? "unit"}`}
+                    ? `Line total ${cur.money2(lineTotal)}`
+                    : `= ${cur.money2(unit)} per ${prod?.unit ?? "unit"}`}
                 </p>
               )}
             </div>
@@ -551,7 +550,7 @@ function PurchaseForm({
         <div className="flex flex-col gap-2">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="pu_paid" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
-              Paying now (₹) — leave blank for full credit
+              Paying now ({cur.symbol}) — leave blank for full credit
             </label>
             <Input
               id="pu_paid"
@@ -615,17 +614,17 @@ function PurchaseForm({
       >
         <div className="flex items-center justify-between text-sm">
           <span style={{ color: "var(--color-ink-mute)" }}>Purchase total</span>
-          <span className="tabular-nums font-medium" style={{ color: "var(--color-ink)" }}>{money2(total)}</span>
+          <span className="tabular-nums font-medium" style={{ color: "var(--color-ink)" }}>{cur.money2(total)}</span>
         </div>
         {method === "credit" && (
           <>
             <div className="flex items-center justify-between text-sm">
               <span style={{ color: "var(--color-ink-mute)" }}>Paying now</span>
-              <span className="tabular-nums" style={{ color: "var(--color-ink)" }}>− {money2(paidNowNum)}</span>
+              <span className="tabular-nums" style={{ color: "var(--color-ink)" }}>− {cur.money2(paidNowNum)}</span>
             </div>
             <div className="flex items-center justify-between pt-1.5 border-t" style={{ borderColor: "color-mix(in srgb, var(--color-warning) 20%, transparent)" }}>
               <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Goes on vendor credit</span>
-              <span className="text-lg font-medium tabular-nums" style={{ color: "var(--color-warning)" }}>{money2(onCredit)}</span>
+              <span className="text-lg font-medium tabular-nums" style={{ color: "var(--color-warning)" }}>{cur.money2(onCredit)}</span>
             </div>
           </>
         )}
@@ -654,7 +653,7 @@ function PurchaseForm({
       {isEdit ? (
         <>
           <Button type="button" variant="primary" disabled={!canSubmit} onClick={() => setPinOpen(true)}>
-            {`Save changes${total > 0 ? " · " + money(total) : ""}`}
+            {`Save changes${total > 0 ? " · " + cur.money(total) : ""}`}
           </Button>
           <SecurityPinDialog
             open={pinOpen}
@@ -672,8 +671,8 @@ function PurchaseForm({
           {pending
             ? "Recording…"
             : method === "credit" && onCredit > 0
-            ? `Record & add ${money(onCredit)} to vendor credit`
-            : `Record purchase ${total > 0 ? money(total) : ""}`}
+            ? `Record & add ${cur.money(onCredit)} to vendor credit`
+            : `Record purchase ${total > 0 ? cur.money(total) : ""}`}
         </Button>
       )}
     </form>
@@ -697,6 +696,7 @@ function PurchaseDetailView({
   securityEnabled: boolean;
   onEdited: () => void;
 }) {
+  const cur = useCurrency();
   const [detail, setDetail] = useState<PurchaseDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -779,11 +779,11 @@ function PurchaseDetailView({
             <div className="flex-1 min-w-0">
               <p className="text-sm truncate" style={{ color: "var(--color-ink)" }}>{i.product_name}</p>
               <p className="text-xs tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
-                {qty(i.quantity)} {i.unit} × {money2(i.unit_cost)}
+                {qty(i.quantity)} {i.unit} × {cur.money2(i.unit_cost)}
               </p>
             </div>
             <p className="text-sm tabular-nums shrink-0" style={{ color: "var(--color-ink)" }}>
-              {money2(i.line_total)}
+              {cur.money2(i.line_total)}
             </p>
           </div>
         ))}
@@ -793,7 +793,7 @@ function PurchaseDetailView({
         >
           <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Total</span>
           <span className="text-lg font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>
-            {money2(detail.total_amount)}
+            {cur.money2(detail.total_amount)}
           </span>
         </div>
       </div>
@@ -811,19 +811,19 @@ function PurchaseDetailView({
         {detail.cash_amount > 0 && (
           <div className="flex justify-between gap-3">
             <span>Paid in cash</span>
-            <span style={{ color: "var(--color-ink)" }}>{money2(detail.cash_amount)}</span>
+            <span style={{ color: "var(--color-ink)" }}>{cur.money2(detail.cash_amount)}</span>
           </div>
         )}
         {detail.online_amount > 0 && (
           <div className="flex justify-between gap-3">
             <span>Paid online</span>
-            <span style={{ color: "var(--color-ink)" }}>{money2(detail.online_amount)}</span>
+            <span style={{ color: "var(--color-ink)" }}>{cur.money2(detail.online_amount)}</span>
           </div>
         )}
         {detail.credit_amount > 0 && (
           <div className="flex justify-between gap-3">
             <span>Added to vendor credit</span>
-            <span style={{ color: "var(--color-warning)" }}>{money2(detail.credit_amount)}</span>
+            <span style={{ color: "var(--color-warning)" }}>{cur.money2(detail.credit_amount)}</span>
           </div>
         )}
         <div className="flex justify-between gap-3">
@@ -889,6 +889,7 @@ export function PurchasesClient({
   /** Whether a Security PIN is configured — editing is impossible without it. */
   securityEnabled: boolean;
 }) {
+  const cur = useCurrency();
   const [rows, setRows] = useState(initialPurchases);
   const [lines, setLines] = useState(initialLines);
   const [summary, setSummary] = useState(initialSummary);
@@ -1004,12 +1005,12 @@ export function PurchasesClient({
 
       {/* Today */}
       <div className="grid gap-3 my-5" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
-        <StatCard label="Purchases today" value={money(summary.totalPurchases)} />
-        <StatCard label="Cash spent today" value={money(summary.cashSpend)} />
-        <StatCard label="Online spent today" value={money(summary.onlineSpend)} />
+        <StatCard label="Purchases today" value={cur.money(summary.totalPurchases)} />
+        <StatCard label="Cash spent today" value={cur.money(summary.cashSpend)} />
+        <StatCard label="Online spent today" value={cur.money(summary.onlineSpend)} />
         <StatCard
           label="On credit today"
-          value={money(summary.creditPurchases)}
+          value={cur.money(summary.creditPurchases)}
           tone={summary.creditPurchases > 0 ? "#f97316" : undefined}
         />
       </div>
@@ -1090,7 +1091,7 @@ export function PurchasesClient({
           </div>
           <div className="text-right">
             <p className="text-lg font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>
-              {money2(stationTotal)}
+              {cur.money2(stationTotal)}
             </p>
             <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
               spent on {stationLabel.toLowerCase()} stock
@@ -1164,10 +1165,10 @@ export function PurchasesClient({
                       {qty(l.quantity)} {l.unit}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
-                      {money2(l.unit_cost)}
+                      {cur.money2(l.unit_cost)}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums font-medium" style={{ color: "var(--color-ink)" }}>
-                      {money2(l.line_total)}
+                      {cur.money2(l.line_total)}
                     </td>
                   </tr>
                 ))}
@@ -1194,7 +1195,7 @@ export function PurchasesClient({
                       {l.product_name}
                     </p>
                     <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
-                      {qty(l.quantity)} {l.unit} × {money2(l.unit_cost)}
+                      {qty(l.quantity)} {l.unit} × {cur.money2(l.unit_cost)}
                     </p>
                     <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
                       {l.purchase_code} · {l.vendor_name} ·{" "}
@@ -1202,7 +1203,7 @@ export function PurchasesClient({
                     </p>
                   </div>
                   <p className="text-sm font-medium tabular-nums shrink-0" style={{ color: "var(--color-ink)" }}>
-                    {money(l.line_total)}
+                    {cur.money(l.line_total)}
                   </p>
                 </div>
               </button>
@@ -1303,10 +1304,10 @@ export function PurchasesClient({
                       className="px-4 py-3 text-right tabular-nums"
                       style={{ color: p.credit_amount > 0 ? "var(--color-danger)" : "var(--color-ink-mute)" }}
                     >
-                      {p.credit_amount > 0 ? money2(p.credit_amount) : "—"}
+                      {p.credit_amount > 0 ? cur.money2(p.credit_amount) : "—"}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums font-medium" style={{ color: "var(--color-ink)" }}>
-                      {money2(p.total_amount)}
+                      {cur.money2(p.total_amount)}
                     </td>
                   </tr>
                 ))}
@@ -1334,7 +1335,7 @@ export function PurchasesClient({
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-sm font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>
-                      {money(p.total_amount)}
+                      {cur.money(p.total_amount)}
                     </p>
                     <p className="text-xs uppercase tracking-wide" style={{ color: METHOD_COLOR[p.method], letterSpacing: "0.06em" }}>
                       {METHOD_LABEL[p.method]}
@@ -1343,7 +1344,7 @@ export function PurchasesClient({
                 </div>
                 {p.credit_amount > 0 && (
                   <p className="text-xs mt-1.5" style={{ color: "var(--color-danger)" }}>
-                    {money2(p.credit_amount)} added to vendor credit
+                    {cur.money2(p.credit_amount)} added to vendor credit
                   </p>
                 )}
               </button>

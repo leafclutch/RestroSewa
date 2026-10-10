@@ -4,9 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { cancelRoomStay } from "@/app/actions/rooms";
 import { Button } from "@/components/ui/button";
 import { TriangleAlert } from "lucide-react";
-
-const rupee = (n: number) =>
-  "₹" + Number(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { useCurrency } from "@/components/currency-provider";
 
 const inputClass = "w-full h-10 rounded-lg border px-3 text-sm";
 const inputStyle = {
@@ -46,6 +44,7 @@ export function CancelStayForm({
   target: CancelTarget;
   onDone: () => void;
 }) {
+  const cur = useCurrency();
   const [keepRaw, setKeepRaw] = useState("");
   const [tender, setTender] = useState<Tender>("cash");
   const [refundCashRaw, setRefundCashRaw] = useState("");
@@ -119,7 +118,7 @@ export function CancelStayForm({
         <TriangleAlert size={14} className="mt-0.5 shrink-0" style={{ color: "var(--color-warning)" }} />
         <p className="text-xs" style={{ color: "var(--color-warning)" }}>
           Room {target.roomNumber} · {target.guestName} has run up{" "}
-          <strong>{rupee(target.runningTotal)}</strong>
+          <strong>{cur.money2(target.runningTotal)}</strong>
           {target.nights > 0 && ` over ${target.nights} ${target.nights === 1 ? "night" : "nights"}`}.
           Cancelling <strong>writes that off</strong> — only what you keep below is charged.
         </p>
@@ -135,10 +134,10 @@ export function CancelStayForm({
               Deposit held
             </p>
             <p className="text-lg tabular-nums" style={{ color: "var(--color-ink)" }}>
-              {rupee(held)}
+              {cur.money2(held)}
             </p>
             <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
-              {rupee(target.advanceCash)} cash + {rupee(target.advanceOnline)} online
+              {cur.money2(target.advanceCash)} cash + {cur.money2(target.advanceOnline)} online
             </p>
           </div>
 
@@ -174,7 +173,7 @@ export function CancelStayForm({
                 Refund to guest
               </span>
               <span className="text-lg tabular-nums" style={{ color: "var(--color-primary)" }}>
-                {rupee(refund)}
+                {cur.money2(refund)}
               </span>
             </div>
           </div>
@@ -235,7 +234,7 @@ export function CancelStayForm({
 
               {!split.ok && (
                 <p className="text-xs mt-1.5" style={{ color: "var(--color-ruby)" }}>
-                  Cash and online together must equal {rupee(refund)}.
+                  Cash and online together must equal {cur.money2(refund)}.
                 </p>
               )}
             </div>

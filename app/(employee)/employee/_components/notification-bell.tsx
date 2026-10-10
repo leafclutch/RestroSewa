@@ -15,6 +15,7 @@ import { PushPrompt } from "@/components/pwa/push-prompt";
 import { NotificationPreferences } from "@/components/pwa/notification-preferences";
 import { formatTime } from "@/lib/format-time";
 import { ArrowDown, Bell, Check, CheckCheck, DoorOpen, Loader2, UtensilsCrossed, X } from "lucide-react";
+import { useCurrency } from "@/components/currency-provider";
 
 // Notifications now arrive by push. This is only a safety net in case the SSE
 // stream is down (proxy, sleep/resume) — hence the long interval.
@@ -32,8 +33,6 @@ const TYPE_CONFIG = {
     color: "#0891b2",
   },
 } as const;
-
-const rupee = (n: number) => `₹${n.toFixed(0)}`;
 
 function whereOf(n: NotificationRow) {
   if (n.table_number) return `Table ${n.table_number}`;
@@ -61,6 +60,7 @@ function NotificationCard({
   busy: boolean;
   onAct: (fn: () => Promise<unknown>) => void;
 }) {
+  const cur = useCurrency();
   const cfg = TYPE_CONFIG[n.type] ?? TYPE_CONFIG.call_waiter;
   const isActivation = n.type === "table_activation_request";
   const acknowledged = n.status === "acknowledged";
@@ -119,7 +119,7 @@ function NotificationCard({
                   {it.name}
                 </span>
                 <span className="shrink-0 tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
-                  {rupee(it.price * it.quantity)}
+                  {cur.money(it.price * it.quantity)}
                 </span>
               </div>
             ))}
@@ -128,7 +128,7 @@ function NotificationCard({
               style={{ borderColor: "var(--color-hairline)", color: "var(--color-ink)" }}
             >
               <span>Total</span>
-              <span className="tabular-nums">{rupee(n.order_total ?? 0)}</span>
+              <span className="tabular-nums">{cur.money(n.order_total ?? 0)}</span>
             </div>
           </div>
         </div>

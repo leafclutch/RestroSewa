@@ -7,9 +7,7 @@ import type { ActiveStay } from "@/app/actions/rooms";
 import { Modal } from "@/app/(admin)/admin/_components/modal";
 import { Button } from "@/components/ui/button";
 import { CancelStayForm, type CancelTarget } from "./cancel-stay-form";
-
-const rupee = (n: number) =>
-  "₹" + Number(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+import { useCurrency } from "@/components/currency-provider";
 
 /**
  * Checked-in guests, with a way to cancel a stay.
@@ -20,6 +18,7 @@ const rupee = (n: number) =>
  * automatically), and the server re-checks that plus the Security PIN.
  */
 export function ActiveStaysClient({ stays }: { stays: ActiveStay[] }) {
+  const cur = useCurrency();
   const router = useRouter();
   const [target, setTarget] = useState<CancelTarget | null>(null);
 
@@ -67,8 +66,8 @@ export function ActiveStaysClient({ stays }: { stays: ActiveStay[] }) {
                   hour12: true,
                 })}
                 {" · "}
-                {s.nights} {s.nights === 1 ? "night" : "nights"} · run up {rupee(s.runningTotal)}
-                {s.advanceHeld > 0.005 && ` · deposit ${rupee(s.advanceHeld)}`}
+                {s.nights} {s.nights === 1 ? "night" : "nights"} · run up {cur.money(s.runningTotal)}
+                {s.advanceHeld > 0.005 && ` · deposit ${cur.money(s.advanceHeld)}`}
               </p>
             </div>
             <Button

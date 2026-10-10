@@ -3,8 +3,7 @@ import { Boxes, AlertTriangle, TriangleAlert, ArrowRight } from "lucide-react";
 import { getStockSummary } from "@/app/actions/stock";
 import { accentOf } from "@/lib/section-colors";
 
-const rupee = (n: number) =>
-  "₹" + Number(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+import { getCurrentCurrency } from "@/lib/currency-server";
 
 /**
  * Stock, as a summary on the staff dashboard.
@@ -19,7 +18,7 @@ const rupee = (n: number) =>
  * there is no permission check to repeat here.
  */
 export async function StockSection() {
-  const s = await getStockSummary();
+  const [s, cur] = await Promise.all([getStockSummary(), getCurrentCurrency()]);
   // No dedicated stock accent in the palette; accentOf() falls back to neutral ink.
   const accent = accentOf("stock");
 
@@ -59,7 +58,7 @@ export async function StockSection() {
           Inventory value
         </span>
         <span className="text-sm tabular font-medium" style={{ color: "var(--color-ink)" }}>
-          {rupee(s.inventoryValue)}
+          {cur.money(s.inventoryValue)}
         </span>
       </div>
 

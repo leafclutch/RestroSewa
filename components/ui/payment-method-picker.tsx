@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
+import { useCurrency } from "@/components/currency-provider";
 
 // Every payment screen used to hand-roll its own method pills, and only billing
 // ever grew a working mixed-payment panel (auto-complement, sum validation,
@@ -47,6 +48,7 @@ export function PaymentMethodPicker({
   disabled?: boolean;
   mixedLabel?: string;
 }) {
+  const cur = useCurrency();
   const cashNum = parseFloat(cash) || 0;
   const onlineNum = parseFloat(online) || 0;
   const bothFilled = cash !== "" && online !== "";
@@ -105,16 +107,16 @@ export function PaymentMethodPicker({
                 className="text-xs uppercase tracking-wide"
                 style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
               >
-                {side === "cash" ? "Cash amount (₹)" : "Online amount (₹)"}
+                {side === "cash" ? `Cash amount (${cur.symbol})` : `Online amount (${cur.symbol})`}
               </label>
               <div className="relative">
                 <span
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
                   style={{ color: "var(--color-ink-mute)" }}
                 >
-                  ₹
+                  {cur.symbol}
                 </span>
-                <Input
+                <Input style={{ paddingLeft: cur.inputPad }}
                   id={`pmp_${side}`}
                   type="number"
                   min="0"
@@ -132,7 +134,7 @@ export function PaymentMethodPicker({
 
           {bothFilled && !valid && (
             <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
-              Cash and Online together must equal ₹{total.toFixed(2)}.
+              Cash and Online together must equal {cur.prefix}{total.toFixed(2)}.
             </p>
           )}
           {bothFilled && valid && (

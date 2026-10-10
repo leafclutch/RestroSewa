@@ -8,6 +8,7 @@ import type { CreditStats } from "@/lib/credits";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { PaidBillButton } from "./paid-bill";
 import { TenderEditButton } from "./tender-edit";
+import { useCurrency } from "@/components/currency-provider";
 
 // Fallback for a report that predates credits (a stale client-router payload).
 const EMPTY_CREDIT_STATS: CreditStats = {
@@ -18,10 +19,6 @@ const EMPTY_CREDIT_STATS: CreditStats = {
   fullyPaidCount: 0,
   openCount: 0,
 };
-
-function money(n: number) {
-  return `₹${Math.round(n).toLocaleString("en-IN")}`;
-}
 
 const METHOD_LABEL: Record<string, string> = {
   cash: "Cash",
@@ -177,6 +174,7 @@ function TxnCard({
    *  receipt that needs printing instead of the general list. */
   highlighted?: boolean;
 }) {
+  const cur = useCurrency();
   const location = txn.table_number
     ? `Table ${txn.table_number}`
     : txn.room_number
@@ -191,7 +189,7 @@ function TxnCard({
   // no settlement, and treating that as unpaid would brand old bills as credit.
   const settlement = txn.settlement ?? "paid";
   const onCredit = settlement !== "paid";
-  const symbol = onCredit ? "◷" : txn.method === "cash" ? "₹" : txn.method === "mixed" ? "⬡₹" : "⬡";
+  const symbol = onCredit ? "◷" : txn.method === "cash" ? `${cur.prefix}` : txn.method === "mixed" ? `⬡${cur.prefix}` : "⬡";
   const tone = SETTLEMENT_COLOR[settlement];
 
   return (
@@ -229,13 +227,13 @@ function TxnCard({
       <div className="text-right shrink-0">
         {/* The full bill value — a credit bill is billed in full, so this is what
             it contributed to Sales. What's still owed is called out below it. */}
-        <p className="text-sm font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>{money(txn.amount)}</p>
+        <p className="text-sm font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>{cur.money(txn.amount)}</p>
         <p className="text-[10px] uppercase tracking-wide" style={{ color: tone, letterSpacing: "0.06em" }}>
           {SETTLEMENT_LABEL[settlement]}
         </p>
         {onCredit && txn.credit_unpaid > 0 && (
           <p className="text-[10px] tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
-            {money(txn.credit_unpaid)} on credit
+            {cur.money(txn.credit_unpaid)} on credit
           </p>
         )}
       </div>
@@ -267,6 +265,7 @@ export function SalesView({
    *  dashboard route (`closeSessionWithPayment`'s success redirect). */
   highlightSessionId?: string | null;
 }) {
+  const cur = useCurrency();
   const [report, setReport] = useState<SalesReport>(initial);
   const [period, setPeriod] = useState<SalesPeriod>(initial.period);
   const [customFrom, setCustomFrom] = useState<string>(initial.from ?? "");
@@ -440,7 +439,7 @@ export function SalesView({
           <StatTile
             key={c.key}
             label={c.label}
-            value={money(c.overviewKey ? report.overview[c.overviewKey] : 0)}
+            value={cur.money(c.overviewKey ? report.overview[c.overviewKey] : 0)}
             active={period === c.key}
             onClick={() => selectPeriod(c.key)}
           />
@@ -495,9 +494,9 @@ export function SalesView({
         className="grid gap-3 mb-6"
         style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}
       >
-        <StatTile label={`Sales · ${PERIOD_LABEL[report.period]}`} value={money(report.periodTotal)} />
+        <StatTile label={`Sales · ${PERIOD_LABEL[report.period]}`} value={cur.money(report.periodTotal)} />
         <StatTile label="Number of Orders" value={String(report.orderCount)} />
-        <StatTile label="Avg. Order Value" value={money(report.avgOrderValue)} />
+        <StatTile label="Avg. Order Value" value={cur.money(report.avgOrderValue)} />
         {/* Sales above is already net of this — it's shown so a manager can see how much
             was given away, not so it can be added back on.
 
@@ -507,7 +506,7 @@ export function SalesView({
             "fix" the gap by pointing this at the finance figure — a debt forgiven weeks
             after the sale isn't a discount on this period's sales. */}
         {report.discountsTotal > 0 && (
-          <StatTile label="Discounts Given" value={money(report.discountsTotal)} />
+          <StatTile label="Discounts Given" value={cur.money(report.discountsTotal)} />
         )}
       </div>
 
@@ -530,7 +529,7 @@ export function SalesView({
                   <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: "var(--color-canvas-soft)" }}>
                     <div className="h-full rounded-full" style={{ width: `${pct}%`, background: b.tone }} />
                   </div>
-                  <span className="text-sm tabular-nums w-20 text-right" style={{ color: "var(--color-ink)" }}>{money(b.value)}</span>
+                  <span className="text-sm tabular-nums w-20 text-right" style={{ color: "var(--color-ink)" }}>{cur.money(b.value)}</span>
                 </div>
               );
             })}
@@ -556,15 +555,15 @@ export function SalesView({
           >
             <StatTile
               label="Outstanding (now)"
-              value={money(credit.outstanding)}
+              value={cur.money(credit.outstanding)}
             />
             <StatTile
               label={`Collected · ${PERIOD_LABEL[report.period]}`}
-              value={money(credit.collected)}
+              value={cur.money(credit.collected)}
             />
             <StatTile
               label={`Credit created · ${PERIOD_LABEL[report.period]}`}
-              value={money(credit.created)}
+              value={cur.money(credit.created)}
             />
             {/* Counted over CUSTOMERS now — one person with three unpaid bills is
                 one debtor to chase, not three. */}
@@ -593,7 +592,7 @@ export function SalesView({
                 <div className="flex items-center justify-between mb-2 px-1">
                   <p className="text-xs font-medium" style={{ color: "var(--color-ink)" }}>{g.label}</p>
                   <p className="text-xs tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
-                    {money(g.items.reduce((sum, t) => sum + t.amount, 0))}
+                    {cur.money(g.items.reduce((sum, t) => sum + t.amount, 0))}
                   </p>
                 </div>
                 <div className="flex flex-col gap-2">

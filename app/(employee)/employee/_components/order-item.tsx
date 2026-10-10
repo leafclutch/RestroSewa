@@ -10,6 +10,7 @@ import {
   describeLine,
 } from "@/lib/order-quantities";
 import { Check, X } from "lucide-react";
+import { useCurrency } from "@/components/currency-provider";
 
 // One order line, on a table's bill or a room's folio.
 //
@@ -36,6 +37,7 @@ export function OrderItem({
   item: OrderItemRow;
   canCancel?: boolean;
 }) {
+  const cur = useCurrency();
   const [, start] = useTransition();
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
@@ -119,7 +121,7 @@ export function OrderItem({
 
       {/* The line's share of the bill — active units only, so it matches the total. */}
       <p className="text-sm tabular shrink-0" style={{ color: "var(--color-ink-mute)" }}>
-        ₹{(Number(item.item_price) * active).toFixed(0)}
+        {cur.prefix}{(Number(item.item_price) * active).toFixed(0)}
       </p>
 
       <span

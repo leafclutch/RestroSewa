@@ -10,13 +10,12 @@ import {
 import type { RestaurantSummary } from "@/app/actions/danger-zone";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, Check, RotateCcw, Trash2, X } from "lucide-react";
+import { currencyFormatter } from "@/lib/currency";
 
 const RUBY = "#b42318";
 const AMBER = "#b45309";
 const GREEN = "#1a7a4a";
 
-const money = (n: number) =>
-  "₹" + Number(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 const count = (n: number) => Number(n ?? 0).toLocaleString("en-IN");
 
 // ─── Shell ───────────────────────────────────────────────────────────────────
@@ -175,6 +174,7 @@ function ResetDialog({
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
+  const money = currencyFormatter(s.currency).moneyUpTo2;
 
   // Opening-balance prompt, shown once the books are actually cleared.
   const [cash, setCash] = useState("");
@@ -431,6 +431,7 @@ function DeleteDialog({
   const [pending, start] = useTransition();
 
   const name = s.restaurant.name;
+  const money = currencyFormatter(s.currency).moneyUpTo2;
   const armed =
     typed.trim().toLowerCase() === name.trim().toLowerCase() ||
     typed.trim().toUpperCase() === "DELETE";

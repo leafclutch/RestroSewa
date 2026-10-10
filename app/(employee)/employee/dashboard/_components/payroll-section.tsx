@@ -3,8 +3,7 @@ import { Users, Wallet, CircleAlert, ArrowRight } from "lucide-react";
 import { getPayrollSheet } from "@/app/actions/payroll";
 import { accentOf } from "@/lib/section-colors";
 
-const rupee = (n: number) =>
-  "₹" + Number(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+import { getCurrentCurrency } from "@/lib/currency-server";
 
 /**
  * Payroll, as a summary on the staff dashboard.
@@ -19,6 +18,7 @@ const rupee = (n: number) =>
  * colleagues' salaries on a screen people leave open at the counter.
  */
 export async function PayrollSection() {
+  const cur = await getCurrentCurrency();
   const sheet = await getPayrollSheet();
   const accent = accentOf("payroll");
 
@@ -29,10 +29,10 @@ export async function PayrollSection() {
 
   const tiles: { label: string; value: string; tone: string; Icon: typeof Users }[] = [
     { label: "On payroll", value: String(sheet.rows.length), tone: "var(--color-ink)", Icon: Users },
-    { label: "Paid", value: rupee(sheet.totalPaid), tone: "var(--color-ink)", Icon: Wallet },
+    { label: "Paid", value: cur.money(sheet.totalPaid), tone: "var(--color-ink)", Icon: Wallet },
     {
       label: "Remaining",
-      value: rupee(sheet.totalRemaining),
+      value: cur.money(sheet.totalRemaining),
       tone: sheet.totalRemaining > 0 ? "var(--color-warning)" : "var(--color-success)",
       Icon: CircleAlert,
     },

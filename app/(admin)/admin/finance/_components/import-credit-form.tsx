@@ -6,6 +6,7 @@ import type { ActionResult } from "@/app/actions/credits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Info } from "lucide-react";
+import { useCurrency } from "@/components/currency-provider";
 
 /**
  * Register a debt the restaurant was already owed before it started using
@@ -20,6 +21,7 @@ import { Info } from "lucide-react";
  * typing a ₹50,000 figure will wonder.
  */
 export function ImportCreditForm({ onDone }: { onDone: () => void }) {
+  const cur = useCurrency();
   const [state, action, pending] = useActionState<ActionResult, FormData>(
     importCreditCustomer,
     null
@@ -75,11 +77,11 @@ export function ImportCreditForm({ onDone }: { onDone: () => void }) {
 
         <div className="flex flex-col gap-1.5">
           <label htmlFor="ic_amount" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
-            Amount owed (₹)
+            Amount owed ({cur.symbol})
           </label>
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>₹</span>
-            <Input id="ic_amount" name="amount" type="number" min="0.01" step="0.01" required placeholder="0.00" className="pl-7" />
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>{cur.symbol}</span>
+            <Input style={{ paddingLeft: cur.inputPad }} id="ic_amount" name="amount" type="number" min="0.01" step="0.01" required placeholder="0.00" className="pl-7" />
           </div>
         </div>
 
