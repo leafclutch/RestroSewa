@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BookOpen, ChevronLeft, ChevronRight, Minus, Plus, X, ZoomIn } from "lucide-react";
+import { getImageProps } from "next/image";
+import { BookOpen, ChevronLeft, ChevronRight, Loader2, Minus, Plus, X, ZoomIn } from "lucide-react";
 import { useBodyScrollLock } from "@/lib/use-body-scroll-lock";
 import { IDENTITY, clampPan, zoomAt, type ZoomState } from "@/lib/zoom";
 import type { MenuImage } from "@/app/actions/menu-images";
@@ -9,6 +10,77 @@ import type { MenuImage } from "@/app/actions/menu-images";
 // The restaurant's printed menu card, for guests: a tab on the right edge opens a drawer
 // from the right with every page; tapping a page opens it full screen to zoom and pan.
 // The parent renders this only when the restaurant has uploaded at least one photo.
+
+// The drawer shows phone-width copies, not the 2000px originals: Next's image optimizer
+// resizes them to the screen, re-encodes them as WebP/AVIF and caches the result —
+// typically a fifth of the bytes. The originals are only fetched by the zoom viewer,
+// where the detail is actually needed.
+const THUMB_SIZES = "(max-width: 480px) 92vw, 440px";
+
+function thumbProps(url: string, alt: string) {
+  // width/height only seed the aspect-ratio box before load; CSS sizes the image.
+  return getImageProps({ src: url, alt, width: 880, height: 1240, sizes: THUMB_SIZES }).props;
+}
+
+/**
+ * Warm the browser cache with the drawer's copies while the guest browses the menu,
+ * so the drawer opens on images that are already there. Same srcset + sizes as the
+ * real <img>, so the browser picks the same file and the later request is a cache hit.
+ * Idle-time and sequential: it never competes with the menu itself for bandwidth.
+ */
+function usePrefetchThumbs(images: MenuImage[]) {
+  useEffect(() => {
+    if (images.length === 0) return;
+    // Respect data-saver: a guest who asked for less data doesn't get speculative downloads.
+    const conn = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+    if (conn?.saveData) return;
+
+    let cancelled = false;
+    let i = 0;
+    const next = () => {
+      if (cancelled || i >= images.length) return;
+      const p = thumbProps(images[i].url, "");
+      i++;
+      const pre = new window.Image();
+      pre.sizes = THUMB_SIZES;
+      if (p.srcSet) pre.srcset = p.srcSet;
+      pre.src = p.src;
+      pre.onload = pre.onerror = () => next();
+    };
+    const w = window as Window & { requestIdleCallback?: (cb: () => void) => number };
+    const start = () => (w.requestIdleCallback ? w.requestIdleCallback(next) : setTimeout(next, 1500));
+    // After the page has finished its own loading.
+    if (document.readyState === "complete") start();
+    else window.addEventListener("load", start, { once: true });
+    return () => {
+      cancelled = true;
+      window.removeEventListener("load", start);
+    };
+  }, [images]);
+}
+
+/** An image that shows a spinner on a tinted box until it has actually arrived. */
+function Thumb({ url, alt }: { url: string; alt: string }) {
+  const [loaded, setLoaded] = useState(false);
+  const p = thumbProps(url, alt);
+  return (
+    <span className="relative block" style={{ minHeight: loaded ? undefined : 260 }}>
+      {!loaded && (
+        <span className="absolute inset-0 flex items-center justify-center" style={{ color: "var(--color-ink-mute)" }}>
+          <Loader2 size={22} className="animate-spin" />
+        </span>
+      )}
+      {/* eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text */}
+      <img
+        {...p}
+        decoding="async"
+        onLoad={() => setLoaded(true)}
+        className="w-full h-auto block"
+        style={{ opacity: loaded ? 1 : 0, transition: "opacity .2s ease" }}
+      />
+    </span>
+  );
+}
 
 const STYLES = `
 @keyframes rs-drawer-in { from { transform: translateX(100%) } to { transform: translateX(0) } }
@@ -20,6 +92,7 @@ export function MenuPhotos({ images }: { images: MenuImage[] }) {
   const [viewing, setViewing] = useState<number | null>(null);
 
   useBodyScrollLock(open);
+  usePrefetchThumbs(images);
 
   useEffect(() => {
     if (!open || viewing !== null) return;
@@ -91,8 +164,7 @@ export function MenuPhotos({ images }: { images: MenuImage[] }) {
                   style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}
                   aria-label={`Open page ${i + 1} of ${images.length}`}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img.url} alt={`Menu page ${i + 1}`} loading="lazy" decoding="async" className="w-full h-auto block" />
+                  <Thumb url={img.url} alt={`Menu page ${i + 1}`} />
                   <span className="block px-3 py-1.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>
                     Page {i + 1} of {images.length}
                   </span>
@@ -129,6 +201,11 @@ function PhotoViewer({
   const zoomRef = useRef<ZoomState>(IDENTITY);
   // While a finger is down the transform follows it exactly; animated only otherwise.
   const [gesturing, setGesturing] = useState(false);
+  // Originals that have finished downloading. Until then the (cached) drawer copy
+  // stands in, so the viewer never opens on a blank screen.
+  const [loadedFull, setLoadedFull] = useState<Set<string>>(() => new Set());
+  const current = images[index];
+  const fullReady = loadedFull.has(current.url);
 
   // Gesture bookkeeping lives in refs: it changes on every pointer move and must not
   // re-render anything but the transform.
@@ -286,18 +363,38 @@ function PhotoViewer({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
+        {!fullReady && (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text */}
+            <img
+              {...thumbProps(current.url, "")}
+              aria-hidden
+              draggable={false}
+              className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+            />
+            <span
+              className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 text-xs text-white rounded-full px-3 py-1.5 pointer-events-none"
+              style={{ background: "rgba(0,0,0,0.5)" }}
+            >
+              <Loader2 size={13} className="animate-spin" /> Loading full quality…
+            </span>
+          </>
+        )}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           ref={imgRef}
-          key={images[index].id}
-          src={images[index].url}
+          key={current.id}
+          src={current.url}
           alt={`Menu page ${index + 1}`}
           draggable={false}
+          decoding="async"
+          onLoad={() => setLoadedFull((s) => (s.has(current.url) ? s : new Set(s).add(current.url)))}
           className="max-w-full max-h-full object-contain"
           style={{
             transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})`,
             transformOrigin: "center center",
             transition: gesturing ? "none" : "transform .18s ease-out",
+            opacity: fullReady ? 1 : 0,
           }}
         />
       </div>

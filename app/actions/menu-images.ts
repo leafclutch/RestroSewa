@@ -71,7 +71,9 @@ export async function uploadMenuImage(formData: FormData): Promise<ActionResult>
   const path = `${ru.restaurant_id}/${crypto.randomUUID()}.${ext}`;
   const { error: uploadErr } = await service.storage
     .from(BUCKET)
-    .upload(path, file, { contentType: file.type, upsert: false });
+    // A year: every upload gets a fresh uuid name and is never overwritten, so a cached
+    // copy can't go stale. Storage's default (1 hour) re-downloaded it on every visit.
+    .upload(path, file, { contentType: file.type, upsert: false, cacheControl: "31536000" });
   if (uploadErr) return { error: "Upload failed. Try again." };
 
   const {
