@@ -213,6 +213,75 @@ export function cycleLabel(cycle: Cycle): string {
   return `${dayLabel(cycle.start)} → ${dayLabel(cycle.end)}`;
 }
 
+// ─── Setup: one staff member's whole payroll arrangement ──────────────────────
+// Joining date, cycle and salary history are one thing to the admin, so they are
+// read, previewed and saved together (`getPayrollSetup` / `savePayrollSetup`).
+
+/** One salary change: `salary` applies from `effectiveFrom` until the next one. */
+export type SalaryRevision = { effectiveFrom: string; salary: number };
+
+export type PayrollSetup = {
+  staffId: string;
+  /** Null when the staff member has never been put on payroll. */
+  joiningDate: string | null;
+  /** Null = paid by calendar month. */
+  anchor: string | null;
+  length: number;
+  /** Oldest first. */
+  revisions: SalaryRevision[];
+  /**
+   * The end of the last cycle holding a payment or verified attendance. A new
+   * cycle start on or before it is moved past it (see `set_cycle_anchor`); later
+   * empty cycles are simply replaced.
+   */
+  lockedUntil: string | null;
+  /** Today in Nepal, so the preview and the server agree on "current". */
+  today: string;
+  /**
+   * The cycle being paid now (or the first one, if it has not begun yet) and the
+   * one after it — the only two places a salary change can start. Null for
+   * someone not on payroll yet.
+   */
+  currentCycle: { start: string; end: string } | null;
+  nextCycle: { start: string; end: string } | null;
+  /** The salary the current cycle is paid at. */
+  salaryNow: number | null;
+};
+
+const monthStart = (iso: string) => `${iso.slice(0, 7)}-01`;
+const monthEnd = (iso: string) => {
+  const [y, m] = iso.split("-").map(Number);
+  return `${iso.slice(0, 7)}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
+};
+
+/**
+ * The anchor `set_cycle_anchor` will actually use: stepped forward by whole
+ * cycles past `lockedUntil`. Mirrors the SQL loop so the form can show it.
+ */
+export function effectiveAnchor(
+  anchor: string,
+  length: number,
+  lockedUntil: string | null
+): string {
+  let a = anchor;
+  while (lockedUntil && a <= lockedUntil) a = addDays(a, length);
+  return a;
+}
+
+/** The pay period containing `date`: an anchored cycle, or a calendar month. */
+export function periodContaining(
+  date: string,
+  anchor: string | null,
+  length: number
+): { start: string; end: string } {
+  if (anchor && date >= anchor) {
+    const c = cycleContaining(anchor, date, length);
+    return { start: c.start, end: c.end };
+  }
+  return { start: monthStart(date), end: monthEnd(date) };
+}
+
+
 // ─── The shapes the screens read ──────────────────────────────────────────────
 
 /** One staff member's standing for one month — the Payroll sheet row. */
@@ -247,8 +316,17 @@ export type SalaryPayment = {
 
 /** One month of a staff member's payroll history, with the payments behind it. */
 export type PayrollHistoryMonth = {
+  /** Unique key: the cycle id, or `YYYY-MM-01` for a period no cycle covers. */
   month: string;
+  /** True for a salary cycle; false for a plain calendar month. */
+  isCycle: boolean;
+  /** The window, inclusive, as YYYY-MM-DD. */
+  periodStart: string;
+  periodEnd: string;
   monthly_salary: number | null;
+  /** What the period actually owes — the salary, less any docked attendance.
+   *  The same figure the payroll sheet reads, so the two can never disagree. */
+  payable: number;
   advancePaid: number;
   salaryPaid: number;
   totalPaid: number;
@@ -413,6 +491,9 @@ export const PAYROLL_ERRORS: Record<string, string> = {
     "That start date falls inside a cycle that already exists. Pick a later date.",
   CYCLE_VERIFIED:
     "This cycle's attendance is verified. Reopen it before changing a day.",
+  REVISION_NOT_FOUND: "That salary change no longer exists. Refresh and try again.",
+  LAST_REVISION:
+    "This is their only salary, so it can be changed but not removed.",
 };
 
 export function payrollError(message: string, fallback: string): string {

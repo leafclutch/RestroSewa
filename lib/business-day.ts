@@ -481,3 +481,40 @@ export function businessPeriodDateBounds(
 export function businessDayEarlyClose(day: string, rule: DayRule): Date | null {
   return earlyCloseOf(rule, day);
 }
+
+/**
+ * The youngest a business day may be and still be closed early.
+ *
+ * With a closing hour of noon or later the evening after closing already belongs
+ * to TOMORROW, so "Close today's business" pressed an hour after a 5 PM close
+ * would end a day that started an hour ago — leaving a one-hour day and pushing
+ * all of the next calendar day's trade onto the day after. No genuine early close
+ * happens this soon after a day began; a 10 PM restaurant closing at 8 PM has
+ * been open for 22 hours of business day.
+ */
+export const MIN_HOURS_BEFORE_EARLY_CLOSE = 6;
+
+/** Whether "Close today's business" and "Reopen" are allowed at `now`. */
+export function earlyCloseWindow(rule: BusinessDayRule, now: Date = new Date()) {
+  const today = businessToday(rule, now);
+  const previous = addDaysStr(today, -1);
+  const startedAt = businessDayStart(today, rule);
+  const scheduledStart = businessDayScheduledStart(today, rule);
+  // Two floors, whichever is later: the day must have reached its normal start
+  // (so a second tap right after an early close can't end the brand-new day too),
+  // and it must have been open long enough to have trade worth closing.
+  const minAge = new Date(startedAt.getTime() + MIN_HOURS_BEFORE_EARLY_CLOSE * 60 * 60 * 1000);
+  const closableFrom = minAge > scheduledStart ? minAge : scheduledStart;
+  const previousClosedEarlyAt = businessDayEarlyClose(previous, rule);
+  return {
+    today,
+    previous,
+    startedAt,
+    closableFrom,
+    canClose: now >= closableFrom,
+    previousClosedEarlyAt,
+    // Past its normal closing hour the closed day would have ended anyway, so a
+    // reopen would change nothing but the history.
+    canReopen: previousClosedEarlyAt !== null && now < scheduledStart,
+  };
+}

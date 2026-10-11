@@ -14,6 +14,7 @@ import {
   businessDayRule,
   businessPeriodBounds,
   businessToday,
+  earlyCloseWindow,
 } from "./business-day.ts";
 
 // Every case below is written in NEPAL wall-clock time, because that is the only
@@ -295,4 +296,37 @@ test("an early close stranded by a later closing-hour change is ignored", () => 
   const { from, to } = businessDayBounds(day, rule);
   assert.equal(day, "2026-10-12");
   assert.ok(bill >= from && bill < to, "the bill sits inside its own day's bounds");
+});
+
+// ── When "Close today's business" is allowed ─────────────────────────────────
+
+test("5 PM closing: pressing Close at 6 PM is refused — the new day is an hour old", () => {
+  const rule = businessDayRule({ business_closing_hour: 17 });
+  const w = earlyCloseWindow(rule, npt("2026-10-11", 18));
+  assert.equal(w.today, "2026-10-12"); // after 5 PM it is already tomorrow's day
+  assert.equal(w.canClose, false);
+  // Closable once it has been open six hours: 11 PM.
+  assert.equal(w.closableFrom.toISOString(), npt("2026-10-11", 23).toISOString());
+});
+
+test("10 PM closing: closing early at 8 PM is allowed", () => {
+  const rule = businessDayRule({ business_closing_hour: 22 });
+  const w = earlyCloseWindow(rule, npt("2026-10-11", 20));
+  assert.equal(w.today, "2026-10-11");
+  assert.equal(w.canClose, true);
+});
+
+test("2 AM closing, closed at 10 PM: no second close until the new day is six hours old", () => {
+  const rule = businessDayRule({
+    business_closing_hour: 2,
+    business_early_closes: { "2026-10-11": npt("2026-10-11", 22).toISOString() },
+  });
+  const soon = earlyCloseWindow(rule, npt("2026-10-11", 22, 5));
+  assert.equal(soon.today, "2026-10-12");
+  assert.equal(soon.canClose, false);
+  assert.equal(soon.canReopen, true);
+  // 4 AM: six hours in, and past the normal 2 AM start.
+  const later = earlyCloseWindow(rule, npt("2026-10-12", 4));
+  assert.equal(later.canClose, true);
+  assert.equal(later.canReopen, false); // Saturday's normal end (2 AM) has passed
 });

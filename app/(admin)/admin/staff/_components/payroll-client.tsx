@@ -1,20 +1,17 @@
 "use client";
 
 import {
-  useActionState,
   useCallback,
   useEffect,
-  useRef,
   useState,
   useTransition,
 } from "react";
+import { useFormSubmit } from "@/lib/use-form-submit";
 import {
   getPayrollCycleSheet,
   getPayrollHistory,
   recordSalaryPayment,
-  setStaffSalary,
 } from "@/app/actions/payroll";
-import type { ActionResult } from "@/app/actions/payroll";
 import {
   PAYMENT_KIND_LABEL,
   PAYROLL_STATUS_COLOR,
@@ -31,19 +28,21 @@ import type {
   PayrollCycleSheet,
   PayrollHistoryMonth,
 } from "@/lib/payroll";
-import { CycleStartForm, SalaryCyclePanel } from "./salary-cycle-panel";
+import { SalaryCyclePanel } from "./salary-cycle-panel";
+import { PayrollSetupForm, SalaryRevisions } from "./payroll-setup";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PaymentMethodPicker, splitIsValid, type PaymentMethod } from "@/components/ui/payment-method-picker";
 import { Modal } from "../../_components/modal";
 import {
+  CalendarDays,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Loader2,
   Wallet,
 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useCurrency } from "@/components/currency-provider";
 
 const when = (iso: string) =>
@@ -66,137 +65,13 @@ function StatusPill({ status }: { status: PayrollCycleRow["status"] }) {
   );
 }
 
-// ── Set / revise a salary ─────────────────────────────────────────────────────
-
-function SalaryForm({
-  staffId,
-  staffName,
-  currentSalary,
-  joiningDate,
-  month,
-  onDone,
-}: {
-  staffId: string;
-  staffName: string;
-  currentSalary: number | null;
-  joiningDate: string | null;
-  month: string;
-  onDone: () => void;
-}) {
-  const cur = useCurrency();
-  const [state, action, pending] = useActionState<ActionResult, FormData>(setStaffSalary, null);
-
-  const wasPending = useRef(false);
-  useEffect(() => {
-    if (wasPending.current && !pending && !state?.error) onDone();
-    wasPending.current = pending;
-  }, [pending, state, onDone]);
-
-  const today = new Date().toISOString().slice(0, 10);
-
-  return (
-    <form action={action} className="flex flex-col gap-3">
-      <input type="hidden" name="staff_id" value={staffId} />
-
-      <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-        Setting the salary for <span style={{ color: "var(--color-ink)" }}>{staffName}</span>.
-      </p>
-
-      <div className="flex flex-col gap-1.5">
-        <label
-          htmlFor="p_salary"
-          className="text-xs uppercase tracking-wide"
-          style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
-        >
-          Monthly salary ({cur.symbol})
-        </label>
-        <Input
-          id="p_salary"
-          name="monthly_salary"
-          type="number"
-          min="0"
-          step="0.01"
-          required
-          autoFocus
-          placeholder="25000.00"
-          defaultValue={currentSalary ?? ""}
-        />
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label
-          htmlFor="p_joining"
-          className="text-xs uppercase tracking-wide"
-          style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
-        >
-          Joining date
-        </label>
-        <input
-          id="p_joining"
-          name="joining_date"
-          type="date"
-          required
-          max={today}
-          defaultValue={joiningDate ?? today}
-          className="w-full text-sm rounded-lg border px-3 py-2"
-          style={{
-            background: "var(--color-canvas)",
-            borderColor: "var(--color-hairline-input)",
-            color: "var(--color-ink)",
-          }}
-        />
-        <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-          Payroll starts from the month they joined. Nothing is owed for any month before it.
-        </p>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label
-          htmlFor="p_effective"
-          className="text-xs uppercase tracking-wide"
-          style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
-        >
-          Effective from
-        </label>
-        <input
-          id="p_effective"
-          name="effective_from"
-          type="month"
-          required
-          defaultValue={month.slice(0, 7)}
-          className="w-full text-sm rounded-lg border px-3 py-2"
-          style={{
-            background: "var(--color-canvas)",
-            borderColor: "var(--color-hairline-input)",
-            color: "var(--color-ink)",
-          }}
-        />
-        {/* The whole reason salary is dated. Worth saying out loud on the form —
-            an admin giving someone a raise needs to know it won't reopen a month
-            they have already paid and closed. */}
-        <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-          A raise applies from this month onwards. Months already paid keep the salary that was
-          in force for them and are not reopened.
-        </p>
-      </div>
-
-      {state?.error && (
-        <p
-          className="text-sm rounded-md px-3 py-2"
-          style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}
-        >
-          {state.error}
-        </p>
-      )}
-
-      <Button type="submit" variant="primary" disabled={pending}>
-        {pending ? "Saving…" : currentSalary == null ? "Set salary" : "Update salary"}
-      </Button>
-    </form>
-  );
-}
-
 // ── Pay a salary, or an advance against it ────────────────────────────────────
+
+/** The period being paid: the sheet's current row, or any earlier one from history. */
+type PayTarget = Pick<
+  PayrollCycleRow,
+  "staff_id" | "cycle_start" | "cycle_end" | "payableAmount" | "advancePaid" | "salaryPaid" | "remaining"
+>;
 
 function PaymentForm({
   row,
@@ -204,13 +79,14 @@ function PaymentForm({
   kind,
   onDone,
 }: {
-  row: PayrollCycleRow;
+  row: PayTarget;
+  /** Any day inside the period — the server files the payment against the period containing it. */
   month: string;
   kind: PaymentKind;
   onDone: () => void;
 }) {
   const cur = useCurrency();
-  const [state, action, pending] = useActionState<ActionResult, FormData>(recordSalaryPayment, null);
+  const { state, pending, onSubmit } = useFormSubmit(recordSalaryPayment, onDone);
   const [method, setMethod] = useState<PayMethod>("cash");
   // Controlled so the split has something to reconcile against — an
   // uncontrolled input leaves the picker validating against nothing.
@@ -219,14 +95,8 @@ function PaymentForm({
   const amountNum = parseFloat(amount) || 0;
   const canSubmit = amountNum > 0 && splitIsValid(method as PaymentMethod, amountNum, split.cash, split.online);
 
-  const wasPending = useRef(false);
-  useEffect(() => {
-    if (wasPending.current && !pending && !state?.error) onDone();
-    wasPending.current = pending;
-  }, [pending, state, onDone]);
-
   return (
-    <form action={action} className="flex flex-col gap-3">
+    <form onSubmit={onSubmit} className="flex flex-col gap-3">
       <input type="hidden" name="staff_id" value={row.staff_id} />
       <input type="hidden" name="salary_month" value={month} />
       <input type="hidden" name="kind" value={kind} />
@@ -298,7 +168,7 @@ function PaymentForm({
           onChange={(e) => setAmount(e.target.value)}
         />
         <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-          At most {cur.money2(row.remaining)} — the rest of this month&apos;s salary.
+          At most {cur.money2(row.remaining)} — the rest of this cycle&apos;s salary.
         </p>
       </div>
 
@@ -364,25 +234,51 @@ function PaymentForm({
 // Fetched only when opened — a restaurant with 40 staff must not load 40 people's
 // payment history to render a list.
 
-function History({ staffId }: { staffId: string }) {
+function History({
+  staffId,
+  version,
+  onPay,
+}: {
+  staffId: string;
+  version: string;
+  /** Pay what is left on a period. Absent for staff who may only view payroll. */
+  onPay?: (period: PayrollHistoryMonth) => void;
+}) {
   const cur = useCurrency();
   const [months, setMonths] = useState<PayrollHistoryMonth[] | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // `version` changes whenever this person's row on the sheet does (a payment, an
+  // attendance change, a new salary), so an open history refetches with it. It
+  // used to load once on open and then sit there stale: an advance paid from the
+  // row above never appeared below until the row was closed and reopened. Only
+  // the first load shows the spinner; a refetch swaps the figures in place.
   useEffect(() => {
     let live = true;
-    setLoading(true);
     getPayrollHistory(staffId)
       .then((m) => { if (live) setMonths(m); })
-      .catch(() => { if (live) setMonths([]); })
+      .catch(() => { if (live) setMonths((prev) => prev ?? []); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [staffId]);
+  }, [staffId, version]);
 
   if (loading) {
+    // The shape of the periods about to appear: a label and pill, a figures line.
     return (
-      <div className="flex items-center justify-center py-6" style={{ color: "var(--color-ink-mute)" }}>
-        <Loader2 size={16} className="animate-spin" />
+      <div className="flex flex-col">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="flex items-center justify-between gap-3 px-4 py-3 flex-wrap"
+            style={{ borderTop: "1px solid var(--color-hairline)" }}
+          >
+            <span className="flex items-center gap-2">
+              <Skeleton onSoft w={150} h={14} />
+              <Skeleton onSoft w={52} h={18} className="rounded-full" />
+            </span>
+            <Skeleton onSoft w={240} h={12} />
+          </div>
+        ))}
       </div>
     );
   }
@@ -402,7 +298,9 @@ function History({ staffId }: { staffId: string }) {
           <div className="flex items-center justify-between gap-3 px-4 py-2.5 flex-wrap">
             <span className="flex items-center gap-2 min-w-0">
               <span className="text-sm" style={{ color: "var(--color-ink)" }}>
-                {monthLabel(m.month)}
+                {m.isCycle
+                  ? `${dayLabel(m.periodStart)} → ${dayLabel(m.periodEnd)}`
+                  : monthLabel(m.periodStart)}
               </span>
               <StatusPill status={m.status} />
             </span>
@@ -411,7 +309,20 @@ function History({ staffId }: { staffId: string }) {
                 "No salary set"
               ) : (
                 <>
-                  Salary {cur.money(m.monthly_salary)} · Paid{" "}
+                  {m.payable < m.monthly_salary - 0.005 ? (
+                    <>Payable {cur.money(m.payable)} of {cur.money(m.monthly_salary)}</>
+                  ) : (
+                    <>Salary {cur.money(m.monthly_salary)}</>
+                  )}
+                  {m.advancePaid > 0 && (
+                    <>
+                      {" "}· Advance{" "}
+                      <span style={{ color: PAYROLL_STATUS_COLOR.partial }}>
+                        {cur.money(m.advancePaid)}
+                      </span>
+                    </>
+                  )}
+                  {" "}· Paid{" "}
                   <span style={{ color: "var(--color-ink)" }}>{cur.money(m.totalPaid)}</span>
                   {m.remaining > 0.005 && (
                     <>
@@ -425,6 +336,13 @@ function History({ staffId }: { staffId: string }) {
                 </>
               )}
             </span>
+            {/* Settle an earlier period right here — no stepping the sheet's
+                date back to it first. */}
+            {onPay && m.monthly_salary != null && m.remaining > 0.005 && (
+              <Button variant="primary" size="sm" onClick={() => onPay(m)}>
+                Pay {cur.money(m.remaining)}
+              </Button>
+            )}
           </div>
 
           {/* Advances and the final payment, each with when, how and who. */}
@@ -478,8 +396,8 @@ function PayrollLine({
   expanded,
   onToggle,
   onPay,
-  onSetSalary,
-  onSetCycle,
+  onPayPeriod,
+  onSetup,
   onChanged,
 }: {
   row: PayrollCycleRow;
@@ -488,19 +406,34 @@ function PayrollLine({
   expanded: boolean;
   onToggle: () => void;
   onPay: (kind: PaymentKind) => void;
-  onSetSalary: () => void;
-  onSetCycle: () => void;
+  /** Pay what is left on an earlier period, from this person's history. */
+  onPayPeriod: (period: PayrollHistoryMonth) => void;
+  /** Open the one "Salary & cycle" form for this person. */
+  onSetup: () => void;
   onChanged: () => void;
 }) {
   const cur = useCurrency();
   const noSalary = row.monthly_salary == null;
   const settled = row.remaining <= 0.005;
+  // Changes whenever this person's row does, so every section under it — cycle,
+  // salary history, payment history — refetches together and stays in step.
+  const version = `${row.cycle_id}|${row.cycle_start}|${row.paymentCount}|${row.totalPaid}|${row.payableAmount}|${row.monthly_salary}|${row.joining_date}`;
 
   return (
-    <div style={{ borderTop: "1px solid var(--color-hairline)" }}>
-      <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
-        {/* The whole row toggles the history — the brief's "clicking a staff
-            member expands". The buttons beside it stopPropagation. */}
+    // Each person is a card of their own, so one staff member's figures and
+    // expanded detail can never be read as the next person's.
+    <div
+      className="rounded-xl border shadow-sm overflow-hidden transition-shadow"
+      style={{
+        background: "var(--color-canvas)",
+        borderColor: expanded ? "var(--color-primary)" : "var(--color-hairline)",
+        boxShadow: expanded ? "0 4px 14px rgba(0,0,0,0.08)" : undefined,
+      }}
+    >
+      {/* Phone: name, then the figures as a 2×2 grid, then full-width buttons.
+          Desktop: all three side by side on one line. */}
+      <div className="flex flex-col lg:flex-row lg:items-center gap-3 px-4 py-3.5">
+        {/* The whole name block toggles the detail below. */}
         <button
           type="button"
           onClick={onToggle}
@@ -508,17 +441,23 @@ function PayrollLine({
           className="flex items-center gap-2.5 flex-1 min-w-0 text-left"
         >
           <ChevronDown
-            size={14}
+            size={16}
             className="shrink-0 transition-transform"
             style={{
               color: "var(--color-ink-mute)",
               transform: expanded ? "none" : "rotate(-90deg)",
             }}
           />
+          <span
+            className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-medium shrink-0"
+            style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink-mute)" }}
+          >
+            {row.display_name.slice(0, 2).toUpperCase()}
+          </span>
           <span className="min-w-0">
             <span className="flex items-center gap-2 flex-wrap">
               <span
-                className="text-sm truncate min-w-0"
+                className="text-sm font-medium truncate min-w-0"
                 style={{ color: "var(--color-ink)", opacity: row.is_active ? 1 : 0.55 }}
               >
                 {row.display_name}
@@ -538,22 +477,25 @@ function PayrollLine({
         </button>
 
         {/* Salary → advance → paid → remaining, in the order the money moves. */}
-        <div className="flex items-center gap-4 sm:gap-6 shrink-0 ml-6 sm:ml-0">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 lg:flex lg:items-center lg:gap-6 lg:shrink-0">
           {noSalary ? (
-            <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+            <span className="text-xs col-span-2 sm:col-span-4" style={{ color: "var(--color-ink-mute)" }}>
               No salary set for this cycle
             </span>
           ) : (
             <>
-              <span className="text-right">
+              {/* What this cycle OWES. With absences that is less than the headline
+                  salary, and showing the salary there made Salary − Paid disagree
+                  with Remaining. */}
+              <span className="lg:text-right" title={`Monthly salary ${cur.money(row.monthly_salary ?? 0)}`}>
                 <span className="block text-[10px]" style={{ color: "var(--color-ink-mute)" }}>
-                  Salary
+                  {row.payableAmount < (row.monthly_salary ?? 0) - 0.005 ? "Payable" : "Salary"}
                 </span>
                 <span className="block text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>
-                  {cur.money(row.monthly_salary ?? 0)}
+                  {cur.money(row.payableAmount)}
                 </span>
               </span>
-              <span className="text-right hidden sm:block">
+              <span className="lg:text-right">
                 <span className="block text-[10px]" style={{ color: "var(--color-ink-mute)" }}>
                   Advance
                 </span>
@@ -568,7 +510,7 @@ function PayrollLine({
                   {row.advancePaid > 0 ? cur.money(row.advancePaid) : "—"}
                 </span>
               </span>
-              <span className="text-right">
+              <span className="lg:text-right">
                 <span className="block text-[10px]" style={{ color: "var(--color-ink-mute)" }}>
                   Paid
                 </span>
@@ -583,7 +525,7 @@ function PayrollLine({
                   {row.totalPaid > 0 ? cur.money(row.totalPaid) : "—"}
                 </span>
               </span>
-              <span className="text-right">
+              <span className="lg:text-right">
                 <span className="block text-[10px]" style={{ color: "var(--color-ink-mute)" }}>
                   Remaining
                 </span>
@@ -599,28 +541,28 @@ function PayrollLine({
         </div>
 
         {canManage && (
-          <div className="flex items-center gap-1.5 shrink-0 ml-auto sm:ml-0">
+          <div className="flex items-center gap-2 lg:shrink-0">
             {noSalary ? (
-              <Button variant="secondary" size="sm" onClick={onSetSalary}>
+              <Button variant="secondary" size="sm" onClick={onSetup} className="flex-1 lg:flex-none">
                 Set salary
               </Button>
             ) : (
               <>
                 {!settled && (
                   <>
-                    <Button variant="secondary" size="sm" onClick={() => onPay("advance")}>
+                    <Button variant="secondary" size="sm" onClick={() => onPay("advance")} className="flex-1 lg:flex-none">
                       Advance
                     </Button>
-                    <Button variant="primary" size="sm" onClick={() => onPay("salary")}>
+                    <Button variant="primary" size="sm" onClick={() => onPay("salary")} className="flex-1 lg:flex-none">
                       Pay
                     </Button>
                   </>
                 )}
                 <button
                   type="button"
-                  onClick={onSetSalary}
-                  className="text-xs px-2 py-1 rounded-lg"
-                  style={{ color: "var(--color-ink-mute)" }}
+                  onClick={onSetup}
+                  className="text-xs px-3 py-1.5 rounded-lg border"
+                  style={{ color: "var(--color-ink-mute)", borderColor: "var(--color-hairline)" }}
                 >
                   Edit
                 </button>
@@ -631,7 +573,7 @@ function PayrollLine({
       </div>
 
       {expanded && (
-        <div style={{ background: "var(--color-canvas-soft)" }}>
+        <div style={{ background: "var(--color-canvas-soft)", borderTop: "1px solid var(--color-hairline)" }}>
           {/* The cycle comes first: it is what the money above is actually
               settled against. History sits under it, unchanged. */}
           <div className="px-4 py-4" style={{ borderBottom: "1px solid var(--color-hairline)" }}>
@@ -643,14 +585,27 @@ function PayrollLine({
                 Salary cycle
               </p>
               {canManage && (
-                <Button variant="secondary" size="sm" onClick={onSetCycle}>
-                  {row.cycle_kind === "calendar_month" ? "Set salary cycle" : "Change cycle"}
+                <Button variant="secondary" size="sm" onClick={onSetup}>
+                  Salary &amp; cycle
                 </Button>
               )}
             </div>
             <SalaryCyclePanel row={row} onChanged={onChanged} />
           </div>
-          <History staffId={row.staff_id} />
+          {/* The salary behind every figure above, correctable in place. */}
+          <div className="px-4 py-4" style={{ borderBottom: "1px solid var(--color-hairline)" }}>
+            <SalaryRevisions
+              staffId={row.staff_id}
+              version={version}
+              canManage={canManage}
+              onChanged={onChanged}
+            />
+          </div>
+          <History
+            staffId={row.staff_id}
+            version={version}
+            onPay={canManage ? onPayPeriod : undefined}
+          />
         </div>
       )}
     </div>
@@ -676,19 +631,25 @@ export function PayrollClient({
   const [expanded, setExpanded] = useState<string | null>(null);
 
   // Which modal is open, and for whom.
-  const [paying, setPaying] = useState<{ row: PayrollCycleRow; kind: PaymentKind } | null>(null);
-  const [editing, setEditing] = useState<{
-    staffId: string;
+  // Who is being paid, for which period: `day` is any date inside it (the sheet's
+  // date for the current row, the period's first day when paid from history).
+  const [paying, setPaying] = useState<{
+    target: PayTarget;
     name: string;
-    salary: number | null;
-    joining: string | null;
+    kind: PaymentKind;
+    day: string;
   } | null>(null);
-  const [cycling, setCycling] = useState<{
-    staffId: string;
-    name: string;
-    start: string | null;
-    length: number;
-  } | null>(null);
+  // One setup form for joining date, cycle and salary — opened from the row, from
+  // inside it, and for someone not on payroll yet.
+  const [setupFor, setSetupFor] = useState<{ staffId: string; name: string; isNew: boolean } | null>(null);
+  // A save can carry a note (e.g. a paid cycle kept its old salary).
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Skeletons only when the admin steps to another cycle. A background refresh
+  // (a payment, a live update) swaps the figures in place instead of blanking
+  // the whole list every time anyone pays anyone.
+  const [stepping, setStepping] = useState(false);
+  const showSkeleton = loading && stepping;
 
   const load = useCallback((d: string) => {
     startTransition(async () => {
@@ -696,6 +657,8 @@ export function PayrollClient({
         setSheet(await getPayrollCycleSheet(d));
       } catch {
         // keep the last known sheet on a transient failure
+      } finally {
+        setStepping(false);
       }
     });
   }, []);
@@ -707,6 +670,7 @@ export function PayrollClient({
     if (by > 0 && next > initial.asOf) return;
     setAsOf(next);
     setExpanded(null);
+    setStepping(true);
     load(next);
   };
 
@@ -714,6 +678,7 @@ export function PayrollClient({
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d > initial.asOf) return;
     setAsOf(d);
     setExpanded(null);
+    setStepping(true);
     load(d);
   };
 
@@ -735,47 +700,82 @@ export function PayrollClient({
           </h2>
           <p className="text-sm mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
             Salaries, advances and payments. Every payment posts straight to Finance.
-            {loading && <span className="ml-2">Updating…</span>}
           </p>
         </div>
 
         {/* Cycle stepper. Each person may be on their own window, so this picks a
             DAY and every row shows the cycle that was running on it. Forward
             stops at today — a salary cannot be paid before it has accrued. */}
-        <div
-          className="flex items-center gap-1 rounded-full border px-1 py-0.5 shrink-0"
-          style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
-        >
-          <button
-            type="button"
-            onClick={() => go(-1)}
-            aria-label="Previous cycle"
-            className="w-7 h-7 rounded-full flex items-center justify-center"
-            style={{ color: "var(--color-ink-mute)" }}
+        {/* In the app's own card style: a little more presence than a bare
+            input (it decides what every figure below means), no loud colour.
+            Off today, a quiet note and a way back. */}
+        <div className="flex flex-col items-stretch sm:items-end gap-1 w-full sm:w-auto">
+          <div
+            className="flex items-center gap-1 rounded-xl border px-1.5 py-1 shadow-sm"
+            style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
           >
-            <ChevronLeft size={15} />
-          </button>
-          <input
-            type="date"
-            value={asOf}
-            max={initial.asOf}
-            onChange={(e) => pick(e.target.value)}
-            aria-label="Show cycles active on"
-            className="text-sm px-2 min-w-[132px] text-center bg-transparent"
-            style={{ color: "var(--color-ink)", border: "none", outline: "none" }}
-          />
-          <button
-            type="button"
-            onClick={() => go(1)}
-            disabled={atToday}
-            aria-label="Next cycle"
-            className="w-7 h-7 rounded-full flex items-center justify-center disabled:opacity-30"
-            style={{ color: "var(--color-ink-mute)" }}
-          >
-            <ChevronRight size={15} />
-          </button>
+            <button
+              type="button"
+              onClick={() => go(-1)}
+              aria-label="Previous cycle"
+              className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 hover:bg-[var(--color-canvas-soft)]"
+              style={{ color: "var(--color-primary)" }}
+            >
+              <ChevronLeft size={17} />
+            </button>
+            <CalendarDays size={14} className="shrink-0" style={{ color: "var(--color-ink-mute)" }} />
+            <input
+              type="date"
+              value={asOf}
+              max={initial.asOf}
+              onChange={(e) => pick(e.target.value)}
+              aria-label="Show cycles active on"
+              className="flex-1 min-w-[140px] h-8 text-sm font-medium text-center bg-transparent"
+              style={{ color: "var(--color-ink)", border: "none", outline: "none" }}
+            />
+            <button
+              type="button"
+              onClick={() => go(1)}
+              disabled={atToday}
+              aria-label="Next cycle"
+              className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 hover:bg-[var(--color-canvas-soft)] disabled:opacity-30 disabled:hover:bg-transparent"
+              style={{ color: "var(--color-primary)" }}
+            >
+              <ChevronRight size={17} />
+            </button>
+          </div>
+          {!atToday && (
+            <button
+              type="button"
+              onClick={() => pick(initial.asOf)}
+              className="text-xs self-end"
+              style={{ color: "var(--color-primary)" }}
+            >
+              Viewing a past cycle · Back to today
+            </button>
+          )}
         </div>
       </div>
+
+      {notice && (
+        <div
+          className="rounded-lg border px-3 py-2.5 mt-3 flex items-start justify-between gap-3"
+          style={{
+            background: "var(--color-warning-bg)",
+            borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)",
+          }}
+        >
+          <p className="text-xs" style={{ color: "var(--color-warning)" }}>{notice}</p>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="text-xs shrink-0"
+            style={{ color: "var(--color-warning)" }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Where the month stands, before any names. */}
       <div
@@ -794,34 +794,62 @@ export function PayrollClient({
             style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
           >
             <p className="text-xs mb-1" style={{ color: "var(--color-ink-mute)" }}>{c.label}</p>
-            <p className="text-lg font-medium tabular-nums" style={{ color: c.tone }}>
-              {cur.money(c.value)}
-            </p>
+            {showSkeleton ? (
+              <Skeleton w="70%" h={24} className="mt-0.5" />
+            ) : (
+              <p className="text-lg font-medium tabular-nums" style={{ color: c.tone }}>
+                {cur.money(c.value)}
+              </p>
+            )}
           </div>
         ))}
       </div>
 
-      <div
-        className="rounded-xl border overflow-hidden"
-        style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
-      >
-        <div
-          className="px-4 py-2.5 border-b"
-          style={{ background: "var(--color-canvas-soft)", borderColor: "var(--color-hairline)" }}
+      <div className="mb-3">
+        <p
+          className="text-xs uppercase tracking-wide font-medium"
+          style={{ color: "var(--color-ink)", letterSpacing: "0.06em" }}
         >
-          <p
-            className="text-xs uppercase tracking-wide font-medium"
-            style={{ color: "var(--color-ink)", letterSpacing: "0.06em" }}
-          >
-            Cycles active on {dayLabel(asOf)}
-          </p>
-          <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
-            Select a staff member to see their cycle, attendance and history
-          </p>
-        </div>
+          Cycles active on {dayLabel(asOf)}
+        </p>
+        <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
+          Select a staff member to see their cycle, attendance and history
+        </p>
+      </div>
 
-        {sheet.rows.length === 0 ? (
-          <p className="px-4 py-6 text-sm" style={{ color: "var(--color-ink-mute)" }}>
+      {/* One card per person, spaced apart. */}
+      <div className="flex flex-col gap-3">
+        {showSkeleton ? (
+          // Stepping to another cycle: placeholder cards in the shape of the real ones.
+          [0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="rounded-xl border shadow-sm px-4 py-3.5 flex flex-col lg:flex-row lg:items-center gap-3"
+              style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+            >
+              <div className="flex items-center gap-2.5 flex-1">
+                <Skeleton w={36} h={36} className="rounded-full shrink-0" />
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <Skeleton w="40%" h={14} />
+                  <Skeleton w="25%" h={11} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 lg:w-[380px]">
+                {[0, 1, 2, 3].map((j) => (
+                  <div key={j} className="flex flex-col gap-1">
+                    <Skeleton w={44} h={9} />
+                    <Skeleton w={64} h={14} />
+                  </div>
+                ))}
+              </div>
+              <Skeleton w={150} h={32} className="lg:shrink-0" />
+            </div>
+          ))
+        ) : sheet.rows.length === 0 ? (
+          <p
+            className="px-4 py-6 text-sm rounded-xl border"
+            style={{ color: "var(--color-ink-mute)", borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
+          >
             Nobody is on payroll on {dayLabel(asOf)} yet.
             {canManage && " Set a salary below to start."}
           </p>
@@ -834,24 +862,25 @@ export function PayrollClient({
               canManage={canManage}
               expanded={expanded === r.staff_id}
               onToggle={() => setExpanded(expanded === r.staff_id ? null : r.staff_id)}
-              onPay={(kind) => setPaying({ row: r, kind })}
-              onSetSalary={() =>
-                setEditing({
-                  staffId: r.staff_id,
+              onPay={(kind) => setPaying({ target: r, name: r.display_name, kind, day: asOf })}
+              onPayPeriod={(p) =>
+                setPaying({
+                  target: {
+                    staff_id: r.staff_id,
+                    cycle_start: p.periodStart,
+                    cycle_end: p.periodEnd,
+                    payableAmount: p.payable,
+                    advancePaid: p.advancePaid,
+                    salaryPaid: p.salaryPaid,
+                    remaining: p.remaining,
+                  },
                   name: r.display_name,
-                  salary: r.monthly_salary,
-                  joining: r.joining_date,
+                  kind: "salary",
+                  day: p.periodStart,
                 })
               }
-              onSetCycle={() =>
-                setCycling({
-                  staffId: r.staff_id,
-                  name: r.display_name,
-                  // A calendar-month row has no anchor yet, so offer nothing
-                  // rather than pre-filling a date that was never chosen.
-                  start: r.cycle_kind === "rolling_30" ? r.cycle_start : null,
-                  length: r.cycle_kind === "rolling_30" ? r.totalDays : 30,
-                })
+              onSetup={() =>
+                setSetupFor({ staffId: r.staff_id, name: r.display_name, isNew: false })
               }
               onChanged={refresh}
             />
@@ -864,7 +893,7 @@ export function PayrollClient({
           mode this section exists to prevent. */}
       {canManage && sheet.notOnPayroll.length > 0 && (
         <div
-          className="rounded-xl border overflow-hidden mt-4"
+          className="rounded-xl border shadow-sm overflow-hidden mt-6"
           style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
         >
           <div
@@ -902,7 +931,7 @@ export function PayrollClient({
                 variant="secondary"
                 size="sm"
                 onClick={() =>
-                  setEditing({ staffId: s.id, name: s.display_name, salary: null, joining: null })
+                  setSetupFor({ staffId: s.id, name: s.display_name, isNew: true })
                 }
               >
                 Set salary
@@ -916,12 +945,16 @@ export function PayrollClient({
         open={!!paying}
         onClose={() => setPaying(null)}
         title={paying?.kind === "advance" ? "Pay a salary advance" : "Pay salary"}
-        subtitle={paying ? `${paying.row.display_name} · ${dayLabel(asOf)}` : undefined}
+        subtitle={
+          paying
+            ? `${paying.name} · ${dayLabel(paying.target.cycle_start)} → ${dayLabel(paying.target.cycle_end)}`
+            : undefined
+        }
       >
         {paying && (
           <PaymentForm
-            row={paying.row}
-            month={asOf}
+            row={paying.target}
+            month={paying.day}
             kind={paying.kind}
             onDone={() => { setPaying(null); refresh(); }}
           />
@@ -929,36 +962,20 @@ export function PayrollClient({
       </Modal>
 
       <Modal
-        open={!!editing}
-        onClose={() => setEditing(null)}
-        title={editing?.salary == null ? "Set salary" : "Update salary"}
-        subtitle={editing?.name}
+        open={!!setupFor}
+        onClose={() => setSetupFor(null)}
+        title={setupFor?.isNew ? "Put on payroll" : "Salary & cycle"}
+        subtitle={setupFor?.name}
       >
-        {editing && (
-          <SalaryForm
-            staffId={editing.staffId}
-            staffName={editing.name}
-            currentSalary={editing.salary}
-            joiningDate={editing.joining}
-            month={asOf}
-            onDone={() => { setEditing(null); refresh(); }}
-          />
-        )}
-      </Modal>
-
-      <Modal
-        open={!!cycling}
-        onClose={() => setCycling(null)}
-        title={cycling?.start ? "Change salary cycle" : "Set salary cycle"}
-        subtitle={cycling?.name}
-      >
-        {cycling && (
-          <CycleStartForm
-            staffId={cycling.staffId}
-            staffName={cycling.name}
-            currentStart={cycling.start}
-            currentLength={cycling.length}
-            onDone={() => { setCycling(null); refresh(); }}
+        {setupFor && (
+          <PayrollSetupForm
+            staffId={setupFor.staffId}
+            staffName={setupFor.name}
+            onDone={(note) => {
+              setSetupFor(null);
+              setNotice(note);
+              refresh();
+            }}
           />
         )}
       </Modal>

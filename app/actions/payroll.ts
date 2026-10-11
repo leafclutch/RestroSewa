@@ -7,11 +7,16 @@ import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { resolveSplit } from "@/lib/payment-split";
 import { getCurrencyFor } from "@/lib/currency-server";
 import { periodBounds } from "@/lib/finance";
+import { businessToday } from "@/lib/business-day";
 import type { FinancePeriod } from "@/lib/finance";
 import {
   ATTENDANCE_FRACTION,
   EMPTY_PAYROLL_SUMMARY,
   monthKey,
+  shiftMonth,
+  addDays,
+  periodContaining,
+  daysBetween,
   payrollError,
   payrollStatus,
 } from "@/lib/payroll";
@@ -23,6 +28,7 @@ import type {
   PayrollHistoryMonth,
   PayrollRow,
   PayrollSheet,
+  PayrollSetup,
   PayrollSummary,
   SalaryPayment,
 } from "@/lib/payroll";
@@ -115,13 +121,25 @@ export async function getPayrollSheet(month?: string | null): Promise<PayrollShe
 }
 
 // ─── One staff member's history ───────────────────────────────────────────────
-// Every month from the one they joined to the one we are in, each with the
-// payments behind it. Assembled here rather than in SQL: the row count is one
-// per staff-month (a couple of hundred at most, for years of history), and doing
-// it in TypeScript keeps the month walk readable.
+// One entry per SALARY CYCLE, plus a calendar month for any stretch no cycle
+// covers (before an anchor was set, or for staff never put on a cycle).
 //
-// A month with no payments still appears, as Unpaid — that is precisely the month
+// It used to be months only, which read a different ledger from the sheet above
+// it: payments filed against a cycle were bucketed by the month the cycle began,
+// and "remaining" was the headline salary minus paid, ignoring absences. So a
+// person's history and their row on the sheet could show two different balances
+// for the same money. Each entry now owes what the sheet says it owes: a cycle's
+// `cycle_payable_amount`, a month's salary scaled by `cycle_payable_days` (the
+// very functions `payroll_cycle_sheet` uses).
+//
+// A period with no payments still appears, as Unpaid: that is precisely the one
 // an admin is looking for.
+
+const lastOfMonth = (first: string) => {
+  const [y, m] = first.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${first.slice(0, 7)}-${String(d).padStart(2, "0")}`;
+};
 
 export async function getPayrollHistory(
   staffId: string
@@ -133,7 +151,7 @@ export async function getPayrollHistory(
 
   // Tenant scope: the profile must be ours. Every query below is filtered by the
   // same restaurant_id, so a staff id from another restaurant returns nothing.
-  const [profileRes, salaryRes, payRes] = await Promise.all([
+  const [profileRes, salaryRes, payRes, cycleRes] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("staff_payroll")
@@ -151,10 +169,18 @@ export async function getPayrollHistory(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("salary_payments")
-      .select("id, salary_month, amount, kind, method, notes, created_at, paid_by")
+      .select("id, salary_month, cycle_id, amount, kind, method, notes, created_at, paid_by")
       .eq("restaurant_user_id", staffId)
       .eq("restaurant_id", ru.restaurant_id)
       .order("created_at", { ascending: false }),
+    // `payable` is a PostgREST computed column: `cycle_payable_amount(salary_cycles)`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("salary_cycles")
+      .select("id, cycle_start, cycle_end, monthly_salary_snapshot, payable:cycle_payable_amount")
+      .eq("restaurant_user_id", staffId)
+      .eq("restaurant_id", ru.restaurant_id)
+      .order("cycle_start", { ascending: false }),
   ]);
 
   if (!profileRes.data) return [];
@@ -167,6 +193,8 @@ export async function getPayrollHistory(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rawPayments = (payRes.data ?? []) as any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cycles = (cycleRes.data ?? []) as any[];
 
   // Resolve "Paid by" in one round trip rather than one per payment.
   const payerIds = [...new Set(rawPayments.map((p) => p.paid_by).filter(Boolean))];
@@ -181,13 +209,18 @@ export async function getPayrollHistory(
     for (const u of (users ?? []) as any[]) payerName.set(u.id, u.display_name);
   }
 
+  // A payment belongs to its cycle; one filed before cycles existed belongs to
+  // its month. Same rule as `payroll_cycle_sheet`.
+  const byCycle = new Map<string, SalaryPayment[]>();
   const byMonth = new Map<string, SalaryPayment[]>();
   for (const p of rawPayments) {
-    const key = String(p.salary_month).slice(0, 10);
-    if (!byMonth.has(key)) byMonth.set(key, []);
-    byMonth.get(key)!.push({
+    const month = String(p.salary_month).slice(0, 10);
+    const bucket = p.cycle_id ? byCycle : byMonth;
+    const key: string = p.cycle_id ?? month;
+    if (!bucket.has(key)) bucket.set(key, []);
+    bucket.get(key)!.push({
       id: p.id,
-      salary_month: key,
+      salary_month: month,
       amount: num(p.amount),
       kind: p.kind,
       method: p.method,
@@ -197,28 +230,29 @@ export async function getPayrollHistory(
     });
   }
 
-  // The salary in force for a month: the newest revision starting on or before
-  // it. Same rule as `salary_for_month` in the database — the screen and the
-  // ledger must agree on what someone was owed.
+  // The salary a month is paid at: the one in force on its 1st, or — someone who
+  // joined part-way through — their first salary that month. Same rule as
+  // `salary_for_cycle` / `salary_for_month` in the database.
   const salaryFor = (month: string): number | null => {
     let found: number | null = null;
     for (const r of revisions) {
       if (r.from <= month) found = r.salary;
       else break;
     }
-    return found;
+    if (found !== null) return found;
+    const first = revisions.find((r) => r.from <= lastOfMonth(month));
+    return first ? first.salary : null;
   };
 
-  const joined = String(profileRes.data.joining_date).slice(0, 10);
-  const start = new Date(Number(joined.slice(0, 4)), Number(joined.slice(5, 7)) - 1, 1);
-  const now = new Date();
-  const end = new Date(now.getFullYear(), now.getMonth(), 1);
-
-  const months: PayrollHistoryMonth[] = [];
-  for (let d = new Date(end); d >= start; d.setMonth(d.getMonth() - 1)) {
-    const key = monthKey(d);
-    const payments = byMonth.get(key) ?? [];
-    const salary = salaryFor(key);
+  const entry = (
+    key: string,
+    isCycle: boolean,
+    periodStart: string,
+    periodEnd: string,
+    salary: number | null,
+    payable: number,
+    payments: SalaryPayment[]
+  ): PayrollHistoryMonth => {
     const advancePaid = payments
       .filter((p) => p.kind === "advance")
       .reduce((n, p) => n + p.amount, 0);
@@ -226,62 +260,415 @@ export async function getPayrollHistory(
       .filter((p) => p.kind === "salary")
       .reduce((n, p) => n + p.amount, 0);
     const totalPaid = advancePaid + salaryPaid;
-
-    months.push({
+    return {
       month: key,
+      isCycle,
+      periodStart,
+      periodEnd,
       monthly_salary: salary,
+      payable,
       advancePaid,
       salaryPaid,
       totalPaid,
-      remaining: Math.max((salary ?? 0) - totalPaid, 0),
-      status: payrollStatus(salary ?? 0, totalPaid),
+      remaining: Math.max(payable - totalPaid, 0),
+      status: payrollStatus(payable, totalPaid),
       payments,
-    });
+    };
+  };
+
+  const out: PayrollHistoryMonth[] = cycles.map((c) =>
+    entry(
+      c.id,
+      true,
+      String(c.cycle_start).slice(0, 10),
+      String(c.cycle_end).slice(0, 10),
+      num(c.monthly_salary_snapshot),
+      num(c.payable),
+      byCycle.get(c.id) ?? []
+    )
+  );
+
+  // Calendar months: every month from joining to now that no cycle touches, and
+  // any month still holding cycle-less payments (filed before an anchor was set).
+  const overlapsCycle = (from: string, to: string) =>
+    cycles.some(
+      (c) => String(c.cycle_start).slice(0, 10) <= to && String(c.cycle_end).slice(0, 10) >= from
+    );
+  // Walk from the first salary's month, not the joining month: the joining date
+  // is a record only, and nothing before the salary starts is owed or listed.
+  const salaryStart = revisions[0]?.from ?? null;
+  const firstMonth = salaryStart ? `${salaryStart.slice(0, 7)}-01` : "9999-12-01";
+  const thisMonth = `${todayKey().slice(0, 7)}-01`;
+  const months: string[] = [];
+  for (let m = thisMonth; m >= firstMonth; m = shiftMonth(m, -1)) {
+    if (byMonth.has(m) || !overlapsCycle(m, lastOfMonth(m))) months.push(m);
+  }
+  // A stray cycle-less payment outside the joined..now walk still has to show.
+  for (const m of byMonth.keys()) if (!months.includes(m)) months.push(m);
+
+  // Attendance applies to plain months too, exactly as on the sheet.
+  const monthPayable = await Promise.all(
+    months.map(async (m) => {
+      const salary = salaryFor(m);
+      if (salary == null) return { m, salary, payable: 0 };
+      const end = lastOfMonth(m);
+      const days = Number(end.slice(8, 10));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (service as any).rpc("cycle_payable_days", {
+        p_staff_id: staffId,
+        p_start: m,
+        p_end: end,
+        p_total: days,
+      });
+      const payableDays = data == null ? days : num(data);
+      return { m, salary, payable: Math.round((salary * payableDays * 100) / days) / 100 };
+    })
+  );
+  for (const { m, salary, payable } of monthPayable) {
+    out.push(entry(m, false, m, lastOfMonth(m), salary, payable, byMonth.get(m) ?? []));
   }
 
-  return months;
+  // Newest first, cycles and months interleaved by when they began.
+  return out.sort((a, b) =>
+    a.periodStart < b.periodStart ? 1 : a.periodStart > b.periodStart ? -1 : 0
+  );
 }
 
-// ─── Set (or revise) a salary ─────────────────────────────────────────────────
+// ─── Payroll setup: joining date, cycle and salary, as one ─────────────────────
+// These used to be two unrelated forms (Edit salary on the row, Set salary cycle
+// inside it) that each saved half the arrangement and showed figures the other
+// did not update. One read, one save, one preview, and every figure on the sheet,
+// in the cycle panel and in history comes from the same database rule
+// (`salary_for_cycle`, see 20261012000000_payroll_setup_unit.sql).
 
-export async function setStaffSalary(
-  _prevState: ActionResult,
+/** Saved, with an optional note for the admin (e.g. a paid cycle kept its salary). */
+export type SetupResult = { error: string } | { notice: string } | null;
+
+const keptNotice = (kept: number) =>
+  kept > 0
+    ? `${kept} cycle${kept === 1 ? " was" : "s were"} already paid more than the new salary ` +
+      `owes, so ${kept === 1 ? "it keeps" : "they keep"} the old salary.`
+    : null;
+
+export async function getPayrollSetup(staffId: string): Promise<PayrollSetup | null> {
+  const ru = await getRestaurantUser();
+  if (!PAYROLL_ACCESS.canViewPayroll(ru)) return null;
+  const service = createServiceClient();
+
+  const [profileRes, salaryRes, cycleRes] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("staff_payroll")
+      .select("joining_date, cycle_anchor_date, cycle_length_days")
+      .eq("restaurant_user_id", staffId)
+      .eq("restaurant_id", ru.restaurant_id)
+      .maybeSingle(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("staff_salaries")
+      .select("monthly_salary, effective_from")
+      .eq("restaurant_user_id", staffId)
+      .eq("restaurant_id", ru.restaurant_id)
+      .order("effective_from", { ascending: true }),
+    // The cycles that hold something — a payment or verified attendance. The last
+    // one's end is where a new cycle start gets pushed past.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("salary_cycles")
+      .select("cycle_end, attendance_verified_at, salary_payments(count)")
+      .eq("restaurant_user_id", staffId)
+      .eq("restaurant_id", ru.restaurant_id),
+  ]);
+
+  const p = profileRes.data;
+  let lockedUntil: string | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const c of (cycleRes.data ?? []) as any[]) {
+    const paid = Number(c.salary_payments?.[0]?.count ?? 0) > 0;
+    if (!paid && !c.attendance_verified_at) continue;
+    const end = String(c.cycle_end).slice(0, 10);
+    if (!lockedUntil || end > lockedUntil) lockedUntil = end;
+  }
+
+  const today = todayKey();
+  const anchor = p?.cycle_anchor_date ? String(p.cycle_anchor_date).slice(0, 10) : null;
+  const length = Number(p?.cycle_length_days ?? 30);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const revisions = ((salaryRes.data ?? []) as any[]).map((s) => ({
+    effectiveFrom: String(s.effective_from).slice(0, 10),
+    salary: num(s.monthly_salary),
+  }));
+
+  // Before the anchor (someone moved onto cycles after a paid month) the
+  // "current" cycle is the first one, still to come.
+  const currentCycle = anchor
+    ? today >= anchor
+      ? periodContaining(today, anchor, length)
+      : { start: anchor, end: addDays(anchor, length - 1) }
+    : null;
+  const nextCycle = currentCycle
+    ? { start: addDays(currentCycle.end, 1), end: addDays(currentCycle.end, length) }
+    : null;
+
+  // The rule `salary_for_cycle` applies: in force on the cycle's first day, else
+  // the first salary at all.
+  let salaryNow: number | null = null;
+  if (currentCycle) {
+    for (const r of revisions) if (r.effectiveFrom <= currentCycle.start) salaryNow = r.salary;
+    if (salaryNow === null) {
+      salaryNow = revisions.find((r) => r.effectiveFrom <= currentCycle.end)?.salary ?? null;
+    }
+  }
+
+  return {
+    staffId,
+    joiningDate: p ? String(p.joining_date).slice(0, 10) : null,
+    anchor,
+    length,
+    revisions,
+    lockedUntil,
+    today,
+    currentCycle,
+    nextCycle,
+    salaryNow,
+  };
+}
+
+/**
+ * Save a staff member's payroll arrangement.
+ *
+ * ONE date drives the money: the SALARY START — the first salary and the first
+ * cycle begin on it, and nothing before it is owed. The joining date is only a
+ * record of when the person joined; it is saved on its own and changes nothing
+ * else. After setup, a salary change starts at a cycle boundary only: "this
+ * cycle" or "next cycle", never an arbitrary day, so the figure on the sheet
+ * always matches the salary the cycle is paid at. Moving the salary start is a
+ * correction, offered separately: while nothing has been paid or verified the
+ * first salary moves with it; afterwards it only re-times cycles still to come.
+ */
+export async function savePayrollSetup(
+  _prev: SetupResult,
   formData: FormData
-): Promise<ActionResult> {
+): Promise<SetupResult> {
   const ru = await getRestaurantUser();
   if (!PAYROLL_ACCESS.canManagePayroll(ru)) {
     return { error: "You don't have permission to set salaries." };
   }
 
   const staffId = (formData.get("staff_id") as string) || "";
-  const salaryRaw = (formData.get("monthly_salary") as string) || "";
-  const joining = ((formData.get("joining_date") as string) || "").trim();
-  const effective = normaliseMonth((formData.get("effective_from") as string) || null);
+  const salaryRaw = ((formData.get("monthly_salary") as string) || "").trim();
+  const applies = (formData.get("applies") as string) === "next" ? "next" : "current";
+  const changeCycle = formData.get("change_cycle") === "1";
+  const startRaw = ((formData.get("start_date") as string) || "").trim();
+  const length = parseInt(((formData.get("cycle_length") as string) || "30").trim(), 10);
+  const joiningRaw = ((formData.get("joining_date") as string) || "").trim();
 
   const salary = salaryRaw === "" ? NaN : parseFloat(salaryRaw);
+  const isDay = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
   if (!staffId) return { error: "Choose a staff member." };
   if (isNaN(salary) || salary < 0) return { error: "Enter a monthly salary of zero or more." };
-  if (!joining) return { error: "Choose the date this staff member joined." };
+
+  const before = await getPayrollSetup(staffId);
+  if (!before) return { error: "That staff member no longer exists." };
+  const isNew = before.joiningDate === null;
+
+  // The joining date is a record only — never a payroll input.
+  if (!isDay(joiningRaw)) return { error: "Choose the date this staff member joined." };
+  if (joiningRaw > before.today) return { error: "The joining date cannot be in the future." };
+
+  if (isNew || changeCycle) {
+    if (!isDay(startRaw)) return { error: "Choose the salary start date." };
+    if (startRaw > before.today) return { error: "The salary start cannot be in the future." };
+    if (isNaN(length) || length < 1 || length > 366) {
+      return { error: "A salary cycle must be between 1 and 366 days long." };
+    }
+  }
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (service as any).rpc("set_staff_salary", {
-    p_restaurant_id: ru.restaurant_id,
-    p_staff_id: staffId,
-    p_monthly_salary: salary,
-    p_joining_date: joining,
-    p_effective_from: effective,
-    p_by: ru.id,
+  const rpc = (fn: string, args: Record<string, unknown>) => (service as any).rpc(fn, args);
+  const fail = (e: { message?: string }, fallback: string) => ({
+    error: payrollError(e.message ?? "", fallback),
   });
+  let kept = 0;
 
-  if (error) {
-    return { error: payrollError(error.message ?? "", "Could not save the salary. Please try again.") };
+  // ── Someone new: the salary start is their first cycle and first salary ──
+  if (isNew) {
+    const s = await rpc("set_staff_salary", {
+      p_restaurant_id: ru.restaurant_id,
+      p_staff_id: staffId,
+      p_monthly_salary: salary,
+      p_joining_date: joiningRaw,
+      p_effective_from: startRaw,
+      p_by: ru.id,
+    });
+    if (s.error) return fail(s.error, "Could not save the salary. Please try again.");
+    const a = await rpc("set_cycle_anchor", {
+      p_restaurant_id: ru.restaurant_id,
+      p_staff_id: staffId,
+      p_anchor: startRaw,
+      p_length: length,
+    });
+    if (a.error) return fail(a.error, "Could not save the salary cycle. Please try again.");
+  } else {
+    // ── Joining date: a record, written on its own ──
+    if (joiningRaw !== before.joiningDate) {
+      const j = await rpc("set_joining_date", {
+        p_restaurant_id: ru.restaurant_id,
+        p_staff_id: staffId,
+        p_date: joiningRaw,
+      });
+      if (j.error) return fail(j.error, "Could not save the joining date. Please try again.");
+    }
+
+    // ── Correct the salary start / cycle length ──
+    if (changeCycle && (startRaw !== before.anchor || length !== before.length)) {
+      const first = before.revisions[0];
+      if (!before.lockedUntil && first && first.effectiveFrom !== startRaw) {
+        // Nothing paid or verified yet: the salary start was simply wrong, so the
+        // first salary moves with the cycle. The joining date is not touched.
+        const u = await rpc("update_salary_revision", {
+          p_restaurant_id: ru.restaurant_id,
+          p_staff_id: staffId,
+          p_old_from: first.effectiveFrom,
+          p_new_from: startRaw,
+          p_salary: first.salary,
+          p_by: ru.id,
+        });
+        if (u.error) return fail(u.error, "Could not move the salary start. Please try again.");
+        kept += Number(u.data ?? 0);
+      }
+      const a = await rpc("set_cycle_anchor", {
+        p_restaurant_id: ru.restaurant_id,
+        p_staff_id: staffId,
+        p_anchor: startRaw,
+        p_length: length,
+      });
+      if (a.error) return fail(a.error, "Could not save the salary cycle. Please try again.");
+    }
+
+    // ── Keep scheduled salaries on a cycle boundary ──
+    // A raise already booked for "next cycle" was dated to the OLD next start.
+    // Under new timing that date can land mid-cycle and silently slip a whole
+    // cycle; move each future-dated salary to the first new boundary on/after it.
+    let now = changeCycle ? await getPayrollSetup(staffId) : before;
+    if (changeCycle && now?.anchor && now.currentCycle) {
+      const { anchor, length: len, currentCycle } = now;
+      for (const r of now.revisions) {
+        if (r.effectiveFrom <= currentCycle.start) continue;
+        const k = Math.ceil(daysBetween(anchor, r.effectiveFrom) / len);
+        const boundary = addDays(anchor, k * len);
+        if (boundary === r.effectiveFrom) continue;
+        const u = await rpc("update_salary_revision", {
+          p_restaurant_id: ru.restaurant_id,
+          p_staff_id: staffId,
+          p_old_from: r.effectiveFrom,
+          p_new_from: boundary,
+          p_salary: r.salary,
+          p_by: ru.id,
+        });
+        if (u.error) return fail(u.error, "Could not re-time a scheduled salary. Please try again.");
+      }
+      now = await getPayrollSetup(staffId);
+    }
+
+    // ── Salary, from this cycle or the next ──
+    // Read AFTER any cycle change, so "this cycle" means the cycle as it now is.
+    const target = applies === "next" ? now?.nextCycle : now?.currentCycle;
+    if (!now || !target) return { error: "Could not work out the salary cycle. Please try again." };
+    const atTarget = (() => {
+      let v: number | null = null;
+      for (const r of now.revisions) if (r.effectiveFrom <= target.start) v = r.salary;
+      return v;
+    })();
+    if (atTarget !== salary) {
+      const s = await rpc("set_staff_salary", {
+        p_restaurant_id: ru.restaurant_id,
+        p_staff_id: staffId,
+        p_monthly_salary: salary,
+        p_joining_date: joiningRaw,
+        p_effective_from: target.start,
+        p_by: ru.id,
+      });
+      if (s.error) return fail(s.error, "Could not save the salary. Please try again.");
+      kept += Number(s.data ?? 0);
+    }
+  }
+
+  // Someone cannot have joined after their salary started: if the first salary
+  // now begins before the recorded joining date, the record moves back to it
+  // (same rule as migration 20261012500000). Pay is unaffected either way.
+  const after = await getPayrollSetup(staffId);
+  const firstSalary = after?.revisions[0]?.effectiveFrom;
+  if (after?.joiningDate && firstSalary && firstSalary < after.joiningDate) {
+    const j = await rpc("set_joining_date", {
+      p_restaurant_id: ru.restaurant_id,
+      p_staff_id: staffId,
+      p_date: firstSalary,
+    });
+    if (j.error) return fail(j.error, "Could not save the joining date. Please try again.");
   }
 
   revalidatePath("/admin/staff");
   revalidatePath("/admin/finance");
-  return null;
+  const note = keptNotice(kept);
+  return note ? { notice: note } : null;
+}
+
+/** Correct a salary change's amount or start date. */
+export async function updateSalaryRevision(
+  staffId: string,
+  oldFrom: string,
+  newFrom: string,
+  salary: number
+): Promise<SetupResult> {
+  const ru = await getRestaurantUser();
+  if (!PAYROLL_ACCESS.canManagePayroll(ru)) {
+    return { error: "You don't have permission to change salaries." };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(newFrom)) return { error: "Choose the date this salary starts." };
+  if (!Number.isFinite(salary) || salary < 0) {
+    return { error: "Enter a monthly salary of zero or more." };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (createServiceClient() as any).rpc("update_salary_revision", {
+    p_restaurant_id: ru.restaurant_id,
+    p_staff_id: staffId,
+    p_old_from: oldFrom,
+    p_new_from: newFrom,
+    p_salary: salary,
+    p_by: ru.id,
+  });
+  if (error) {
+    return { error: payrollError(error.message ?? "", "Could not change the salary. Please try again.") };
+  }
+  revalidatePath("/admin/staff");
+  revalidatePath("/admin/finance");
+  const note = keptNotice(Number(data ?? 0));
+  return note ? { notice: note } : null;
+}
+
+/** Remove a salary change; the one before it applies again. */
+export async function deleteSalaryRevision(staffId: string, from: string): Promise<SetupResult> {
+  const ru = await getRestaurantUser();
+  if (!PAYROLL_ACCESS.canManagePayroll(ru)) {
+    return { error: "You don't have permission to change salaries." };
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (createServiceClient() as any).rpc("delete_salary_revision", {
+    p_restaurant_id: ru.restaurant_id,
+    p_staff_id: staffId,
+    p_from: from,
+  });
+  if (error) {
+    return { error: payrollError(error.message ?? "", "Could not remove the salary. Please try again.") };
+  }
+  revalidatePath("/admin/staff");
+  revalidatePath("/admin/finance");
+  const note = keptNotice(Number(data ?? 0));
+  return note ? { notice: note } : null;
 }
 
 // ─── Pay a salary, or an advance against it ───────────────────────────────────
@@ -299,7 +686,13 @@ export async function recordSalaryPayment(
   }
 
   const staffId = (formData.get("staff_id") as string) || "";
-  const month = normaliseMonth((formData.get("salary_month") as string) || null);
+  // The DAY the sheet is showing, not its month. `record_salary_payment` files the
+  // payment against the cycle containing this date; cutting it to the 1st (as this
+  // used to) filed any payment on a cycle that doesn't start on the 1st against
+  // the PREVIOUS cycle, so an advance vanished from the row it was paid from and
+  // only turned up inside that person's history. Anchor-less staff are unaffected:
+  // the function truncates to the month itself for them.
+  const day = normaliseDay((formData.get("salary_month") as string) || null);
   const amountRaw = (formData.get("amount") as string) || "";
   const kind = ((formData.get("kind") as string) || "salary").toLowerCase();
   const method = ((formData.get("method") as string) || "cash").toLowerCase();
@@ -330,7 +723,7 @@ export async function recordSalaryPayment(
   const { error } = await (service as any).rpc("record_salary_payment", {
     p_restaurant_id: ru.restaurant_id,
     p_staff_id: staffId,
-    p_month: month,
+    p_month: day,
     p_amount: amount,
     p_kind: kind,
     p_method: method,
@@ -429,14 +822,14 @@ const EMPTY_CYCLE_SHEET = (asOf: string): PayrollCycleSheet => ({
   totalRemaining: 0,
 });
 
-/** `YYYY-MM-DD` for today, in the server's own calendar — never via toISOString(). */
+/**
+ * `YYYY-MM-DD` for today in NEPAL. It used to read the server's own calendar,
+ * which on a UTC host is still yesterday until 05:45 Nepal time — so an early
+ * morning payroll screen opened on the previous day (and the previous cycle).
+ * A zero offset makes `businessToday` the plain Nepal calendar date.
+ */
 function todayKey(): string {
-  const d = new Date();
-  return (
-    `${d.getFullYear()}-` +
-    `${String(d.getMonth() + 1).padStart(2, "0")}-` +
-    `${String(d.getDate()).padStart(2, "0")}`
-  );
+  return businessToday(0);
 }
 
 function normaliseDay(raw: string | null | undefined): string {
@@ -620,47 +1013,3 @@ export async function verifyCycleAttendance(
   return null;
 }
 
-// ─── The cycle anchor ─────────────────────────────────────────────────────────
-// Moving an anchor only ever affects the FUTURE: `set_cycle_anchor` pushes the
-// new start past any cycle that already exists, so history cannot be reshaped
-// under a payment that has already been made.
-
-export async function setCycleAnchor(
-  _prevState: ActionResult,
-  formData: FormData
-): Promise<ActionResult> {
-  const ru = await getRestaurantUser();
-  if (!PAYROLL_ACCESS.canManagePayroll(ru)) {
-    return { error: "You don't have permission to set salary cycles." };
-  }
-
-  const staffId = (formData.get("staff_id") as string) || "";
-  const anchor = ((formData.get("cycle_start") as string) || "").trim();
-  const lengthRaw = ((formData.get("cycle_length") as string) || "30").trim();
-  const length = parseInt(lengthRaw, 10);
-
-  if (!staffId) return { error: "Choose a staff member." };
-  if (!anchor) return { error: "Choose the date this staff member's salary cycle starts." };
-  if (isNaN(length) || length < 1 || length > 366) {
-    return { error: "A salary cycle must be between 1 and 366 days long." };
-  }
-
-  const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (service as any).rpc("set_cycle_anchor", {
-    p_restaurant_id: ru.restaurant_id,
-    p_staff_id: staffId,
-    p_anchor: normaliseDay(anchor),
-    p_length: length,
-  });
-
-  if (error) {
-    return {
-      error: payrollError(error.message ?? "", "Could not save the salary cycle. Please try again."),
-    };
-  }
-
-  revalidatePath("/admin/staff");
-  revalidatePath("/admin/finance");
-  return null;
-}

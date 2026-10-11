@@ -6,6 +6,8 @@ import {
   cycleFor,
   cycleContaining,
   cycleLabel,
+  effectiveAnchor,
+  periodContaining,
   dailyRate,
   payableDays,
   payableAmount,
@@ -177,4 +179,23 @@ test("a zero salary stays zero rather than producing NaN", () => {
 
 test("cycleLabel reads the way an admin would say it", () => {
   assert.equal(cycleLabel(AUG15), "15 Aug 2026 → 13 Sep 2026");
+});
+
+// ── Setup preview: must say what `salary_for_cycle` / `set_cycle_anchor` will do ──
+
+test("a cycle start on or before a locked cycle is stepped past it", () => {
+  assert.equal(effectiveAnchor("2026-09-19", 30, "2026-10-18"), "2026-10-19");
+  assert.equal(effectiveAnchor("2026-10-25", 30, "2026-10-18"), "2026-10-25");
+  assert.equal(effectiveAnchor("2026-09-19", 30, null), "2026-09-19");
+});
+
+test("before the anchor, a date falls in its calendar month", () => {
+  assert.deepEqual(periodContaining("2026-08-10", "2026-08-20", 30), {
+    start: "2026-08-01",
+    end: "2026-08-31",
+  });
+  assert.deepEqual(periodContaining("2026-08-25", "2026-08-20", 30), {
+    start: "2026-08-20",
+    end: "2026-09-18",
+  });
 });

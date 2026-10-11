@@ -162,6 +162,8 @@ export function BusinessDayClient({ state: day }: { state: BusinessDaySettings }
               This applies to <strong>past days too</strong>. Sales, finance and stock figures for
               earlier days will shift once as orders near the boundary move to a neighbouring
               business day. Your totals don&apos;t change — only which day they land on.
+              Yesterday&apos;s and today&apos;s daily summaries are sent again with the new
+              figures; for older days, use Resend in Report history.
             </p>
           </div>
         )}
@@ -283,7 +285,7 @@ function CloseTodayCard({ day }: { day: BusinessDaySettings }) {
           </>
         )}
 
-        {day.previousClosedEarlyAt && !day.canCloseNow && (
+        {day.canReopen && (
           <Button
             type="button"
             variant="secondary"
@@ -305,8 +307,8 @@ function CloseTodayCard({ day }: { day: BusinessDaySettings }) {
       )}
       {!day.canCloseNow && (
         <p className="text-xs mt-3" style={{ color: "var(--color-ink-mute)" }}>
-          This business day began with an early close, so it can be closed again from{" "}
-          {when(day.closableFrom)}.
+          {dayName(day.today)} only started {when(day.startedAt)}, so there is nothing to close
+          yet. It can be closed from {when(day.closableFrom)}.
         </p>
       )}
       {error && (
