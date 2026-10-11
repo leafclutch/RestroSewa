@@ -369,7 +369,7 @@ export async function getPayrollSummary(params?: {
 
   const { from, to } = periodBounds(
     params?.period ?? "today",
-    ru.closingHour,
+    ru.dayRule,
     params?.from,
     params?.to
   );
@@ -379,8 +379,8 @@ export async function getPayrollSummary(params?: {
   // database would compute them with `now()` in its own timezone (UTC), which
   // disagreed with every other figure in the same row, and it has no way to know
   // the restaurant's closing hour.
-  const today = periodBounds("today", ru.closingHour);
-  const month = periodBounds("month", ru.closingHour);
+  const today = periodBounds("today", ru.dayRule);
+  const month = periodBounds("month", ru.dayRule);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (service as any).rpc("payroll_summary", {

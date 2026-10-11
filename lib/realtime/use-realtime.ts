@@ -13,7 +13,13 @@ export type Topic =
   | "vendors"
   | "finance"
   | "payroll"
-  | "menu";
+  | "menu"
+  | "settings"
+  | "staff"
+  | "rooms"
+  | "workstations"
+  | "expenses"
+  | "security";
 
 /**
  * ─── ONE stream per page, shared by every subscriber ─────────────────────────
@@ -177,6 +183,23 @@ function acquire(url: string, sub: Subscriber): () => void {
     c.es?.close();
     conns.delete(url);
   };
+}
+
+/**
+ * Wake every live subscriber on the page for all of its topics, as if each had
+ * just changed. Pull-to-refresh uses it so sections that fetch for themselves
+ * (with whatever filter the user has picked) reload too, not only the
+ * server-rendered parts `router.refresh()` reaches.
+ */
+export function resyncRealtime() {
+  for (const conn of conns.values()) {
+    // Once per subscriber, not once per topic: a section listening to five topics
+    // refetches everything on any of them, so five calls would be five refetches.
+    for (const s of [...conn.subs]) {
+      const first = s.topics.values().next().value;
+      if (first) s.cb(first as Topic);
+    }
+  }
 }
 
 /**

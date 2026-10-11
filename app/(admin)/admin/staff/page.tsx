@@ -5,6 +5,7 @@ import { getWorkstations } from "@/app/actions/workstations";
 import { getPayrollCycleSheet } from "@/app/actions/payroll";
 import { WorkstationAssign } from "./_components/workstation-assign";
 import { PayrollClient } from "./_components/payroll-client";
+import { RealtimeRefresh } from "@/components/realtime-refresh";
 
 type StaffRow = {
   id: string;
@@ -67,6 +68,8 @@ export default async function AdminStaffPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-3xl">
+      {/* Live: another device's change re-renders this page in place. */}
+      <RealtimeRefresh topics={["staff", "workstations", "tables"]} />
       <h1
         className="text-2xl mb-1"
         style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}

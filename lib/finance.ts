@@ -6,7 +6,7 @@
 // deliberate choice lib/room-billing.ts makes. It is what lets this module be
 // exercised under `node --test`, which resolves neither tsconfig paths nor
 // extensionless specifiers. `business-day.ts` has no imports of its own.
-import { businessPeriodBounds } from "./business-day.ts";
+import { businessPeriodBounds, type DayRule } from "./business-day.ts";
 import type { ExpenseCategoryTotal } from "@/lib/expenses";
 
 export type FinancePeriod =
@@ -35,11 +35,11 @@ export const PERIOD_LABEL: Record<FinancePeriod, string> = {
  * the last 7 days, so the two screens disagreed). One definition, one place.
  *
  * `hour` is the restaurant's business-day boundary, which every caller already
- * holds as `ru.closingHour`.
+ * holds as `ru.dayRule`.
  */
 export function periodBounds(
   period: FinancePeriod,
-  hour: number,
+  hour: DayRule,
   from?: string | null,
   to?: string | null
 ): { from: Date; to: Date } {

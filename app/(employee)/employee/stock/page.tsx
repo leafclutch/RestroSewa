@@ -53,7 +53,7 @@ export default async function EmployeeStockPage() {
         targets={targets}
         workstations={workstations}
         deductionsHref="/employee/deductions"
-        today={businessToday(restaurantUser.closingHour)}
+        today={businessToday(restaurantUser.dayRule)}
         canManage={STOCK_ACCESS.canManageStock(restaurantUser)}
       />
     </div>

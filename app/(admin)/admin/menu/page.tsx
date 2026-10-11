@@ -5,6 +5,7 @@ import { getMenuImages } from "@/app/actions/menu-images";
 import { MenuClient } from "./_components/menu-client";
 import type { MenuItemRow } from "@/app/actions/menu";
 import Link from "next/link";
+import { RealtimeRefresh } from "@/components/realtime-refresh";
 
 export default async function MenuPage() {
   const { restaurantUser } = await requireRestaurantAdmin();
@@ -24,6 +25,8 @@ export default async function MenuPage() {
 
   return (
     <div className="p-4 md:p-8">
+      {/* Live: another device's change re-renders this page in place. */}
+      <RealtimeRefresh topics={["menu", "workstations"]} />
       <h1
         className="text-2xl mb-1"
         style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}

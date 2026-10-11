@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { normalizeClosingHour } from "@/lib/business-day";
+import { businessDayRule, type BusinessDayRule } from "@/lib/business-day";
 import { span } from "@/lib/perf/timing";
 
 /** What every caller actually reads off the auth user: the id, and rarely the email. */
@@ -67,7 +67,7 @@ export type StaffRow = {
   display_name: string;
   permissions: string[];
   /**
-   * The restaurant's business-day boundary (whole hours; 0 = midnight).
+   * The restaurant's business-day boundary: closing hour plus any early closes.
    *
    * It rides along on the staff row rather than being fetched where it's used:
    * every server action already opens with `getRestaurantUser()`, so the hour
@@ -75,7 +75,7 @@ export type StaffRow = {
    * trip, and it is structurally bound to the right tenant, so a report cannot
    * accidentally be bucketed with another restaurant's boundary.
    */
-  closingHour: number;
+  dayRule: BusinessDayRule;
 };
 
 /** The caller's restaurant_users row, or null. Memoised per request. */
@@ -127,7 +127,7 @@ export const getStaffRow = cache(async (authUserId: string): Promise<StaffRow | 
     display_name: raw.display_name,
     // A row predating the permissions migration can carry null.
     permissions: Array.isArray(raw.permissions) ? raw.permissions : [],
-    closingHour: normalizeClosingHour(rest?.settings?.business_closing_hour),
+    dayRule: businessDayRule(rest?.settings),
   };
 });
 

@@ -1275,7 +1275,7 @@ export function StockClient({
 
   // Stock moves from three places: a POS sale, a purchase, and a manual
   // deduction. All three push here.
-  useRealtime(["stock", "purchases", "orders"], refresh);
+  useRealtime(["stock", "purchases", "orders", "workstations", "settings"], refresh);
 
   // Stations worth offering as a filter: every active one, plus any inactive one
   // still holding something — so a product tagged to a station that was later

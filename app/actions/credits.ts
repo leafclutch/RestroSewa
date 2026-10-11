@@ -238,7 +238,7 @@ export async function getCreditSummary(): Promise<CreditStats> {
 
   // "Today" here means the current BUSINESS day, so credit taken at 1am on a
   // 3am-closing restaurant counts against the night it was actually taken.
-  const startOfToday = businessPeriodBounds("today", ru.closingHour).from.getTime();
+  const startOfToday = businessPeriodBounds("today", ru.dayRule).from.getTime();
 
   return computeCreditStats(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

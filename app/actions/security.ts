@@ -74,7 +74,7 @@ export async function getSecurityAuditLog(
 ): Promise<SecurityAuditRow[]> {
   const { restaurantUser } = await requireRestaurantAdmin();
   const unbounded = !date && period === "all";
-  const { from, to } = historyPeriodBounds(period, restaurantUser.closingHour, date);
+  const { from, to } = historyPeriodBounds(period, restaurantUser.dayRule, date);
   return getSecurityAuditRows(
     restaurantUser.restaurant_id,
     limit,

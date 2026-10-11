@@ -1,13 +1,14 @@
 import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth/current-user";
+import type { BusinessDayRule } from "@/lib/business-day";
 
 export type RestaurantUserCtx = {
   id: string;
   restaurant_id: string;
   role: string;
   permissions: string[];
-  /** The restaurant's business-day boundary — see `StaffRow.closingHour`. */
-  closingHour: number;
+  /** The restaurant's business-day boundary — see `StaffRow.dayRule`. */
+  dayRule: BusinessDayRule;
 };
 
 /**

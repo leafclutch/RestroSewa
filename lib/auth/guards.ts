@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { hasPermission } from "@/lib/permissions";
 import type { Permission } from "@/lib/permissions";
 import { getAuthUser, getStaffRow, isSuperAdmin } from "@/lib/auth/current-user";
+import type { BusinessDayRule } from "@/lib/business-day";
 
 /**
  * Where a signed-out staff member belongs: their OWN restaurant's sign-in.
@@ -30,11 +31,11 @@ export type RestaurantUserContext = {
   display_name: string;
   permissions: string[];
   /**
-   * The restaurant's business-day boundary — see `StaffRow.closingHour`.
+   * The restaurant's business-day boundary — see `StaffRow.dayRule`.
    * Server components read it from here to resolve dates before handing them to
    * client components, which must never work the day out themselves.
    */
-  closingHour: number;
+  dayRule: BusinessDayRule;
 };
 
 export async function requireSuperAdmin() {

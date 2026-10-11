@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { PeriodFilter } from "@/components/ui/period-filter";
 import type { HistoryPeriod } from "@/lib/history-period";
 import { Mail, CheckCircle2, History, RefreshCw, AlertTriangle } from "lucide-react";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 
 const SLOTS = 3;
 
@@ -141,6 +142,11 @@ function HistoryCard({ history: initialHistory }: { history: ReportDeliveryRow[]
     startLoad(async () => setHistory(await getReportHistory(period, date || null)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period, date]);
+
+  // The scheduler writes delivery rows on its own — show them as they land.
+  useRealtime(["settings"], () => {
+    startLoad(async () => setHistory(await getReportHistory(period, date || null)));
+  });
 
   const retry = (day: string) => {
     setError(null);

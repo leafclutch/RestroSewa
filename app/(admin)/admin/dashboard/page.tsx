@@ -124,7 +124,7 @@ export default async function AdminDashboardPage() {
       {/* Live stats: any sale, purchase, stock move or credit change re-runs this
           page in place, so the admin never refreshes to see today's numbers. */}
       <RealtimeRefresh
-        topics={["billing", "credits", "stock", "purchases", "vendors", "finance", "orders", "tables"]}
+        topics={["billing", "credits", "stock", "purchases", "vendors", "finance", "orders", "tables", "menu", "staff", "workstations", "rooms", "payroll"]}
       />
 
       <h1

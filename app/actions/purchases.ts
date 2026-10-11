@@ -156,7 +156,7 @@ export async function getPurchases(params?: {
 
   const period = params?.period ?? "today";
   if (params?.date || period !== "all") {
-    const { from, to } = historyPeriodBounds(period, ru.closingHour, params?.date);
+    const { from, to } = historyPeriodBounds(period, ru.dayRule, params?.date);
     query = query.gte("created_at", from.toISOString()).lt("created_at", to.toISOString());
   }
 
@@ -216,7 +216,7 @@ export async function getPurchaseLines(params?: {
 
   const period = params?.period ?? "today";
   if (params?.date || period !== "all") {
-    const { from, to } = historyPeriodBounds(period, ru.closingHour, params?.date);
+    const { from, to } = historyPeriodBounds(period, ru.dayRule, params?.date);
     query = query.gte("created_at", from.toISOString()).lt("created_at", to.toISOString());
   }
 
@@ -295,7 +295,7 @@ export async function getPurchaseSummary(day?: string | null): Promise<PurchaseS
   if (!STOCK_ACCESS.canViewPurchases(ru)) return empty;
 
   const service = createServiceClient();
-  const { from, to } = dayBounds(day ?? null, ru.closingHour);
+  const { from, to } = dayBounds(day ?? null, ru.dayRule);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (service as any)

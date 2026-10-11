@@ -1,6 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { timingSafeEqual } from "node:crypto";
-import { addBusinessDays, businessToday, normalizeClosingHour } from "@/lib/business-day";
+import { addBusinessDays, businessToday, businessDayRule } from "@/lib/business-day";
 import { normalizeDailySummaryConfig } from "@/lib/reports/daily-summary";
 import { sendDailySummary } from "@/lib/reports/daily-summary-send";
 
@@ -64,7 +64,7 @@ export async function POST(req: Request) {
     processed += 1;
 
     try {
-      const hour = normalizeClosingHour(r.settings?.business_closing_hour);
+      const hour = businessDayRule(r.settings);
       const day = addBusinessDays(businessToday(hour), -1); // the just-closed day
       const outcome = await sendDailySummary(r.id, day, hour, { force: false });
       // Log WHO each run addressed. Owners edit their recipient list in Settings,

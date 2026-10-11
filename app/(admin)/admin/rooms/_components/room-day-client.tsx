@@ -51,6 +51,13 @@ export function RoomDayClient({
   const [error, setError] = useState<string | null>(null);
   const [newDay, setNewDay] = useState(newDayHour);
   const [dbl, setDbl] = useState(doubleHour);
+  // Follow the saved hours when they change underneath us (here or elsewhere).
+  const [savedKey, setSavedKey] = useState(`${newDayHour}/${doubleHour}`);
+  if (savedKey !== `${newDayHour}/${doubleHour}`) {
+    setSavedKey(`${newDayHour}/${doubleHour}`);
+    setNewDay(newDayHour);
+    setDbl(doubleHour);
+  }
 
   const changed = newDay !== newDayHour || dbl !== doubleHour;
 

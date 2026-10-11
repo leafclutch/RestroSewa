@@ -98,7 +98,7 @@ export function DeductionsClient({
     [load, period, customFrom, customTo]
   );
   // A manual deduction is written on the `stock` channel.
-  useRealtime(["stock"], refresh);
+  useRealtime(["stock", "orders", "workstations", "settings"], refresh);
 
   const chipStations = useMemo(
     () => filterableStations(workstations, report.rows.flatMap((r) => r.workstation_ids)),

@@ -26,7 +26,13 @@ export type Topic =
   | "vendors"
   | "finance"
   | "payroll"
-  | "menu";
+  | "menu"
+  | "settings"
+  | "staff"
+  | "rooms"
+  | "workstations"
+  | "expenses"
+  | "security";
 
 type Listener = (topic: Topic) => void;
 
@@ -117,56 +123,73 @@ function dispatch(payload: string) {
   }
 }
 
+/** Try again later, with backoff — but only while someone is still listening. */
+function scheduleReconnect() {
+  const delay = Math.min(30_000, 1000 * 2 ** bus.retry++);
+  setTimeout(() => {
+    if (bus.subscribers.size > 0) void connect();
+  }, delay);
+}
+
+/**
+ * Open the shared LISTEN connection. NEVER rejects.
+ *
+ * Every concurrent caller awaits the same in-flight promise, so that promise must
+ * already have its failure handled. It used to be the raw attempt: the first
+ * caller caught its rejection, but a second caller arriving mid-connect got it
+ * unhandled — the `unhandledRejection: getaddrinfo ENOTFOUND` lines in the dev
+ * log — and the SSE route awaiting it threw.
+ */
 async function connect(): Promise<void> {
   if (bus.client) return;
   if (bus.connecting) return bus.connecting;
 
   bus.connecting = (async () => {
     const cfg = listenerConfig();
-    if (!cfg) {
-      bus.connecting = null;
+    if (!cfg) return;
+
+    const client = new Client(cfg);
+    // Until connected, failures surface through connect() rejecting; an 'error'
+    // event with no listener would crash the process, so absorb it here.
+    client.on("error", () => {});
+
+    try {
+      await client.connect();
+      await client.query("listen rs_events");
+    } catch (err) {
+      // Never swallow this: if the listener can't connect, every dashboard silently
+      // falls back to the slow poll and nobody knows why.
+      console.error("[realtime] listener failed to connect:", err);
+      client.removeAllListeners();
+      void client.end().catch(() => {});
+      scheduleReconnect();
       return;
     }
 
-    const client = new Client(cfg);
-
     // A dropped connection must not silently stop every dashboard updating.
-    // Clear it and reconnect with backoff; subscribers stay registered.
+    // Clear it and reconnect with backoff; subscribers stay registered. 'error'
+    // and 'end' usually both fire for one drop — reconnect once, not twice.
+    let dead = false;
     const onDead = () => {
+      if (dead) return;
+      dead = true;
       if (bus.client === client) bus.client = null;
-      const delay = Math.min(30_000, 1000 * 2 ** bus.retry++);
-      setTimeout(() => {
-        if (bus.subscribers.size > 0) void connect();
-      }, delay);
+      scheduleReconnect();
     };
-
+    client.removeAllListeners("error");
     client.on("error", onDead);
     client.on("end", onDead);
     client.on("notification", (n) => {
       if (n.payload) dispatch(n.payload);
     });
 
-    await client.connect();
-    await client.query("listen rs_events");
-
     bus.client = client;
     bus.retry = 0;
+  })().finally(() => {
     bus.connecting = null;
-  })();
+  });
 
-  try {
-    await bus.connecting;
-  } catch (err) {
-    // Never swallow this: if the listener can't connect, every dashboard silently
-    // falls back to the slow poll and nobody knows why.
-    console.error("[realtime] listener failed to connect:", err);
-    bus.connecting = null;
-    bus.client = null;
-    const delay = Math.min(30_000, 1000 * 2 ** bus.retry++);
-    setTimeout(() => {
-      if (bus.subscribers.size > 0) void connect();
-    }, delay);
-  }
+  return bus.connecting;
 }
 
 /** True once the shared LISTEN connection is live. Surfaced to clients so a

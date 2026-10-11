@@ -2,7 +2,7 @@
 // action files so the screens and the actions agree on what "today" means and on
 // when a product counts as low or out — the two can never drift apart.
 
-import { businessDayBounds, businessToday } from "@/lib/business-day";
+import { businessDayBounds, businessToday, type DayRule } from "@/lib/business-day";
 
 export type StockStatus = "ok" | "low" | "out";
 
@@ -38,12 +38,12 @@ export function stockStatus(closing: number, threshold: number): StockStatus {
  * closing balance and the next day's opening balance are evaluated at the very
  * same instant, so they cannot disagree.
  */
-export function dayBounds(day: string | null | undefined, hour: number): { from: Date; to: Date } {
+export function dayBounds(day: string | null | undefined, hour: DayRule): { from: Date; to: Date } {
   return businessDayBounds(day, hour);
 }
 
 /** The business day we're currently inside, as YYYY-MM-DD (local, never UTC). */
-export function todayISO(hour: number): string {
+export function todayISO(hour: DayRule): string {
   return businessToday(hour);
 }
 

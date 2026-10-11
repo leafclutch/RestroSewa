@@ -10,6 +10,7 @@ import { hasRooms } from "@/lib/business-type";
 import { RoomsClient } from "./_components/rooms-client";
 import { RoomDayClient } from "./_components/room-day-client";
 import { ActiveStaysClient } from "./_components/active-stays-client";
+import { RealtimeRefresh } from "@/components/realtime-refresh";
 
 export type EmployeeOption = { id: string; display_name: string };
 
@@ -75,6 +76,8 @@ export default async function RoomsPage() {
 
   return (
     <div className="p-4 md:p-8">
+      {/* Live: another device's change re-renders this page in place. */}
+      <RealtimeRefresh topics={["rooms", "tables"]} />
       <h1
         className="text-2xl mb-1"
         style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}

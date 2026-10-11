@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { updateCurrencySetting, type ActionResult } from "@/app/actions/settings";
 import { Button } from "@/components/ui/button";
 import { CURRENCIES, currencyFormatter } from "@/lib/currency";
@@ -18,8 +19,20 @@ export function CurrencyClient({ currency }: { currency: string }) {
     null
   );
   const [code, setCode] = useState(currency);
+  // Follow the saved currency when it changes underneath us (here or elsewhere).
+  const [savedCode, setSavedCode] = useState(currency);
+  if (savedCode !== currency) {
+    setSavedCode(currency);
+    setCode(currency);
+  }
 
   const saved = state !== null && "ok" in state;
+  // Pull the saved value back in at once, so this card and the rest of the page
+  // show it without a manual reload.
+  const router = useRouter();
+  useEffect(() => {
+    if (saved) router.refresh();
+  }, [state, saved, router]);
   const errored = state !== null && "error" in state;
   const changed = code !== currency;
   const preview = currencyFormatter(code);

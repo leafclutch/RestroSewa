@@ -882,7 +882,7 @@ export function FinanceClient({
     () => load(period, customFrom || undefined, customTo || undefined),
     [load, period, customFrom, customTo]
   );
-  useRealtime(["billing", "credits", "purchases", "vendors", "finance", "payroll"], resync);
+  useRealtime(["billing", "credits", "purchases", "vendors", "finance", "payroll", "settings"], resync);
 
   const netMovement = report.closingNet - (report.openingCash + report.openingOnline);
   const periodLabel = PERIOD_LABEL[report.period];

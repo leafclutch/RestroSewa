@@ -1,6 +1,6 @@
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/service";
-import { businessDayBounds } from "@/lib/business-day";
+import { businessDayBounds, type DayRule } from "@/lib/business-day";
 import { stockStatus } from "@/lib/stock";
 import { hasRooms, normalizeBusinessType } from "@/lib/business-type";
 import { expenseCategoryLabel } from "@/lib/expenses";
@@ -148,9 +148,9 @@ const num = (v: unknown) => Number(v ?? 0);
 export async function buildDailySummary(
   restaurantId: string,
   businessDate: string,
-  closingHour: number
+  dayRule: DayRule
 ): Promise<DailySummaryModel> {
-  const { from, to } = businessDayBounds(businessDate, closingHour);
+  const { from, to } = businessDayBounds(businessDate, dayRule);
   const fromIso = from.toISOString();
   const toIso = to.toISOString();
   const service = createServiceClient();

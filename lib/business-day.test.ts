@@ -9,6 +9,11 @@ import {
   roomNightBoundary,
   roomNights,
   type RoomDayRule,
+  businessDate,
+  businessDayBounds,
+  businessDayRule,
+  businessPeriodBounds,
+  businessToday,
 } from "./business-day.ts";
 
 // Every case below is written in NEPAL wall-clock time, because that is the only
@@ -213,4 +218,81 @@ test("the two hours are independent — a hotel can run 4 AM / 11 AM", () => {
     roomNightBoundary(npt("2026-08-14", 5), 1, rule).toISOString(),
     npt("2026-08-15", 11).toISOString()
   );
+});
+
+// ── Closing hour on either side of midnight ──────────────────────────────────
+
+test("closing at 2 AM keeps after-midnight sales on the night before", () => {
+  const rule = businessDayRule({ business_closing_hour: 2 });
+  assert.equal(businessDate(npt("2026-10-11", 1, 30), rule), "2026-10-10");
+  assert.equal(businessDate(npt("2026-10-11", 2), rule), "2026-10-11");
+});
+
+test("closing at 10 PM sends later sales to tomorrow", () => {
+  const rule = businessDayRule({ business_closing_hour: 22 });
+  assert.equal(businessDate(npt("2026-10-11", 21, 59), rule), "2026-10-11");
+  assert.equal(businessDate(npt("2026-10-11", 22), rule), "2026-10-12");
+  assert.equal(businessDate(npt("2026-10-11", 9), rule), "2026-10-11");
+  const { from, to } = businessDayBounds("2026-10-11", rule);
+  assert.equal(from.toISOString(), npt("2026-10-10", 22).toISOString());
+  assert.equal(to.toISOString(), npt("2026-10-11", 22).toISOString());
+});
+
+test("closing at 9 PM: This Month after 9 PM on the last day is already next month", () => {
+  const rule = businessDayRule({ business_closing_hour: 21 });
+  const { from } = businessPeriodBounds("month", rule, null, null, npt("2026-10-31", 21, 30));
+  assert.equal(from.toISOString(), npt("2026-10-31", 21).toISOString());
+});
+
+// ── Close today's business ────────────────────────────────────────────────────
+
+test("an early close ends that day at the instant it was pressed", () => {
+  const closedAt = npt("2026-10-11", 20, 5);
+  const rule = businessDayRule({
+    business_closing_hour: 22,
+    business_early_closes: { "2026-10-11": closedAt.toISOString() },
+  });
+  assert.equal(businessDate(npt("2026-10-11", 20), rule), "2026-10-11");
+  assert.equal(businessDate(npt("2026-10-11", 20, 5), rule), "2026-10-12");
+  assert.equal(businessToday(rule, npt("2026-10-11", 20, 30)), "2026-10-12");
+
+  const closed = businessDayBounds("2026-10-11", rule);
+  assert.equal(closed.to.toISOString(), closedAt.toISOString());
+  const next = businessDayBounds("2026-10-12", rule);
+  assert.equal(next.from.toISOString(), closedAt.toISOString());
+  // …and the day after it is back on the normal closing hour.
+  assert.equal(next.to.toISOString(), npt("2026-10-12", 22).toISOString());
+});
+
+test("an early close works with a past-midnight closing hour too", () => {
+  const closedAt = npt("2026-10-11", 23);
+  const rule = businessDayRule({
+    business_closing_hour: 3,
+    business_early_closes: { "2026-10-11": closedAt.toISOString() },
+  });
+  assert.equal(businessDate(npt("2026-10-12", 1), rule), "2026-10-12");
+  assert.equal(businessDate(npt("2026-10-12", 4), rule), "2026-10-12");
+  assert.equal(businessDayBounds("2026-10-12", rule).to.toISOString(), npt("2026-10-13", 3).toISOString());
+});
+
+test("junk in the early-close map is ignored", () => {
+  const rule = businessDayRule({
+    business_closing_hour: 0,
+    business_early_closes: { "2026-10-11": "nope", bad: "2026-10-11T00:00:00Z", x: 5 },
+  });
+  assert.deepEqual(rule.earlyCloses, {});
+});
+
+test("an early close stranded by a later closing-hour change is ignored", () => {
+  // Closed at 8:05 PM under a midnight closing hour, then the hour moved to 6 PM:
+  // 8:05 PM is now past the day's normal end, so the day just ends at 6 PM.
+  const rule = businessDayRule({
+    business_closing_hour: 18,
+    business_early_closes: { "2026-10-11": npt("2026-10-11", 20, 5).toISOString() },
+  });
+  const bill = npt("2026-10-11", 19);
+  const day = businessDate(bill, rule);
+  const { from, to } = businessDayBounds(day, rule);
+  assert.equal(day, "2026-10-12");
+  assert.ok(bill >= from && bill < to, "the bill sits inside its own day's bounds");
 });

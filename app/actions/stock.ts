@@ -177,7 +177,7 @@ export async function getStock(params?: {
   if (!STOCK_ACCESS.canViewStock(ru)) return [];
 
   const service = createServiceClient();
-  const { from, to } = dayBounds(params?.day ?? null, ru.closingHour);
+  const { from, to } = dayBounds(params?.day ?? null, ru.dayRule);
 
   const [productsRes, reportRes, linksRes, stationsRes] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -407,7 +407,7 @@ export async function getProductHistory(
   // Business-day bounds, the same "This Week" every other list in the app means.
   // Each row's running balance is still computed over the WHOLE history inside
   // product_history_range, so it stays the true on-hand figure.
-  const bounds = period === "all" ? null : historyPeriodBounds(period, ru.closingHour);
+  const bounds = period === "all" ? null : historyPeriodBounds(period, ru.dayRule);
 
   // PAGED, never one call. The API returns at most 1000 rows per request, and this
   // function returns OLDEST-first (so the running balance can accumulate) — so a

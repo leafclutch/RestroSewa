@@ -1,4 +1,4 @@
-import { businessPeriodBounds, businessPeriodDateBounds, businessDayBounds, addBusinessDays } from "@/lib/business-day";
+import { businessPeriodBounds, businessPeriodDateBounds, businessDayBounds, addBusinessDays, type DayRule } from "@/lib/business-day";
 
 // A lighter period set for simple chronological lists (Security activity, Report
 // delivery history, Purchases, Savings, …) that just need "narrow the window",
@@ -24,7 +24,7 @@ export const HISTORY_PERIOD_LABEL: Record<HistoryPeriod, string> = {
  */
 export function historyPeriodBounds(
   period: HistoryPeriod,
-  hour: number,
+  hour: DayRule,
   date?: string | null
 ): { from: Date; to: Date } {
   if (date) return businessDayBounds(date, hour);
@@ -34,7 +34,7 @@ export function historyPeriodBounds(
 /** String bounds, for filtering a plain YYYY-MM-DD business-date column. */
 export function historyPeriodDateBounds(
   period: HistoryPeriod,
-  hour: number,
+  hour: DayRule,
   date?: string | null
 ): { from: string | null; to: string | null } {
   if (date) return { from: date, to: addBusinessDays(date, 1) };

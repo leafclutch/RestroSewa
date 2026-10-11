@@ -5,10 +5,33 @@
 // of the previous night's trading. The books said otherwise — a 00:45 bill
 // landed on the next calendar day, splitting one evening's takings across two
 // reports. So the boundary is configurable per restaurant
-// (`restaurants.settings.business_closing_hour`, whole hours, default 0 =
+// (`restaurants.settings.business_closing_hour`, whole hours 0–23, default 0 =
 // midnight = the old behaviour).
 //
-//   business day D  =  [ D h:00 Nepal , D+1 h:00 Nepal )
+// A closing hour can sit on EITHER side of midnight, and which side decides which
+// calendar date the 24-hour window is named after — the one holding most of it:
+//
+//   before noon (0–11)  late close: the small hours belong to the night before
+//       business day D  =  [ D h:00 , D+1 h:00 )            e.g. 2 AM
+//   noon or later (12–23)  early close: after closing is already tomorrow
+//       business day D  =  [ D-1 h:00 , D h:00 )            e.g. 10 PM
+//
+// Both are the same formula with a signed OFFSET from midnight (h, or h − 24):
+//
+//   business day D  =  [ D offset , D+1 offset )
+//
+// The day-maths functions below take a `DayRule`. A plain number is a raw offset
+// (the room-night rules use that form, where 12 means noon of that date, not the
+// day before); a restaurant's closing hour reaches them as a `BusinessDayRule`
+// built by `businessDayRule(settings)`, which does the flip and also carries…
+//
+// ── EARLY CLOSES ──────────────────────────────────────────────────────────────
+// "Close today's business" ends the current day at the instant it is pressed.
+// It is stored per business date (`settings.business_early_closes`, date → ISO
+// instant) and only moves THAT day's end — and so the next day's start. The day
+// after reverts to the normal closing hour without anyone touching anything.
+// It is kept forever on purpose: forgetting it would quietly pull the evening's
+// later bills back into the day that was closed.
 //
 // ── TIMEZONE: PINNED TO NEPAL, NOT THE SERVER ────────────────────────────────
 // This used to compute in the SERVER's local timezone, which was fine on a
@@ -53,6 +76,71 @@ export function normalizeClosingHour(v: unknown): number {
   return n;
 }
 
+/**
+ * A restaurant's business-day boundary, resolved. `offset` is signed hours from
+ * Nepal midnight (−12…11); `earlyCloses` maps a business date to the instant it
+ * was closed early.
+ */
+export type BusinessDayRule = {
+  hour: number;
+  offset: number;
+  earlyCloses: Readonly<Record<string, string>>;
+};
+
+/** A `BusinessDayRule`, or a bare offset in hours (no early closes). */
+export type DayRule = number | BusinessDayRule;
+
+/** Closing hour → signed offset from midnight. 22 (10 PM) → −2; 3 → 3. */
+export function closingOffset(hour: number): number {
+  return hour >= 12 ? hour - 24 : hour;
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Coerce `settings.business_early_closes` into date → ISO, dropping junk. */
+export function normalizeEarlyCloses(v: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [day, at] of Object.entries(v as Record<string, unknown>)) {
+    if (DATE_RE.test(day) && typeof at === "string" && Number.isFinite(Date.parse(at))) {
+      out[day] = at;
+    }
+  }
+  return out;
+}
+
+/** The restaurant's rule, from its `settings` jsonb. */
+export function businessDayRule(
+  settings: { business_closing_hour?: unknown; business_early_closes?: unknown } | null | undefined
+): BusinessDayRule {
+  const hour = normalizeClosingHour(settings?.business_closing_hour);
+  return {
+    hour,
+    offset: closingOffset(hour),
+    earlyCloses: normalizeEarlyCloses(settings?.business_early_closes),
+  };
+}
+
+const offsetOf = (rule: DayRule) => (typeof rule === "number" ? rule : rule.offset);
+
+/**
+ * The instant `day` was closed early, if it was — and only while that instant
+ * still lies inside the day's normal window. An early close is recorded against
+ * the closing hour in force at the time; if the hour is changed later the stored
+ * instant can fall outside the day it names (past its new end, or before its new
+ * start). Honouring it then would make `businessDate` and the day bounds disagree
+ * about the same bill, so it is ignored and the day runs to its normal hour.
+ */
+function earlyCloseOf(rule: DayRule, day: string): Date | null {
+  if (typeof rule === "number") return null;
+  const raw = rule.earlyCloses[day];
+  if (!raw) return null;
+  const at = new Date(raw);
+  const opens = nepalInstant(day, rule.offset);
+  const closes = nepalInstant(addDaysStr(day, 1), rule.offset);
+  return at >= opens && at < closes ? at : null;
+}
+
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /** The Nepal wall-clock date (YYYY-MM-DD) of an absolute instant. */
@@ -91,21 +179,37 @@ export function addBusinessDays(day: string, n: number): string {
 
 /**
  * The instant business day `day` begins: Nepal midnight of that date plus the
- * closing hour. Accepts a YYYY-MM-DD string, or a Date (read as its Nepal day).
+ * rule's offset — or, when the day before was closed early, that instant.
+ * Accepts a YYYY-MM-DD string, or a Date (read as its Nepal day).
  */
-export function businessDayStart(day: string | Date, hour: number): Date {
+export function businessDayStart(day: string | Date, rule: DayRule): Date {
   const s = typeof day === "string" ? day : nepalDateStr(day);
-  return nepalInstant(s, hour);
+  return earlyCloseOf(rule, addDaysStr(s, -1)) ?? nepalInstant(s, offsetOf(rule));
+}
+
+/** Where `day` would begin on the normal closing hour, ignoring early closes. */
+export function businessDayScheduledStart(day: string, rule: DayRule): Date {
+  return nepalInstant(day, offsetOf(rule));
 }
 
 /**
  * Which business day does this instant belong to?
  *
- * Shifting back by the closing hour is the whole trick: with h=3, a 02:50 stamp
- * moves to 23:50 the previous day and reads off that Nepal date.
+ * Shifting back by the offset is the whole trick: with 3 AM, a 02:50 stamp moves
+ * to 23:50 the previous day and reads off that Nepal date; with 10 PM (−2), a
+ * 22:30 stamp moves to 00:30 the next day. Then an early close of that day, if
+ * the stamp is past it, hands the stamp to the following day.
  */
-export function businessDate(at: Date, hour: number): string {
-  return nepalDateStr(new Date(at.getTime() - hour * 60 * 60 * 1000));
+export function businessDate(at: Date, rule: DayRule): string {
+  let d = nepalDateStr(new Date(at.getTime() - offsetOf(rule) * 60 * 60 * 1000));
+  // Bounded: a day can only be closed early once it has started, so at most a
+  // couple of consecutive early closes can ever cover one instant.
+  for (let i = 0; i < 3; i++) {
+    const closed = earlyCloseOf(rule, d);
+    if (!closed || at < closed) break;
+    d = addDaysStr(d, 1);
+  }
+  return d;
 }
 
 /**
@@ -115,17 +219,17 @@ export function businessDate(at: Date, hour: number): string {
  * test can't otherwise reach — 01:00 on the 1st of a month, or exactly h:00:00.
  * Production callers never pass it.
  */
-export function businessToday(hour: number, now: Date = new Date()): string {
-  return businessDate(now, hour);
+export function businessToday(rule: DayRule, now: Date = new Date()): string {
+  return businessDate(now, rule);
 }
 
 /** Bounds for ONE business day (the Nepal date, or today's). */
 export function businessDayBounds(
   day: string | null | undefined,
-  hour: number
+  rule: DayRule
 ): { from: Date; to: Date } {
-  const d = day ?? businessToday(hour);
-  return { from: nepalInstant(d, hour), to: nepalInstant(addDaysStr(d, 1), hour) };
+  const d = day ?? businessToday(rule);
+  return { from: businessDayStart(d, rule), to: businessDayStart(addDaysStr(d, 1), rule) };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -304,14 +408,14 @@ export type BusinessPeriod =
  */
 export function businessPeriodBounds(
   period: BusinessPeriod,
-  hour: number,
+  rule: DayRule,
   from?: string | null,
   to?: string | null,
   now: Date = new Date()
 ): { from: Date; to: Date } {
   // Anchor on the Nepal business day we're inside — see the header note.
-  const today = businessToday(hour, now);
-  const S = (dayStr: string) => nepalInstant(dayStr, hour);
+  const today = businessToday(rule, now);
+  const S = (dayStr: string) => businessDayStart(dayStr, rule);
   const tomorrow = S(addDaysStr(today, 1));
 
   switch (period) {
@@ -353,10 +457,10 @@ export function businessPeriodBounds(
  */
 export function businessPeriodDateBounds(
   period: Exclude<BusinessPeriod, "yesterday" | "custom">,
-  hour: number,
+  rule: DayRule,
   now: Date = new Date()
 ): { from: string | null; to: string | null } {
-  const today = businessToday(hour, now);
+  const today = businessToday(rule, now);
   const tomorrow = addDaysStr(today, 1);
 
   switch (period) {
@@ -371,4 +475,9 @@ export function businessPeriodDateBounds(
     case "all":
       return { from: null, to: null };
   }
+}
+
+/** The instant `day` was closed early, if that close still applies (see `earlyCloseOf`). */
+export function businessDayEarlyClose(day: string, rule: DayRule): Date | null {
+  return earlyCloseOf(rule, day);
 }

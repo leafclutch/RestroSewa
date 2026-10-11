@@ -4,7 +4,15 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { requireRestaurantAdmin } from "@/lib/auth/guards";
 import { normalizeBillLabel, type BillNumberLabel } from "@/lib/billing/bill-number";
-import { normalizeClosingHour } from "@/lib/business-day";
+import {
+  addBusinessDays,
+  businessDayEarlyClose,
+  businessDayRule,
+  businessDayScheduledStart,
+  businessDayStart,
+  businessToday,
+  normalizeEarlyCloses,
+} from "@/lib/business-day";
 import { defaultTicketCode, ticketCodeOf } from "@/lib/workstations/ticket-code";
 import { revalidateRestaurantInfo } from "@/lib/restaurant-info";
 import { revalidateWorkstations } from "@/lib/cache/tenant-cache";
@@ -42,6 +50,19 @@ export type BillingSettings = {
 export type BusinessDaySettings = {
   /** The hour a business day rolls over, 0–23. 0 = midnight (the default). */
   closingHour: number;
+  /** The business day we are inside now (YYYY-MM-DD). */
+  today: string;
+  /** When it began and when it will end, as ISO instants. */
+  startedAt: string;
+  endsAt: string;
+  /** The day before, and the instant it was closed early (null if it wasn't). */
+  previousDay: string;
+  previousClosedEarlyAt: string | null;
+  /** The day sales will count toward after an early close. */
+  nextDay: string;
+  /** Whether "Close today's business" is allowed right now, and from when it is. */
+  canCloseNow: boolean;
+  closableFrom: string;
 };
 
 // Reads the restaurant's billing settings for the admin form. Admin-only; the page
@@ -194,20 +215,75 @@ export async function updateBillingSettings(
 }
 
 // ─── Business day ─────────────────────────────────────────────────────────────
-// Restaurants that trade past midnight count those sales as the previous night's
-// takings. This is the hour at which the books roll over.
+// The hour at which the books roll over — any hour. Before noon is a late close
+// (after-midnight sales stay on the previous night); noon or later is an early
+// close (sales after it already count toward tomorrow). See lib/business-day.ts.
+//
+// "Close today's business" ends the current business day NOW, for this one day
+// only; the next day runs to the normal closing hour again.
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function readSettings(service: any, restaurantId: string): Promise<Record<string, unknown>> {
+  const { data } = await service
+    .from("restaurants")
+    .select("settings")
+    .eq("id", restaurantId)
+    .maybeSingle();
+  return (data?.settings ?? {}) as Record<string, unknown>;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function writeSettings(service: any, restaurantId: string, settings: Record<string, unknown>) {
+  const { error } = await service.from("restaurants").update({ settings }).eq("id", restaurantId);
+  return error ? { error: error.message as string } : null;
+}
+
+// Every date-based figure in the app is re-bucketed by a boundary change, so every
+// reporting surface must be refreshed — a cached page would keep showing totals
+// computed against the OLD boundary and quietly disagree with the rest of the system.
+function refreshBusinessDaySurfaces(restaurantId: string) {
+  revalidateRestaurantInfo(restaurantId);
+  for (const p of [
+    "/admin/settings",
+    "/admin/dashboard",
+    "/admin/finance",
+    "/admin/stock",
+    "/admin/purchases",
+    "/admin/staff",
+    "/employee/sales",
+    "/employee/credits",
+    "/employee/dashboard",
+  ]) {
+    revalidatePath(p);
+  }
+}
+
+/** The day state the settings card shows, worked out on the server's clock. */
+function businessDayState(settings: Record<string, unknown>, now = new Date()): BusinessDaySettings {
+  const rule = businessDayRule(settings);
+  const today = businessToday(rule, now);
+  const previous = addBusinessDays(today, -1);
+  const tomorrow = addBusinessDays(today, 1);
+  return {
+    closingHour: rule.hour,
+    today,
+    startedAt: businessDayStart(today, rule).toISOString(),
+    endsAt: businessDayStart(tomorrow, rule).toISOString(),
+    previousDay: previous,
+    previousClosedEarlyAt: businessDayEarlyClose(previous, rule)?.toISOString() ?? null,
+    nextDay: tomorrow,
+    // A day can only be closed once it has properly begun. Without this, a second
+    // tap right after an early close would end the brand-new day too, leaving it
+    // empty and skipping straight to the day after.
+    canCloseNow: now >= businessDayScheduledStart(today, rule),
+    closableFrom: businessDayScheduledStart(today, rule).toISOString(),
+  };
+}
 
 export async function getBusinessDaySettings(): Promise<BusinessDaySettings> {
   const { restaurantUser } = await requireRestaurantAdmin();
   const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any)
-    .from("restaurants")
-    .select("settings")
-    .eq("id", restaurantUser.restaurant_id)
-    .maybeSingle();
-
-  return { closingHour: normalizeClosingHour(data?.settings?.business_closing_hour) };
+  return businessDayState(await readSettings(service, restaurantUser.restaurant_id));
 }
 
 export async function updateBusinessDaySettings(
@@ -223,41 +299,69 @@ export async function updateBusinessDaySettings(
     return { error: "Choose a valid closing time." };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: rest } = await (service as any)
-    .from("restaurants")
-    .select("settings")
-    .eq("id", restaurantUser.restaurant_id)
-    .maybeSingle();
+  const current = await readSettings(service, restaurantUser.restaurant_id);
+  const failed = await writeSettings(service, restaurantUser.restaurant_id, {
+    ...current,
+    business_closing_hour: hour,
+  });
+  if (failed) return failed;
 
-  const settings = { ...(rest?.settings ?? {}), business_closing_hour: hour };
+  refreshBusinessDaySurfaces(restaurantUser.restaurant_id);
+  return { ok: true };
+}
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (service as any)
-    .from("restaurants")
-    .update({ settings })
-    .eq("id", restaurantUser.restaurant_id);
+/** End the current business day right now. New sales count toward the next day. */
+export async function closeBusinessDayNow(): Promise<ActionResult> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+  const service = createServiceClient();
+  const now = new Date();
 
-  if (error) return { error: error.message };
-
-  revalidateRestaurantInfo(restaurantUser.restaurant_id);
-
-  // This re-buckets every date-based figure in the app, so every reporting
-  // surface must be refreshed — a cached page would keep showing totals computed
-  // against the OLD boundary and quietly disagree with the rest of the system.
-  for (const p of [
-    "/admin/settings",
-    "/admin/dashboard",
-    "/admin/finance",
-    "/admin/stock",
-    "/admin/purchases",
-    "/admin/staff",
-    "/employee/sales",
-    "/employee/credits",
-    "/employee/dashboard",
-  ]) {
-    revalidatePath(p);
+  const current = await readSettings(service, restaurantUser.restaurant_id);
+  const state = businessDayState(current, now);
+  if (!state.canCloseNow) {
+    return { error: "Today's business has only just started — it can't be closed yet." };
   }
+
+  const failed = await writeSettings(service, restaurantUser.restaurant_id, {
+    ...current,
+    business_early_closes: {
+      ...normalizeEarlyCloses(current.business_early_closes),
+      [state.today]: now.toISOString(),
+    },
+  });
+  if (failed) return failed;
+
+  refreshBusinessDaySurfaces(restaurantUser.restaurant_id);
+  return { ok: true };
+}
+
+/**
+ * Undo the most recent early close: the closed day runs to its normal closing
+ * hour again, and anything sold since the close moves back onto it.
+ */
+export async function reopenBusinessDay(): Promise<ActionResult> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+  const service = createServiceClient();
+
+  const current = await readSettings(service, restaurantUser.restaurant_id);
+  const state = businessDayState(current);
+  if (!state.previousClosedEarlyAt) return { error: "There is no early close to undo." };
+  // Past its normal closing hour the day would have ended anyway — reopening it
+  // would change nothing but the history, so don't pretend it can.
+  const rule = businessDayRule(current);
+  if (new Date() >= businessDayScheduledStart(state.today, rule)) {
+    return { error: "That day has already passed its normal closing time." };
+  }
+
+  const closes = normalizeEarlyCloses(current.business_early_closes);
+  delete closes[state.previousDay];
+  const failed = await writeSettings(service, restaurantUser.restaurant_id, {
+    ...current,
+    business_early_closes: closes,
+  });
+  if (failed) return failed;
+
+  refreshBusinessDaySurfaces(restaurantUser.restaurant_id);
   return { ok: true };
 }
 
@@ -422,7 +526,7 @@ export async function getReportHistory(
     .eq("restaurant_id", restaurantUser.restaurant_id)
     .eq("period_type", "daily");
 
-  const { from, to } = historyPeriodDateBounds(period, restaurantUser.closingHour, date);
+  const { from, to } = historyPeriodDateBounds(period, restaurantUser.dayRule, date);
   if (from) query = query.gte("period_key", from);
   if (to) query = query.lt("period_key", to);
 
@@ -456,7 +560,7 @@ export async function retryReportDelivery(
   const outcome = await sendDailySummary(
     restaurantUser.restaurant_id,
     businessDate,
-    restaurantUser.closingHour,
+    restaurantUser.dayRule,
     { force: true }
   );
 

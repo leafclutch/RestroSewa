@@ -487,7 +487,7 @@ export function VendorsClient({
   const refresh = useCallback(() => reload(search, filter), [reload, search, filter]);
 
   // A purchase on credit raises a vendor balance — that must show up here live.
-  useRealtime(["vendors", "purchases"], refresh);
+  useRealtime(["vendors", "purchases", "settings"], refresh);
 
   const pageCount = Math.max(1, Math.ceil(vendors.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);

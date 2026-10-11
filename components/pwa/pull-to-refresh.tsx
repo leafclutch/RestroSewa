@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
+import { resyncRealtime } from "@/lib/realtime/use-realtime";
 
 /**
  * Drag down from the top of the page to refetch.
@@ -63,7 +64,19 @@ function insideScrolledContainer(start: EventTarget | null): boolean {
   return false;
 }
 
-export function PullToRefresh({ children }: { children: React.ReactNode }) {
+/**
+ * `resync` also wakes every live section on the page (see `resyncRealtime`). The
+ * admin screens need it: their reports fetch for themselves under whatever period
+ * the admin picked, so a route refresh alone would re-run the page and leave them
+ * showing what they had.
+ */
+export function PullToRefresh({
+  children,
+  resync = false,
+}: {
+  children: React.ReactNode;
+  resync?: boolean;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [spinning, setSpinning] = useState(false);
@@ -99,7 +112,8 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
     startedAt.current = Date.now();
     setSpinning(true);
     startTransition(() => router.refresh());
-  }, [router]);
+    if (resync) resyncRealtime();
+  }, [router, resync]);
 
   // Stop the arrow once the refresh has landed, but never before the floor — a 90ms
   // flash reads as "my pull did nothing".

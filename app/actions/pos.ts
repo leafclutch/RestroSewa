@@ -16,6 +16,7 @@ import {
   businessPeriodBounds,
   businessToday,
   resolveRoomDayRule,
+  type DayRule,
 } from "@/lib/business-day";
 import { buildFolio } from "@/lib/room-billing";
 import { folioToBill } from "@/lib/billing/room-bill";
@@ -2223,7 +2224,7 @@ export type SalesReport = {
  */
 function resolveSalesRange(
   period: SalesPeriod,
-  hour: number,
+  hour: DayRule,
   from?: string | null,
   to?: string | null
 ): { fromMs: number; toMs: number } {
@@ -2264,10 +2265,10 @@ export async function getSalesReport(params?: {
       discountsTotal: 0,
       credit: emptyCredit,
       transactions: [],
-      businessToday: businessToday(ru.closingHour),
+      businessToday: businessToday(ru.dayRule),
       businessYesterday: businessDate(
-        new Date(businessPeriodBounds("yesterday", ru.closingHour).from),
-        ru.closingHour
+        new Date(businessPeriodBounds("yesterday", ru.dayRule).from),
+        ru.dayRule
       ),
     };
   }
@@ -2347,12 +2348,12 @@ export async function getSalesReport(params?: {
   // card's total always equals the detail you get by clicking it. They used to be
   // re-derived inline here, which is exactly how "this week" drifted into meaning
   // two different things on one screen.
-  const startOfToday = businessPeriodBounds("today", ru.closingHour).from.getTime();
-  const weekAgo = businessPeriodBounds("week", ru.closingHour).from.getTime();
-  const startOfMonth = businessPeriodBounds("month", ru.closingHour).from.getTime();
-  const startOfYear = businessPeriodBounds("year", ru.closingHour).from.getTime();
+  const startOfToday = businessPeriodBounds("today", ru.dayRule).from.getTime();
+  const weekAgo = businessPeriodBounds("week", ru.dayRule).from.getTime();
+  const startOfMonth = businessPeriodBounds("month", ru.dayRule).from.getTime();
+  const startOfYear = businessPeriodBounds("year", ru.dayRule).from.getTime();
 
-  const { fromMs, toMs } = resolveSalesRange(period, ru.closingHour, params?.from, params?.to);
+  const { fromMs, toMs } = resolveSalesRange(period, ru.dayRule, params?.from, params?.to);
 
   // Which stays this call actually needs a deposit split for: only bills landing in
   // the selected period that were settled (in full or in part) by an advance taken
@@ -2477,7 +2478,7 @@ export async function getSalesReport(params?: {
       online_amount: online,
       card_amount: card,
       created_at: p.created_at,
-      business_date: businessDate(new Date(p.created_at), ru.closingHour),
+      business_date: businessDate(new Date(p.created_at), ru.dayRule),
       table_number: p.sessions?.restaurant_tables?.number ?? null,
       room_number: p.sessions?.rooms?.number ?? null,
       session_type: p.sessions?.type ?? null,
@@ -2518,10 +2519,10 @@ export async function getSalesReport(params?: {
       toMs
     ),
     transactions,
-    businessToday: businessToday(ru.closingHour),
+    businessToday: businessToday(ru.dayRule),
     businessYesterday: businessDate(
-      new Date(businessPeriodBounds("yesterday", ru.closingHour).from),
-      ru.closingHour
+      new Date(businessPeriodBounds("yesterday", ru.dayRule).from),
+      ru.dayRule
     ),
   };
 }
@@ -2595,7 +2596,7 @@ export async function exportSalesCsv(params?: {
         if (tableId === null && roomId === null) return includeWalkinSales;
         return csvVisibility.canSeeTable(tableId) && csvVisibility.canSeeRoom(roomId);
       });
-  const { fromMs, toMs } = resolveSalesRange(period, ru.closingHour, params?.from, params?.to);
+  const { fromMs, toMs } = resolveSalesRange(period, ru.dayRule, params?.from, params?.to);
   const inRange = rows.filter((p) => {
     const ts = new Date(p.created_at).getTime();
     return ts >= fromMs && ts < toMs; // upper bound exclusive — see getSalesReport

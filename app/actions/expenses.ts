@@ -65,7 +65,7 @@ export async function listExtraExpenses(params?: {
   const period = todayOnly ? "today" : params?.period ?? "month";
   const { from, to } = periodBounds(
     period,
-    ru.closingHour,
+    ru.dayRule,
     todayOnly ? null : params?.from,
     todayOnly ? null : params?.to
   );
@@ -196,7 +196,7 @@ export async function listSavingTitles(): Promise<SavingTitle[]> {
   // pot's opening amount is not read at all. There is no total in the payload
   // for a client bug to reveal.
   const todayOnly = STOCK_ACCESS.expensesTodayOnly(ru);
-  const today = todayOnly ? periodBounds("today", ru.closingHour) : null;
+  const today = todayOnly ? periodBounds("today", ru.dayRule) : null;
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -298,7 +298,7 @@ export async function listSavings(
     .eq("saving_title_id", savingTitleId);
 
   if (effectiveDate || effectivePeriod !== "all") {
-    const { from, to } = historyPeriodBounds(effectivePeriod, ru.closingHour, effectiveDate);
+    const { from, to } = historyPeriodBounds(effectivePeriod, ru.dayRule, effectiveDate);
     query = query.gte("created_at", from.toISOString()).lt("created_at", to.toISOString());
   }
 
@@ -754,7 +754,7 @@ export async function getExpenseSummary(): Promise<ExpenseSummary> {
   if (!STOCK_ACCESS.canViewExpenses(ru)) return EMPTY_EXPENSE_SUMMARY;
 
   const todayOnly = STOCK_ACCESS.expensesTodayOnly(ru);
-  const { from, to } = periodBounds("today", ru.closingHour);
+  const { from, to } = periodBounds("today", ru.dayRule);
   const service = createServiceClient();
 
   const [todayRes, potsRes] = await Promise.all([

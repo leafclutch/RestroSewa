@@ -45,7 +45,7 @@ export default async function StockPage() {
       // which disagrees with the reports whenever the device is in another
       // timezone — and would disagree every night once a business day can end
       // after midnight.
-      today={businessToday(restaurantUser.closingHour)}
+      today={businessToday(restaurantUser.dayRule)}
       canManage={STOCK_ACCESS.canManageStock(restaurantUser)}
     />
   );

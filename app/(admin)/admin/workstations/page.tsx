@@ -4,6 +4,7 @@ import { getWorkstations } from "@/app/actions/workstations";
 import type { PaperWidth } from "@/app/actions/workstations";
 import { createServiceClient } from "@/lib/supabase/service";
 import { WorkstationsClient } from "./_components/workstations-client";
+import { RealtimeRefresh } from "@/components/realtime-refresh";
 
 export default async function WorkstationsPage() {
   const { restaurantUser } = await requireAdminOrPermission(PERMISSIONS.MANAGE_MENU);
@@ -21,6 +22,8 @@ export default async function WorkstationsPage() {
 
   return (
     <div className="p-4 md:p-8">
+      {/* Live: another device's change re-renders this page in place. */}
+      <RealtimeRefresh topics={["workstations", "menu", "staff"]} />
       <h1
         className="text-2xl mb-1"
         style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}

@@ -718,7 +718,7 @@ export function PayrollClient({
   };
 
   const refresh = useCallback(() => load(asOf), [load, asOf]);
-  useRealtime(["payroll"], refresh);
+  useRealtime(["payroll", "staff", "settings"], refresh);
 
   const atToday = asOf >= initial.asOf;
 

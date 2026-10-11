@@ -107,7 +107,7 @@ export async function getFinanceReport(params?: {
 }): Promise<FinanceReport> {
   const ru = await getRestaurantUser();
   const period = params?.period ?? "today";
-  const { from, to } = periodBounds(period, ru.closingHour, params?.from, params?.to);
+  const { from, to } = periodBounds(period, ru.dayRule, params?.from, params?.to);
   const fromIso = from.toISOString();
   const toIso = to.toISOString();
 
@@ -237,7 +237,7 @@ export async function getFinanceTransactions(params?: {
   if (!STOCK_ACCESS.canViewFinance(ru)) return [];
 
   const period = params?.period ?? "today";
-  const { from, to } = periodBounds(period, ru.closingHour, params?.from, params?.to);
+  const { from, to } = periodBounds(period, ru.dayRule, params?.from, params?.to);
 
   const service = createServiceClient();
   // PAGED, never one call: the API returns at most 1000 rows per request, and a
@@ -298,7 +298,7 @@ export async function getPeriodPurchases(params?: {
   if (!STOCK_ACCESS.canViewFinance(ru)) return [];
 
   const period = params?.period ?? "today";
-  const { from, to } = periodBounds(period, ru.closingHour, params?.from, params?.to);
+  const { from, to } = periodBounds(period, ru.dayRule, params?.from, params?.to);
 
   const service = createServiceClient();
   // `purchase_items ( id )` is only counted, not read — one round trip instead of

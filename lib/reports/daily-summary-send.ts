@@ -7,7 +7,7 @@ import {
 } from "./daily-summary";
 import { renderDailySummaryPdf } from "./daily-summary-pdf";
 import { sendEmail } from "@/lib/email/mailer";
-import { addBusinessDays, businessToday } from "@/lib/business-day";
+import { addBusinessDays, businessToday, type DayRule } from "@/lib/business-day";
 import type { ReportLogo } from "./pdf/report-document";
 
 // ─── Orchestrator: build → PDF → email → log ───────────────────────────────────
@@ -66,7 +66,7 @@ function pdfFilename(restaurantName: string, businessDate: string): string {
 export async function sendDailySummary(
   restaurantId: string,
   businessDate: string,
-  closingHour: number,
+  dayRule: DayRule,
   opts?: { force?: boolean }
 ): Promise<SendOutcome> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -126,7 +126,7 @@ export async function sendDailySummary(
     if (floor && businessDate < floor) {
       return { status: "skipped", reason: `before REPORT_SEND_FROM (${floor})` };
     }
-    const oldestAutoSendable = addBusinessDays(businessToday(closingHour), -MAX_UNATTENDED_AGE_DAYS);
+    const oldestAutoSendable = addBusinessDays(businessToday(dayRule), -MAX_UNATTENDED_AGE_DAYS);
     if (businessDate < oldestAutoSendable) {
       return { status: "skipped", reason: `too old to auto-send (before ${oldestAutoSendable})` };
     }
@@ -146,7 +146,7 @@ export async function sendDailySummary(
 
   const generatedAt = new Date().toISOString();
   const restaurantName = rest.name ?? "Restaurant";
-  const model = await buildDailySummary(restaurantId, businessDate, closingHour);
+  const model = await buildDailySummary(restaurantId, businessDate, dayRule);
   const logo = await fetchLogo(rest.logo_url ?? null);
   const pdf = await renderDailySummaryPdf(model, { restaurantName, logo });
   const email = renderDailySummaryEmail(model, restaurantName);

@@ -939,7 +939,7 @@ export function PurchasesClient({
 
   const refresh = useCallback(() => reload(search, filter, period, date), [reload, search, filter, period, date]);
 
-  useRealtime(["purchases", "vendors"], refresh);
+  useRealtime(["purchases", "vendors", "workstations", "settings"], refresh);
 
   // Stations worth offering: active ones, plus any inactive station still on a
   // line in view.

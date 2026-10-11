@@ -8,6 +8,7 @@ import { PeriodFilter } from "@/components/ui/period-filter";
 import type { HistoryPeriod } from "@/lib/history-period";
 import { useCurrency } from "@/components/currency-provider";
 import type { CurrencyFormatter } from "@/lib/currency";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 
 // Read-only "Security activity" log for the owner: every attempt to edit a money record —
 // success, a wrong-PIN failure, or a PIN-was-right-but-refused block. The PIN itself never
@@ -76,6 +77,11 @@ export function SecurityActivityClient({ rows: initialRows }: { rows: SecurityAu
     startTransition(async () => setRows(await getSecurityAuditLog(period, date || null)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period, date]);
+
+  // A new attempt anywhere lands here live, under whatever filter is picked.
+  useRealtime(["security", "settings"], () => {
+    startTransition(async () => setRows(await getSecurityAuditLog(period, date || null)));
+  });
 
   return (
     <div

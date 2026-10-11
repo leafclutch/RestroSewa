@@ -41,7 +41,7 @@ export async function getDeductionReport(params?: {
   const period = params?.period ?? "month";
   const bounds = businessPeriodBounds(
     period,
-    ru.closingHour,
+    ru.dayRule,
     params?.from ?? null,
     params?.to ?? null
   );

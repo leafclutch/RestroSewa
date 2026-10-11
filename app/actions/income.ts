@@ -74,7 +74,7 @@ export async function listExtraIncome(params?: {
   if (!STOCK_ACCESS.canViewFinance(ru)) return [];
 
   const period = params?.period ?? "month";
-  const { from, to } = periodBounds(period, ru.closingHour, params?.from, params?.to);
+  const { from, to } = periodBounds(period, ru.dayRule, params?.from, params?.to);
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

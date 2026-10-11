@@ -44,6 +44,7 @@ import {
   ArrowUpFromLine,
 } from "lucide-react";
 import { useCurrency } from "@/components/currency-provider";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 
 const PERIODS: FinancePeriod[] = ["today", "yesterday", "week", "month", "year"];
 
@@ -1129,6 +1130,14 @@ export function ExpensesClient({
     load(period, date);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period, date, todayOnly]);
+
+  // Someone else recorded, edited or withdrew (or the closing hour moved): reload
+  // with the filter this screen is on, and let open pots refetch their history.
+  // (extra_expenses also announces "finance", so that one topic covers both.)
+  useRealtime(["finance", "settings"], () => {
+    void Promise.all([load(period, date), loadTitles()]);
+    setSavingsVersion((v) => v + 1);
+  });
 
   const total = expenses.reduce((s, e) => s + e.amount, 0);
   const cash = expenses.reduce((s, e) => s + e.cash, 0);
