@@ -47,6 +47,10 @@ export const PERMISSIONS = {
   // level from counting stock. See STOCK_ACCESS.canManagePurchases / canManageVendors.
   MANAGE_PURCHASES: "manage_purchases",
   MANAGE_VENDORS:   "manage_vendors",
+  // Item Sales — how many of each menu item sold. A report on its own lane: it
+  // shows what the kitchen sells, not takings or debt, so it is granted apart
+  // from Sales/Finance. See ITEM_SALES_ACCESS.
+  VIEW_ITEM_SALES:  "view_item_sales",
   // Overheads — rent, electricity, water. Its own lane rather than a rider on
   // manage_purchases: recording a supplier bill and paying the landlord are
   // different trust levels, and an owner must be able to hand a manager the
@@ -181,6 +185,13 @@ export const PERMISSION_GROUPS: PermissionGroupDef[] = [
       // Creating/editing/deleting vendors and paying what they're owed. Write
       // implies the read of the Vendors page. See STOCK_ACCESS.canManageVendors.
       { key: "manage_vendors", label: "Manage Vendors" },
+    ],
+  },
+  {
+    label: "Item Sales",
+    items: [
+      // Units sold per menu item, by category, with the best sellers. Read-only.
+      { key: "view_item_sales", label: "View Item Sales" },
     ],
   },
   {
@@ -472,6 +483,13 @@ export const STOCK_ACCESS = {
   /** Shows the Stock & Finance group in the admin sidebar at all. */
   canSeeModule: (u: { role: string; permissions: string[] }) =>
     hasAnyPermission(u, [P_.VIEW_STOCK, P_.MANAGE_STOCK, P_.MANAGE_PURCHASES, P_.MANAGE_VENDORS, P_.MANAGE_EXPENSES, P_.ADD_EXPENSES, P_.VIEW_FINANCE]),
+};
+
+// ─── Item Sales ───────────────────────────────────────────────────────────────
+// Units sold per menu item. Read-only, one permission; `restaurant_admin` passes.
+export const ITEM_SALES_ACCESS = {
+  canView: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.VIEW_ITEM_SALES),
 };
 
 // ─── Payroll (Staff → Payroll) ────────────────────────────────────────────────

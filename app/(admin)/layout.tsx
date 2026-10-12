@@ -1,6 +1,6 @@
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { createServiceClient } from "@/lib/supabase/service";
-import { STOCK_ACCESS } from "@/lib/permissions";
+import { ITEM_SALES_ACCESS, STOCK_ACCESS } from "@/lib/permissions";
 import { hasRooms, normalizeBusinessType } from "@/lib/business-type";
 import { AdminSidebar } from "./admin/_components/admin-sidebar";
 import { OfflineGate } from "@/components/pwa/offline-gate";
@@ -63,6 +63,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         showStock={STOCK_ACCESS.canViewStock(restaurantUser)}
         showPurchases={STOCK_ACCESS.canViewPurchases(restaurantUser)}
         showVendors={STOCK_ACCESS.canViewVendors(restaurantUser)}
+        showItemSales={ITEM_SALES_ACCESS.canView(restaurantUser)}
         showExpenses={STOCK_ACCESS.canViewExpenses(restaurantUser)}
         showFinance={STOCK_ACCESS.canViewFinance(restaurantUser)}
         // Rooms only exist for a hotel / restaurant+hotel client.
