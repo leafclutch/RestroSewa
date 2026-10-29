@@ -21,12 +21,22 @@ export function SessionSplitView({
   canCreateOrders,
   menuData,
   children,
+  surface,
+  header,
 }: {
   sessionId: string;
   canCreateOrders: boolean;
   /** Null when the viewer can't create orders — no Menu column to show at all. */
   menuData: AddItemsMenuData | null;
   children: React.ReactNode;
+  /** A theme class re-colouring this screen's primary (e.g. "walkin-surface", purple). */
+  surface?: string;
+  /**
+   * The order column's Back bar. On a desktop it sits ABOVE the column's scrolling
+   * area — fixed at the top of the column, never scrolled away with the order — and on
+   * a phone it leads the page.
+   */
+  header?: React.ReactNode;
 }) {
   const router = useRouter();
   const showMenu = canCreateOrders && !!menuData;
@@ -34,7 +44,10 @@ export function SessionSplitView({
   return (
     <>
       {/* ── Mobile (below lg): unchanged ── */}
-      <div className="lg:hidden p-4 sm:p-5 max-w-lg mx-auto">{children}</div>
+      <div className={`lg:hidden p-4 sm:p-5 max-w-lg mx-auto ${surface ?? ""}`}>
+        {header && <div className="mb-4">{header}</div>}
+        {children}
+      </div>
 
       {/* ── Desktop/tablet: order · menu, beside the persistent rail ──
           `fixed`, not a flow height computed by subtracting the nav's height
@@ -47,7 +60,7 @@ export function SessionSplitView({
           and 100% didn't. Anchoring `top`/`bottom`/`left`/`right` to the
           viewport directly sidesteps all of it: the browser resolves the
           size itself, with nothing here to round differently.
-          `left: RAIL_BOX_WIDTH`, not `inset-x-0` — the rail (a sibling fixed
+          `right: RAIL_BOX_WIDTH`, not `inset-x-0` — the rail (a sibling fixed
           element from `session/layout.tsx`) occupies the space from 0 to
           there; starting here instead of double-padding reproduces the
           original single-row layout's spacing exactly (see
@@ -61,11 +74,12 @@ export function SessionSplitView({
           `thin-scrollbar` (see `globals.css`) — enough to signal "more below"
           without bulky browser scrollbars competing. */}
       <div
-        className="hidden lg:flex gap-3 lg:fixed lg:bottom-0 z-10"
-        style={{ top: NAV_HEIGHT, left: RAIL_BOX_WIDTH, right: 0, paddingTop: 12, paddingBottom: 12, paddingRight: 12 }}
+        className={`hidden lg:flex gap-3 lg:fixed lg:bottom-0 z-10 ${surface ?? ""}`}
+        style={{ top: NAV_HEIGHT, left: 0, right: RAIL_BOX_WIDTH, paddingTop: 12, paddingBottom: 12, paddingLeft: 12 }}
       >
-        {/* Menu in the middle, the order on the right (rail · menu · order): the menu is
-            where the hands are while taking an order, the bill is glanced at beside it. */}
+        {/* The order on the left, the menu in the middle, the tables rail on the right
+            (order · menu · rail). The order column comes second in the markup and is moved
+            to the front with `order-first`, so the menu still renders before it. */}
         {showMenu && (
           <div
             className="flex-1 min-w-0 flex flex-col rounded-xl border overflow-hidden"
@@ -92,14 +106,20 @@ export function SessionSplitView({
         )}
 
         <div
-          className={`${showMenu ? "w-[400px] xl:w-[420px] shrink-0" : "flex-1 max-w-xl"} overflow-y-auto thin-scrollbar rounded-xl border p-4 sm:p-5`}
+          className={`order-first ${showMenu ? "w-[400px] xl:w-[420px] shrink-0" : "flex-1 max-w-xl"} flex flex-col overflow-hidden rounded-xl border`}
           style={{
             borderColor: "var(--color-hairline-input)",
             background: "var(--color-canvas)",
             boxShadow: "var(--shadow-card)",
           }}
         >
-          {children}
+          {/* The Back bar, outside the scroll — the order scrolls beneath it. */}
+          {header && (
+            <div className="shrink-0 px-4 sm:px-5 py-3 border-b" style={{ borderColor: "var(--color-hairline)" }}>
+              {header}
+            </div>
+          )}
+          <div className="flex-1 min-h-0 overflow-y-auto thin-scrollbar p-4 sm:p-5">{children}</div>
         </div>
       </div>
     </>

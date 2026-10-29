@@ -386,6 +386,27 @@ html:not(.dark) .admin-surface {
   --room-ink: var(--sec-rooms);
 }
 
+/* ── Walk-in screen surface ────────────────────────────────────────────────────
+ * A walk-in's order screen (order panel + menu, and its phone add-items page) runs in the
+ * WALK-INS PURPLE — the dashboard tile's colour — rather than the app's indigo, the same
+ * way `.room-surface` turns a room teal. Solid purple deep enough for white text.
+ */
+.walkin-surface {
+  --color-primary: #7e22ce;
+  --color-primary-deep: #6b21a8;
+  --color-primary-press: #581c87;
+  --color-primary-soft: #a855f7;
+  --color-primary-subdued: #e9d5ff;
+}
+
+.dark .walkin-surface {
+  --color-primary: #9333ea;
+  --color-primary-deep: #7e22ce;
+  --color-primary-press: #6b21a8;
+  --color-primary-soft: #c084fc;
+  --color-primary-subdued: #3b0764;
+}
+
 /* ── Customer QR menu surface ──────────────────────────────────────────────────
  * The customer site has its own TEAL accent (not the app's indigo) and a set of hardcoded
  * status colours. Both live here as tokens so the site can have a real dark theme (it follows the

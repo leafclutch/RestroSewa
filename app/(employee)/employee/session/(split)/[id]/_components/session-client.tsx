@@ -1129,7 +1129,8 @@ export function SessionClient({
     : null;
 
   return (
-    <div className="flex flex-col gap-5 max-w-lg">
+    // `pb-32` on a phone: room for the bottom action bar, so it never covers the last card.
+    <div className={`flex flex-col gap-5 max-w-lg ${!isClosed && (canCreateOrders || (hasOrders && canCloseBills)) ? "pb-32 lg:pb-0" : ""}`}>
       {/* Location label */}
       {locationLabel && (
         <div className="flex items-center justify-between gap-2">
@@ -1224,7 +1225,7 @@ export function SessionClient({
           card as a popup instead of the whole form sitting in this column. */}
       {hasOrders && (
         <div
-          className="rounded-2xl border px-5 py-4 flex flex-col gap-2.5"
+          className="rounded-2xl border px-4 sm:px-5 py-4 flex flex-col gap-2.5"
           style={{
             background: "var(--color-canvas)",
             borderColor: "var(--color-hairline)",
@@ -1235,11 +1236,56 @@ export function SessionClient({
             <span className="text-base font-medium" style={{ color: "var(--color-ink)" }}>Subtotal</span>
             <span className="text-sm tabular" style={{ color: "var(--color-ink)" }}>{cur.money2(session.total)}</span>
           </div>
-          {discount > 0 && (
-            <div className="flex items-center justify-between">
-              <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>Discount</span>
-              <span className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>− {cur.money2(discount)}</span>
+          {!isClosed && canCloseBills && discountEnabled ? (
+            // Discount, right on the bill — without opening Pay Now. The SAME state the
+            // payment popup reads, so whatever is typed here is already filled in there;
+            // the PIN that authorizes it is still asked for at Pay Now.
+            <div className="flex flex-col gap-1">
+              {/* Wraps on a narrow phone: the ₹/% switch and the field drop under the label,
+                  right-aligned, rather than pushing past the card's edge. */}
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                <label htmlFor="bill_discount" className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
+                  Discount
+                </label>
+                <div className="flex items-center gap-2 ml-auto">
+                  <DiscountUnitToggle
+                    mode={discountMode}
+                    onChange={(m) => {
+                      if (m === discountMode) return;
+                      setDiscountMode(m);
+                      setDiscountAmt("");
+                    }}
+                  />
+                  <input
+                    id="bill_discount"
+                    type="number"
+                    min="0"
+                    max={discountMode === "percent" ? 100 : session.total}
+                    step="0.01"
+                    inputMode="decimal"
+                    value={discountAmt}
+                    onChange={(e) => setDiscountAmt(e.target.value)}
+                    placeholder={discountMode === "percent" ? "0" : "0.00"}
+                    className="h-9 w-[96px] sm:w-[110px] rounded-lg border px-2.5 text-sm text-right tabular"
+                    style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+                  />
+                </div>
+              </div>
+              {discount > 0 && (
+                <p className="text-xs text-right tabular" style={{ color: "var(--color-ink-mute)" }}>
+                  − {cur.money2(discount)}
+                  {discountMode === "amount" ? ` (${formatPercent(discount, session.total)})` : ""}
+                  {" · "}PIN asked at Pay Now
+                </p>
+              )}
             </div>
+          ) : (
+            discount > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>Discount</span>
+                <span className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>− {cur.money2(discount)}</span>
+              </div>
+            )
           )}
           <div className="flex items-center justify-between pt-2.5 border-t" style={{ borderColor: "var(--color-hairline)" }}>
             <span className="text-base font-semibold" style={{ color: "var(--color-ink)" }}>Total</span>
@@ -1251,7 +1297,8 @@ export function SessionClient({
             <button
               type="button"
               onClick={() => setPaying(true)}
-              className="mt-1 w-full h-12 rounded-xl text-base font-semibold inline-flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.99]"
+              // Desktop only: on a phone Pay Now lives in the bottom action bar instead.
+              className="mt-1 w-full h-12 rounded-xl text-base font-semibold hidden lg:inline-flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.99]"
               style={{ background: accent.fill, color: "#fff" }}
             >
               <Wallet size={18} /> Pay Now
@@ -1267,14 +1314,6 @@ export function SessionClient({
               "Menu" tab (see session-split-view.tsx) instead of navigating to
               a separate page, so this button — and the navigation it does —
               is mobile-only. */}
-          {canCreateOrders && (
-            <Link href={`/employee/session/${session.id}/add`} className="lg:hidden">
-              <Button variant="secondary" className="w-full flex items-center justify-center gap-2">
-                <Plus size={14} />
-                Add items
-              </Button>
-            </Link>
-          )}
 
           {/* KOT / BOT / Bill printing — a billing/order-management action (Cashier /
               Receptionist), NOT any waiter, once the table has at least one order.
@@ -1378,6 +1417,51 @@ export function SessionClient({
             </>
           ) : null}
         </>
+      )}
+
+      {/* Phone: the two things a waiter reaches for — Add items and Pay Now, with the
+          total — pinned to the bottom of the screen, always under the thumb however long
+          the order is. Desktop has the menu beside the order and Pay Now in the bill card. */}
+      {!isClosed && (canCreateOrders || (hasOrders && canCloseBills)) && (
+        <div
+          className="lg:hidden fixed inset-x-0 bottom-0 z-30 border-t px-3 sm:px-4 pt-3 flex items-center gap-2 sm:gap-2.5"
+          style={{
+            background: "var(--color-canvas)",
+            borderColor: "var(--color-hairline)",
+            boxShadow: "0 -4px 16px rgba(15,23,42,0.08)",
+            // Same allowance as the menu's cart bar: the home indicator, and the fixed
+            // subscription watermark that sits `bottom-2` centred on a phone.
+            paddingBottom: "calc(2.25rem + env(safe-area-inset-bottom, 0px))",
+          }}
+        >
+          {hasOrders && (
+            <div className="min-w-0 mr-auto">
+              <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Total</p>
+              <p className="text-[15px] sm:text-lg font-bold tabular leading-tight truncate" style={{ color: accent.color }}>
+                {cur.money2(Math.max(0, session.total - discount))}
+              </p>
+            </div>
+          )}
+          {canCreateOrders && (
+            <Link
+              href={`/employee/session/${session.id}/add`}
+              className={`h-11 px-3 sm:px-4 rounded-xl border-[1.5px] text-sm sm:text-[15px] font-semibold inline-flex items-center justify-center gap-1 sm:gap-1.5 shrink-0 whitespace-nowrap ${hasOrders ? "" : "flex-1"}`}
+              style={{ borderColor: accent.fill, color: accent.color, background: "var(--color-canvas)" }}
+            >
+              <Plus size={16} strokeWidth={2.4} /> Add items
+            </Link>
+          )}
+          {hasOrders && canCloseBills && (
+            <button
+              type="button"
+              onClick={() => setPaying(true)}
+              className="h-11 px-3.5 sm:px-5 rounded-xl text-sm sm:text-[15px] font-semibold inline-flex items-center justify-center gap-1 sm:gap-1.5 shrink-0 whitespace-nowrap transition-all active:scale-[0.98]"
+              style={{ background: accent.fill, color: "#fff" }}
+            >
+              <Wallet size={16} /> Pay Now
+            </button>
+          )}
+        </div>
       )}
 
       {isClosed && (

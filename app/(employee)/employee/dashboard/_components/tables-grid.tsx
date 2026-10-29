@@ -145,6 +145,39 @@ const TableCard = memo(function TableCard({
   if (table.state === "cleaning") {
     const s = STATUS_STYLE.cleaning;
     const waited = cleaningFor(table.cleaning_since);
+    if (!compact) {
+      // Dashboard: the SAME tile as a free or busy table — same TILE box, same height,
+      // icon · number on top, one short line under it — so a table going to cleaning
+      // doesn't make its row taller than the rest. The line under the number is the
+      // action itself: a short "Clean" button (how long it has waited is on hover).
+      return (
+        <div
+          title={`Table ${table.number} — needs cleaning${waited ? ` (${waited})` : ""}`}
+          className={TILE}
+          style={{
+            minHeight: TILE_MIN_HEIGHT,
+            background: s.soft,
+            borderColor: s.color,
+            boxShadow: TILE_SHADOW,
+            opacity: cleaning ? 0.5 : 1,
+          }}
+        >
+          <TileTop icon={Armchair} number={table.number} fg={s.color} />
+          <button
+            type="button"
+            disabled={cleaning}
+            onClick={() => onClean(table.id)}
+            className="self-center max-w-full min-w-0 inline-flex items-center justify-center gap-1 whitespace-nowrap overflow-hidden text-[12px] font-semibold leading-none px-2 py-[3px] rounded-md border transition-colors"
+            style={{ borderColor: s.color, color: s.color, background: "var(--color-canvas)" }}
+          >
+            <Sparkles size={11} className="shrink-0" />
+            {/* One short word, so it always fits inside the tile; how long it has
+                waited is on hover (the tile's title). */}
+            {cleaning ? "…" : "Clean"}
+          </button>
+        </div>
+      );
+    }
     return (
       <div
         title={`Table ${table.number} — needs cleaning`}

@@ -64,7 +64,7 @@ export default function SessionLoading() {
           skeletoned) tables rail — matching `session-split-view.tsx` exactly. */}
       <div
         className="hidden lg:flex gap-3 lg:fixed lg:bottom-0 z-10"
-        style={{ top: NAV_HEIGHT, left: RAIL_BOX_WIDTH, right: 0, paddingTop: 12, paddingBottom: 12, paddingRight: 12 }}
+        style={{ top: NAV_HEIGHT, left: 0, right: RAIL_BOX_WIDTH, paddingTop: 12, paddingBottom: 12, paddingLeft: 12 }}
       >
         <div
           className="w-[460px] shrink-0 rounded-xl border p-4 sm:p-5"

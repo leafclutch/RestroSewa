@@ -70,7 +70,7 @@ const WalkInCard = memo(function WalkInCard({
           <span className={NUMBER} style={{ ...numberStyle, color: "#fff" }}>{label}</span>
         ) : (
           <>
-            <TileTop icon={ShoppingBag} number={label} fg="#fff" chip={{ background: "rgba(255,255,255,0.22)", color: "#fff" }} />
+            <TileTop icon={ShoppingBag} number={label} fg="#fff" />
             <TileStatus label={slot.customer_name || "Active"} fg="rgba(255,255,255,0.92)" dot="#4ade80" />
           </>
         )}
@@ -78,13 +78,13 @@ const WalkInCard = memo(function WalkInCard({
     );
   }
 
-  // Free. Neutral grey on the dashboard (the purple stays in the dot and arrow), so the
+  // Free. Neutral grey on the dashboard (the purple stays in the dot), so the
   // solid purple busy lanes are what stand out; the compact rail keeps its purple tint.
   const a = SECTION_ACCENT.walkins;
   if (!compact) {
     const body = (
       <>
-        <TileTop icon={ShoppingBag} number={label} fg="var(--color-ink)" chip={{ background: "var(--color-canvas)", color: a.color }} />
+        <TileTop icon={ShoppingBag} number={label} fg="var(--color-ink)" />
         <TileStatus label="Free" fg="var(--color-ink-mute)" dot={a.color} />
       </>
     );
@@ -180,7 +180,9 @@ function AddWalkInCard({
           onResult(await addWalkIn(), null);
         })
       }
-      className={`${compact ? CARD_COMPACT : CARD} hover:brightness-95`}
+      // On the dashboard: the same TILE box as the lanes (same height, same rhythm — a
+      // top row, a short line under it), dashed so it reads as an action, not a lane.
+      className={compact ? `${CARD_COMPACT} hover:brightness-95` : `${TILE} items-center hover:brightness-95`}
       style={{
         minHeight: compact ? 44 : TILE_MIN_HEIGHT,
         background: "transparent",
@@ -189,11 +191,17 @@ function AddWalkInCard({
         opacity: adding ? 0.5 : 1,
       }}
     >
-      <Plus aria-hidden size={compact ? 16 : 20} style={{ color: a.color }} />
-      {!compact && (
-        <span className="text-xs mt-1 font-medium" style={{ color: a.color }}>
-          {adding ? "Adding…" : "Add walk-in"}
-        </span>
+      {compact ? (
+        <Plus aria-hidden size={16} style={{ color: a.color }} />
+      ) : (
+        <>
+          <span className="flex items-center justify-center h-6">
+            <Plus aria-hidden size={18} strokeWidth={2.2} style={{ color: a.color }} />
+          </span>
+          <span className="text-[12px] font-semibold whitespace-nowrap truncate max-w-full" style={{ color: a.color }}>
+            {adding ? "Adding…" : "Add walk-in"}
+          </span>
+        </>
       )}
     </button>
   );

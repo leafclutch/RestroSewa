@@ -1463,6 +1463,22 @@ export function FolioClient({
       className={showMenu ? "room-surface lg:fixed lg:flex lg:gap-3 lg:p-3 z-10" : "room-surface"}
       style={showMenu ? { top: NAV_HEIGHT, left: 0, right: 0, bottom: 0 } : undefined}
     >
+    {/* Desktop: the room column is a Back bar on top and the scrolling details under it,
+        so Back stays put while the column scrolls. Below lg this wrapper is a plain box
+        and Back sits in the page as before. */}
+    <div className={showMenu ? "lg:w-[460px] xl:w-[500px] lg:shrink-0 lg:flex lg:flex-col lg:min-h-0" : ""}>
+    {showMenu && (
+      <div className="hidden lg:block shrink-0 px-1 pb-3">
+        <Link
+        href="/employee/dashboard"
+        className="inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors hover:brightness-110 active:brightness-95"
+        style={{ color: "#fff", background: "var(--color-primary)" }}
+      >
+        <ChevronLeft size={15} />
+        Back
+      </Link>
+      </div>
+    )}
     <div
       // `[&>*]:shrink-0`: in this height-capped scrolling column, flex would otherwise SHRINK
       // the cards to fit — and a card with `overflow-hidden` shrinks to nothing, hiding the
@@ -1470,7 +1486,7 @@ export function FolioClient({
       // column scrolls instead.
       className={
         showMenu
-          ? "max-w-2xl mx-auto px-3 sm:px-5 py-4 pb-16 flex flex-col gap-4 lg:mx-0 lg:max-w-none lg:w-[460px] xl:w-[500px] lg:shrink-0 lg:overflow-y-auto thin-scrollbar lg:px-1 lg:py-0 lg:pb-6 lg:[&>*]:shrink-0"
+          ? "max-w-2xl mx-auto px-3 sm:px-5 py-4 pb-16 flex flex-col gap-4 lg:mx-0 lg:max-w-none lg:flex-1 lg:min-h-0 lg:overflow-y-auto thin-scrollbar lg:px-1 lg:py-0 lg:pb-6 lg:[&>*]:shrink-0"
           : "max-w-2xl mx-auto px-3 sm:px-5 py-4 pb-16 flex flex-col gap-4"
       }
     >
@@ -1485,7 +1501,7 @@ export function FolioClient({
           `self-start` so the flex column doesn't stretch it full width. */}
       <Link
         href="/employee/dashboard"
-        className="self-start inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 -ml-1 rounded-lg transition-colors hover:brightness-110 active:brightness-95"
+        className={`self-start inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 -ml-1 rounded-lg transition-colors hover:brightness-110 active:brightness-95 ${showMenu ? "lg:hidden" : ""}`}
         style={{ color: "#fff", background: "var(--color-primary)" }}
       >
         <ChevronLeft size={15} />
@@ -2067,6 +2083,8 @@ export function FolioClient({
           }}
         />
       </PrintModal>
+    </div>
+
     </div>
 
     {/* The menu, right of the room — tablet/desktop only (phones use "Add order"). */}

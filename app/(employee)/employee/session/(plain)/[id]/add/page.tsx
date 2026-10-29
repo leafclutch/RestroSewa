@@ -103,7 +103,7 @@ export default async function AddItemsPage({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("sessions")
-      .select("id, status, room_stay_id")
+      .select("id, status, room_stay_id, type")
       .eq("id", sessionId)
       .eq("restaurant_id", restaurant_id)
       .maybeSingle(),
@@ -137,9 +137,9 @@ export default async function AddItemsPage({
   return (
     // A room stay's menu wears the room screen's theme (rooms teal, `.room-surface` in
     // globals.css), the same as the menu built into the room screen on a desktop — not
-    // the app's default colour. A table's stays as it is.
+    // the app's default colour; a walk-in's wears the walk-ins purple. A table's stays as it is.
     <div
-      className={`flex flex-col ${session.room_stay_id ? "room-surface" : ""}`}
+      className={`flex flex-col ${session.room_stay_id ? "room-surface" : session.type === "walk_in" ? "walkin-surface" : ""}`}
       style={{ height: SCREEN_UNDER_NAV }}
     >
       {/* Header */}
