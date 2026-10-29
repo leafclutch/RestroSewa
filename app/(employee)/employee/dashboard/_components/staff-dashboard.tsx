@@ -1,13 +1,39 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { DASH_SECTION_KEY, DASH_RESTORING_ATTR } from "../../_components/dashboard-restore";
 import { ListOrdered, Banknote, LayoutGrid, BedDouble, BookOpen, ChevronDown, HandCoins, ShoppingBag, Boxes, ShoppingCart, Truck, Receipt, Wallet, ChartColumn } from "lucide-react";
 import { accentOf } from "@/lib/section-colors";
 import { PlatformLogo, PlatformWordmark } from "@/components/branding/platform-logo";
 import { SectionBadgesContext, type SectionBadge } from "./section-badges";
 
 export type SectionKey = "orders" | "tables" | "walkins" | "rooms" | "sales" | "credits" | "menu" | "stock" | "purchases" | "vendors" | "itemSales" | "expenses" | "payroll";
+
+/** Where the dashboard remembers which section is on screen, for a reload to return to. */
+// DASH_SECTION_KEY / DASH_RESTORING_ATTR: see ../../_components/dashboard-restore.ts
+
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+/**
+ * A reload is restored ONCE per document. `performance`'s navigation entry keeps saying
+ * "reload" for the whole life of the tab's document, so without this every later in-app
+ * return to the dashboard (Back from a table, the mock-bill page's Close …) would jump to
+ * the section saved before that reload, long out of date. Flipped on a timer rather than
+ * in the effect itself so StrictMode's dev double-run still sees the first mount as first.
+ */
+let reloadRestoreSpent = false;
+
+/** Lifts the "positioning" loader (see DASH_RESTORE_SCRIPT). Safe to call any number of times. */
+function revealDashboard() {
+  document.documentElement.removeAttribute(DASH_RESTORING_ATTR);
+}
+
+/**
+ * Inline, pre-paint: hide the sections while the page is about to jump somewhere other
+ * than the top. Plain ES5, no dependencies — it runs before React exists.
+ */
+const DASH_RESTORE_SCRIPT = `try{var q=location.search,n=(performance.getEntriesByType("navigation")||[])[0],s=sessionStorage.getItem("${DASH_SECTION_KEY}");var f=/[?&](focus|credit|session)=/.test(q)&&!/[?&]focus=(orders|notifications)(&|$)/.test(q);var r=!/[?&](focus|credit|session)=/.test(q)&&n&&n.type==="reload"&&s&&s!=="orders";if(f||r)document.documentElement.setAttribute("${DASH_RESTORING_ATTR}","1")}catch(e){}`;
 
 export type DashboardSection = {
   key: SectionKey;
@@ -38,6 +64,45 @@ const SECTION_ICON: Record<
   expenses: Receipt,
   payroll: Wallet,
 };
+
+/**
+ * The dashboard's section cards in grey — shown while the page is being positioned on a
+ * section (and by the dashboard's loading.tsx). Same paddings as the real body.
+ */
+export function DashboardSkeleton() {
+  const bar = (w: string | number, h = 12, extra = "") => (
+    <div className={`rounded-md animate-pulse ${extra}`} style={{ height: h, width: w, background: "var(--color-hairline)" }} />
+  );
+  const card = (i: number, tiles: boolean) => (
+    <div
+      key={i}
+      className="rounded-2xl border-2 overflow-hidden"
+      style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)", boxShadow: "var(--shadow-card)" }}
+    >
+      <div className="flex items-center gap-3 px-4 sm:px-5 py-3.5">
+        <div className="w-10 h-10 rounded-xl shrink-0" style={{ background: "var(--color-canvas-soft)" }} />
+        <div className="flex-1 flex flex-col gap-2">{bar(120, 14)}{bar(180, 10)}</div>
+        {bar(64, 26, "rounded-full shrink-0")}
+      </div>
+      <div className="px-4 sm:px-5 pb-4 pt-1 flex flex-col gap-2.5">
+        {tiles ? (
+          <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))" }}>
+            {Array.from({ length: 8 }).map((_, j) => <div key={j}>{bar("100%", 64, "rounded-xl")}</div>)}
+          </div>
+        ) : (
+          [92, 70, 84].map((w, j) => <div key={j}>{bar(`${w}%`, 14)}</div>)
+        )}
+      </div>
+    </div>
+  );
+  return (
+    <div className="w-full px-3 sm:px-5 lg:px-10 pt-2 flex flex-col gap-5" aria-hidden>
+      {card(0, false)}
+      {card(1, true)}
+      {card(2, false)}
+    </div>
+  );
+}
 
 /**
  * What a section shows while its data is still in flight.
@@ -209,6 +274,88 @@ export function StaffDashboard({
   };
 
   const sectionKeys = sections.map((s) => s.key).join(",");
+
+  // ── Reload keeps you in your section ──────────────────────────────────────────
+  // The browser restores a reload to the same PIXEL offset — but the sections above
+  // (Orders, Tables …) stream in a beat later and change height, so that offset lands in
+  // some other section entirely (reloading on Sales came back around Vendors). Instead the
+  // section on screen is remembered (per tab, in sessionStorage) and a reload goes back to
+  // THAT section by name, through the same focus-and-follow logic a `?focus` link uses;
+  // the browser's own restore is switched off so it can't fight it.
+  const [restored, setRestored] = useState<SectionKey | null>(null);
+  // Don't record the section until the page has settled (and any restore has landed), or
+  // the first paint — always at the top, on Orders — would overwrite what was saved.
+  const saveAfter = useRef(Number.POSITIVE_INFINITY);
+  // An in-app arrival (Back from a table → ?focus=tables) is a client render: the inline
+  // script below never runs then, so the same "hide until positioned" mark is set here —
+  // a layout effect, i.e. still before the browser paints.
+  useIsoLayoutEffect(() => {
+    if (focus && focus !== "orders") document.documentElement.setAttribute(DASH_RESTORING_ATTR, "1");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const prev = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
+    const keys = sectionKeys.split(",");
+    let target: SectionKey | null = null;
+    const firstMount = !reloadRestoreSpent;
+    setTimeout(() => { reloadRestoreSpent = true; }, 0);
+    try {
+      const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+      // Only a reload OF THE DASHBOARD itself, on its first mount in this document.
+      const reloadedHere = firstMount && nav?.type === "reload" && new URL(nav.name).pathname === window.location.pathname;
+      const saved = window.sessionStorage.getItem(DASH_SECTION_KEY) as SectionKey | null;
+      if (!focus && reloadedHere && saved && keys.includes(saved)) target = saved;
+    } catch {
+      // Storage blocked (private mode etc.): a reload just starts at the top.
+    }
+    if (target) {
+      setRestored(target);
+      setCurrent(target);
+    }
+    // A focus this staff member has no section for goes nowhere either.
+    const focusHere = focus && keys.includes(focus) ? focus : null;
+    // While a restore is landing the page isn't where the staff member left it yet; a
+    // reload in that window keeps what was saved before rather than recording mid-jump.
+    saveAfter.current = target || focusHere ? Date.now() + 1500 : 0;
+    // Nowhere to go after all (no saved section, or it is gone): show the page as is.
+    if (!target && !focusHere) revealDashboard();
+    // Safety net: never leave the loader up, whatever happens.
+    const safety = setTimeout(revealDashboard, 4000);
+    return () => {
+      clearTimeout(safety);
+      window.history.scrollRestoration = prev;
+      // Leaving mid-restore must not carry the mark to the next visit.
+      revealDashboard();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Saved ONCE, at the moment the page is left or reloaded — measured from where the
+  // sections actually are on screen right then. It used to be saved on every scroll using
+  // the quick-nav's rule "scrolled to the very bottom → the LAST section", and a page that
+  // was still loading (short, so always "at the bottom") kept saving the last section,
+  // Menu, whichever section you were really on.
+  useEffect(() => {
+    const keys = sectionKeys.split(",").filter(Boolean) as SectionKey[];
+    const save = () => {
+      if (Date.now() < saveAfter.current) return; // still landing from the last restore
+      const line = 170;
+      let pick: SectionKey | null = keys[0] ?? null;
+      for (const k of keys) {
+        const el = document.getElementById(`sec-${k}`);
+        if (el && el.getBoundingClientRect().top - line <= 0) pick = k;
+      }
+      try {
+        if (pick) window.sessionStorage.setItem(DASH_SECTION_KEY, pick);
+      } catch { /* storage blocked */ }
+    };
+    window.addEventListener("pagehide", save);
+    return () => {
+      window.removeEventListener("pagehide", save);
+    };
+  }, [sectionKeys]);
+
   useEffect(() => {
     const keys = sectionKeys.split(",").filter(Boolean) as SectionKey[];
     let frame = 0;
@@ -259,7 +406,10 @@ export function StaffDashboard({
   // the screen behind the print preview was showing Walk-ins. For ~4s (or until staff
   // scroll / touch / press a key themselves) the target is re-pinned whenever it drifts.
   useEffect(() => {
-    if (!focus) return;
+    const target = focus ?? restored;
+    // No target (or one this staff member has no section for): nothing to do here — the
+    // mount effect above has already lifted the loader when there is nowhere to go.
+    if (!target || !sectionKeys.split(",").includes(target)) return;
     let tries = 0;
     let found = false;
     let userMoved = false;
@@ -272,11 +422,16 @@ export function StaffDashboard({
     const drifted = (el: HTMLElement) => Math.abs(el.getBoundingClientRect().top) > 120;
 
     const timer = setInterval(() => {
-      const el = document.getElementById(`sec-${focus}`);
+      const el = document.getElementById(`sec-${target}`);
       if (!found) {
         if (el) {
           found = true;
-          el.scrollIntoView({ behavior: "smooth", block: "start" });
+          // Instant, not smooth: coming back from a table should land straight on the
+          // section, not scroll visibly down from the top of the dashboard.
+          el.scrollIntoView({ behavior: "auto", block: "start" });
+          // Let the sections above settle for a beat (the follow loop below keeps pinning
+          // the target), then lift the loader — the page appears already in place.
+          setTimeout(revealDashboard, 350);
           const url = new URL(window.location.href);
           if (url.searchParams.has("focus")) {
             url.searchParams.delete("focus");
@@ -286,6 +441,7 @@ export function StaffDashboard({
           // ~3s and it never appeared (the staff member lacks that section): give up
           // quietly rather than spin forever.
           clearInterval(timer);
+          revealDashboard();
         }
         return;
       }
@@ -301,10 +457,24 @@ export function StaffDashboard({
       clearInterval(timer);
       events.forEach((ev) => window.removeEventListener(ev, stopFollowing));
     };
-  }, [focus]);
+  }, [focus, restored, sectionKeys]);
 
   return (
     <div className="pb-10 pt-1.5">
+      {/* Runs while the server's HTML is still being parsed — BEFORE the first paint — and
+          only decides one thing: is this page about to jump to a section (a reload with a
+          saved section, or a ?focus / ?credit / ?session link)? If so it marks <html>, which
+          hides the sections behind a small loader (see .dash-restoring in globals.css) until
+          they are positioned. Without it the page painted at the top, on Orders, and then
+          visibly jumped. React never runs it on the client. */}
+      <script
+        suppressHydrationWarning
+        dangerouslySetInnerHTML={{ __html: DASH_RESTORE_SCRIPT }}
+      />
+      <div className="dash-restore-loader" aria-live="polite">
+        <span className="sr-only">Loading your section…</span>
+        <DashboardSkeleton />
+      </div>
 
       {/* Quick-nav — sticky under the top bar. Shows when there's more than one section to
           jump between, OR when the mock-bill shortcut needs somewhere to live: a cashier
@@ -386,7 +556,7 @@ export function StaffDashboard({
           </div>
         </div>
       ) : (
-        <div className="w-full px-3 sm:px-5 lg:px-10 pt-2 flex flex-col gap-5">
+        <div data-dash-body className="w-full px-3 sm:px-5 lg:px-10 pt-2 flex flex-col gap-5">
           {sections.map((s) =>
             s.bare ? (
               <div key={s.key} id={`sec-${s.key}`} style={{ scrollMarginTop: 150 }}>

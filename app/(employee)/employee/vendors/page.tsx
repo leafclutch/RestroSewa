@@ -26,7 +26,7 @@ export default async function EmployeeVendorsPage() {
   return (
     <div className="p-4 sm:p-5 max-w-3xl mx-auto">
       <Link
-        href="/employee/dashboard"
+        href="/employee/dashboard?focus=vendors"
         className="inline-flex items-center gap-1 text-sm mb-4"
         style={{ color: "var(--color-ink-mute)" }}
       >

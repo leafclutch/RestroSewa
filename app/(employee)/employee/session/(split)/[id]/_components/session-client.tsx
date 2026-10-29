@@ -1390,7 +1390,7 @@ export function SessionClient({
                         // back into use: staying here left a closed "W4" on screen while
                         // the next walk-in added became a NEW W4 — two W4s, one closed,
                         // which read like the app bouncing around the same walk-in.
-                        router.push("/employee/dashboard");
+                        router.push("/employee/dashboard?focus=walkins");
                       } else if (window.matchMedia("(min-width: 1024px)").matches) {
                         // Desktop/tablet: don't navigate anywhere — stay on this exact
                         // page. `isClosed` (below) already swaps the whole Actions block
@@ -1400,8 +1400,8 @@ export function SessionClient({
                         router.refresh();
                       } else {
                         // Mobile has no rail to stay near, so this goes home instead —
-                        // same as it always has.
-                        router.push("/employee/dashboard");
+                        // to the Tables section it came from.
+                        router.push("/employee/dashboard?focus=tables");
                       }
                     });
                   }
@@ -1478,7 +1478,7 @@ export function SessionClient({
                 Its number may now be used by a new walk-in — open it from the dashboard.
               </p>
               <Link
-                href="/employee/dashboard"
+                href="/employee/dashboard?focus=walkins"
                 className="inline-block mt-2 text-xs font-semibold px-3 py-1.5 rounded-lg"
                 style={{ color: "#fff", background: "var(--color-primary)" }}
               >

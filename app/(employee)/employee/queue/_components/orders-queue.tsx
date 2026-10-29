@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { getMyOrderQueue, updateOrderItemStatus } from "@/app/actions/pos";
 import type { QueueOrder, QueueOrderItem } from "@/app/actions/pos";
 import { useRealtime } from "@/lib/realtime/use-realtime";
-import { Armchair, BedDouble, Clock, ConciergeBell, ShoppingBag, User } from "lucide-react";
+import Link from "next/link";
+import { Armchair, BedDouble, ChevronRight, Clock, ConciergeBell, ShoppingBag, User } from "lucide-react";
 import { useCurrency } from "@/components/currency-provider";
 import { SECTION_ACCENT } from "@/lib/section-colors";
 
@@ -144,8 +145,15 @@ function OrderCard({
       className="rounded-2xl border-[1.5px] overflow-hidden flex flex-col"
       style={{ background: "var(--color-canvas)", borderColor: origin.color, boxShadow: "var(--shadow-card)" }}
     >
-      {/* Header — tinted in the origin's colour, the solid icon tile says where at a glance. */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: "var(--color-hairline)", background: origin.soft }}>
+      {/* Header — tinted in the origin's colour, the solid icon tile says where at a glance.
+          The whole header is a link to that table / walk-in / room's own screen (a room
+          stay's session page hands straight on to the room screen). */}
+      <Link
+        href={`/employee/session/${order.session_id}`}
+        title={`Open ${locationLabel(order)}`}
+        className="group flex items-center gap-3 px-4 py-3 border-b transition-[filter] hover:brightness-[0.97]"
+        style={{ borderColor: "var(--color-hairline)", background: origin.soft }}
+      >
         <span
           className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
           style={{ background: origin.fill, color: "#fff" }}
@@ -170,7 +178,13 @@ function OrderCard({
           <span aria-hidden className="w-1.5 h-1.5 rounded-full" style={{ background: meta.color }} />
           {meta.label}
         </span>
-      </div>
+        <ChevronRight
+          size={18}
+          aria-hidden
+          className="shrink-0 -mr-1 transition-transform group-hover:translate-x-0.5"
+          style={{ color: origin.color }}
+        />
+      </Link>
 
       {/* Items */}
       <div className="flex-1">
@@ -189,6 +203,21 @@ function OrderCard({
 }
 
 export type OrdersStats = { total: number; pending: number };
+
+/**
+ * The column arrangements, 1 to 6, and when each one shows. A column needs ~300px plus
+ * the 12px gap, so N columns fit from (312·N − 12)px of box width; each arrangement shows
+ * from its own threshold up to the next one's. Literal class strings, so Tailwind
+ * generates them.
+ */
+const COLUMN_LAYOUTS = [
+  { n: 1, show: "flex @min-[612px]:hidden" },
+  { n: 2, show: "hidden @min-[612px]:flex @min-[924px]:hidden" },
+  { n: 3, show: "hidden @min-[924px]:flex @min-[1236px]:hidden" },
+  { n: 4, show: "hidden @min-[1236px]:flex @min-[1548px]:hidden" },
+  { n: 5, show: "hidden @min-[1548px]:flex @min-[1860px]:hidden" },
+  { n: 6, show: "hidden @min-[1860px]:flex" },
+] as const;
 
 export function OrdersQueue({
   initialOrders,
@@ -260,7 +289,12 @@ export function OrdersQueue({
 
   // The queue only ever holds orders that still have a pending item — an order
   // whose items have all gone out drops off it — so every order here is pending.
-  const pendingOrders = orders;
+  // NEWEST first: the order that just came in is the one staff look for, so it leads the
+  // list (top-left). The server hands them over oldest first; this flips that for display
+  // only — every fetch, push and poll goes through here, so the order always holds.
+  const pendingOrders = useMemo(() => [...orders].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  ), [orders]);
 
   // Report live counts upward (dashboard uses this to auto-collapse when empty).
   useEffect(() => {
@@ -296,10 +330,30 @@ export function OrdersQueue({
               {pendingOrders.length}
             </span>
           </p>
-          {/* A grid of order cards, like the room cards — several orders side by side on a tablet. */}
-          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
-            {pendingOrders.map((o) => (
-              <OrderCard key={o.order_id} order={o} canManage={canManage} onUpdate={handleUpdate} busyItems={busyItems} />
+          {/* Newest first, packed. The orders (newest first) are DEALT across the columns
+              like cards — 1, 2, 3 along the top, 4, 5, 6 under them — so the list reads left
+              to right from the latest order down to the oldest. Each column stacks its own
+              cards, so a long order only makes its own column longer; the short ones beside
+              it sit under one another instead of in a row as tall as the long one.
+
+              How many columns fit is decided by CSS, not JavaScript: every arrangement from
+              1 to 6 columns is in the page, and a container query shows only the one that
+              fits this box (~300px a column). So the very first paint — the server's HTML —
+              is already the final layout; nothing is measured and re-dealt afterwards, which
+              is what made the queue jump while the dashboard loaded. */}
+          <div className="@container">
+            {COLUMN_LAYOUTS.map(({ n, show }) => (
+              <div key={n} className={`${show} items-start gap-3`}>
+                {Array.from({ length: n }, (_, c) => (
+                  <div key={c} className="flex-1 min-w-0 flex flex-col gap-5">
+                    {pendingOrders
+                      .filter((_, i) => i % n === c)
+                      .map((o) => (
+                        <OrderCard key={o.order_id} order={o} canManage={canManage} onUpdate={handleUpdate} busyItems={busyItems} />
+                      ))}
+                  </div>
+                ))}
+              </div>
             ))}
           </div>
         </section>

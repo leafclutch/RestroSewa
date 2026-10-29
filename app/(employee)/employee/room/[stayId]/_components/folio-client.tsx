@@ -1470,7 +1470,7 @@ export function FolioClient({
     {showMenu && (
       <div className="hidden lg:block shrink-0 px-1 pb-3">
         <Link
-        href="/employee/dashboard"
+        href="/employee/dashboard?focus=rooms"
         className="inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors hover:brightness-110 active:brightness-95"
         style={{ color: "#fff", background: "var(--color-primary)" }}
       >
@@ -1500,7 +1500,7 @@ export function FolioClient({
           button tapped constantly on a busy floor has to read as one at a glance.
           `self-start` so the flex column doesn't stretch it full width. */}
       <Link
-        href="/employee/dashboard"
+        href="/employee/dashboard?focus=rooms"
         className={`self-start inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 -ml-1 rounded-lg transition-colors hover:brightness-110 active:brightness-95 ${showMenu ? "lg:hidden" : ""}`}
         style={{ color: "#fff", background: "var(--color-primary)" }}
       >

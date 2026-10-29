@@ -54,7 +54,8 @@ export default function SessionLoading() {
   );
 
   return (
-    <div aria-busy="true" aria-live="polite">
+    // `rs-wait-in`: invisible for a beat, so a quick open never flashes this.
+    <div className="rs-wait-in" aria-busy="true" aria-live="polite">
       <span className="sr-only">Loading table…</span>
 
       {/* ── Mobile (below lg) ── */}

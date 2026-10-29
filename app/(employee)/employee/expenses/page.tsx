@@ -36,7 +36,7 @@ export default async function EmployeeExpensesPage() {
     <div className="max-w-3xl mx-auto">
       <div className="px-4 sm:px-5 pt-4">
         <Link
-          href="/employee/dashboard"
+          href="/employee/dashboard?focus=expenses"
           className="inline-flex items-center gap-1 text-sm"
           style={{ color: "var(--color-ink-mute)" }}
         >

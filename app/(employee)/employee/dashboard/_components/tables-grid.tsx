@@ -117,7 +117,7 @@ const TableCard = memo(function TableCard({
             <>
               {/* No arrow of its own: an active table's arrow IS the Shift button below,
                   laid over this slot, so it only shows when the table can be moved. */}
-              <TileTop icon={Armchair} number={table.number} fg="#fff" />
+              <TileTop icon={Armchair} number={table.number} fg="#fff" reserveRight={canShift} />
               <TileStatus label="Active" fg="rgba(255,255,255,0.92)" dot="#4ade80" />
             </>
           )}
@@ -129,7 +129,7 @@ const TableCard = memo(function TableCard({
             title="Shift to another table"
             onClick={() => onShift(table)}
             // Sits exactly over TileTop's empty arrow slot (tile border 1.5px + padding).
-            className="absolute top-[9.5px] right-[11.5px] w-6 h-6 rounded-full flex items-center justify-center transition-colors"
+            className="absolute top-[9.5px] right-[9.5px] w-6 h-6 rounded-full flex items-center justify-center transition-colors"
             style={{ background: "rgba(255,255,255,0.22)", color: "#fff" }}
           >
             <MoveRight size={13} strokeWidth={2.2} />

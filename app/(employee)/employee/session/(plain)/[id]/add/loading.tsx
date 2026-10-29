@@ -11,7 +11,7 @@ import { MenuSkeleton } from "./_components/menu-skeleton";
 export default function AddItemsLoading() {
   return (
     <div
-      className="flex flex-col"
+      className="flex flex-col rs-wait-in"
       style={{ height: "calc(100dvh - 56px - env(safe-area-inset-top, 0px))" }}
       aria-busy="true"
       aria-live="polite"

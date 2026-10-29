@@ -8,6 +8,7 @@ import { CalendarDays, Clock, Home, LogOut } from "lucide-react";
 import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import { NotificationBell } from "./notification-bell";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { DASH_SECTION_KEY, DASH_RESTORING_ATTR } from "./dashboard-restore";
 
 /**
  * Today's date and a ticking clock, for the top bar. Read on the client only (empty on
@@ -67,6 +68,22 @@ export function StaffNav({
   const atHome = pathname === "/employee/dashboard";
   const atRota = pathname === "/employee/rota";
 
+  // Home is a fresh start: forget the section the dashboard remembers for a reload, and
+  // land at the TOP. Already on the dashboard, a link to the same page would do nothing,
+  // so it scrolls up itself (and drops any ?focus / ?session left in the address).
+  const goHome = (e: React.MouseEvent) => {
+    // Ctrl/Cmd/Shift/middle-click opens the dashboard in another tab or window: leave this
+    // tab's remembered section alone and let the browser do that.
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    try { window.sessionStorage.removeItem(DASH_SECTION_KEY); } catch { /* storage blocked */ }
+    document.documentElement.removeAttribute(DASH_RESTORING_ATTR);
+    if (atHome) {
+      e.preventDefault();
+      if (window.location.search) window.history.replaceState(null, "", "/employee/dashboard");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
   return (
     <header
       // z-40 keeps it above the dashboard's own sticky section-nav (z-30), which
@@ -87,7 +104,7 @@ export function StaffNav({
       {/* Brand / user — tapping it returns to the dashboard. Staff work for the
           RESTAURANT, so its logo leads here; HRestroSewa is the platform underneath
           and doesn't compete for the space. */}
-      <Link href="/employee/dashboard" className="flex-1 min-w-0 flex items-center gap-2.5">
+      <Link href="/employee/dashboard" onClick={goHome} className="flex-1 min-w-0 flex items-center gap-2.5">
         <RestaurantLogo
           name={restaurantName}
           logoUrl={restaurantLogo}
@@ -113,6 +130,7 @@ export function StaffNav({
           screen. The label collapses on narrow phones; the icon never does. */}
       <Link
         href="/employee/dashboard"
+        onClick={goHome}
         aria-label="Home"
         aria-current={atHome ? "page" : undefined}
         className="flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-sm transition-colors"

@@ -343,6 +343,38 @@ html:not(.dark) .admin-surface {
   --color-hairline-input: #7389aa;
 }
 
+/* ── Dashboard: landing on a section ─────────────────────────────────────────
+ * When the dashboard is about to jump to a section (a reload with a saved section, or a
+ * ?focus link), an inline script marks <html data-dash-restoring> before the first paint.
+ * The sections stay hidden behind a skeleton while they are positioned, then fade in
+ * already in place — instead of painting at the top on Orders and visibly jumping. The
+ * loader itself only appears if that takes a moment (same delay as .rs-wait-in). The
+ * section bar above stays visible throughout.
+ */
+.dash-restore-loader { display: none; }
+html[data-dash-restoring] [data-dash-body] { visibility: hidden; opacity: 0; }
+/* The skeleton fills the screen under the sticky section bar (top bar 56px + section bar
+   ~88px), on the page's own background, while the real sections are positioned behind it. */
+html[data-dash-restoring] .dash-restore-loader {
+  display: block;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: calc(56px + 88px + env(safe-area-inset-top, 0px));
+  z-index: 20;
+  overflow: hidden;
+  background: var(--color-canvas);
+  pointer-events: none;
+  animation: rs-wait-in 140ms ease-out 120ms backwards;
+}
+/* Fades in when the mark is lifted (a transition, so it plays at the reveal, not on mount). */
+[data-dash-body] { transition: opacity 220ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-dash-restoring] .dash-restore-loader { animation: none; }
+  [data-dash-body] { transition: none; }
+}
+
 /* ── Menu key count ───────────────────────────────────────────────────────────
  * The count badge on a staff menu key pops when it changes — the one motion on the menu,
  * and only ever in answer to a tap, so the cashier sees the tap land. Off for anyone who
@@ -635,6 +667,22 @@ header {
 
 @media (prefers-reduced-motion: reduce) {
   .rs-page {
+    animation: none;
+  }
+}
+
+/* A loading skeleton that only appears if the wait is real: invisible for the first
+   ~220ms, then a soft fade. A quick navigation finishes inside that window, so it never
+   flashes a loader; a slow one gets a clear "loading" screen. */
+@keyframes rs-wait-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.rs-wait-in {
+  animation: rs-wait-in 180ms ease-out 220ms backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rs-wait-in {
     animation: none;
   }
 }

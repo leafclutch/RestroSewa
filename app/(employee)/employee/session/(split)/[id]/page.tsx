@@ -140,8 +140,10 @@ export default async function SessionPage({
       // on a busy floor and needs to read as an actual button at a glance. Passed as the
       // header so on a desktop it sits above the order column's scroll, not inside it.
       header={
+        // Back to the SECTION this came from (Tables or Walk-ins), not the top of the
+        // dashboard — `?focus` scrolls the dashboard straight to it.
         <Link
-          href="/employee/dashboard"
+          href={`/employee/dashboard?focus=${session.type === "walk_in" ? "walkins" : "tables"}`}
           className="inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 -ml-1 rounded-lg transition-colors hover:brightness-110 active:brightness-95"
           style={{ color: "#fff", background: "var(--color-primary)" }}
         >

@@ -109,7 +109,7 @@ function RoomColumnSkeleton() {
 
 export default function RoomLoading() {
   return (
-    <div className="room-surface" aria-busy="true" aria-live="polite">
+    <div className="room-surface rs-wait-in" aria-busy="true" aria-live="polite">
       <span className="sr-only">Loading room…</span>
 
       {/* ── Phone / small tablet: the one column, as FolioClient below lg ── */}
