@@ -2,12 +2,45 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { logout } from "@/app/actions/auth";
-import { CalendarDays, Home, LogOut } from "lucide-react";
+import { CalendarDays, Clock, Home, LogOut } from "lucide-react";
 import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import { NotificationBell } from "./notification-bell";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+
+/**
+ * Today's date and a ticking clock, for the top bar. Read on the client only (empty on
+ * the server, filled after mount): the server's clock and zone are not the till's, and
+ * rendering it there would mismatch on hydration. Hidden on phones, where the bar has
+ * no room to spare.
+ */
+function NavClock() {
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+    const t = setInterval(() => setNow(new Date()), 15_000);
+    return () => clearInterval(t);
+  }, []);
+  if (!now) return <span className="hidden md:block w-[230px]" aria-hidden />;
+
+  return (
+    <span
+      className="hidden md:inline-flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm whitespace-nowrap"
+      style={{ background: "rgba(255,255,255,0.08)", color: "#fff" }}
+    >
+      <span className="inline-flex items-center gap-1.5">
+        <CalendarDays size={15} strokeWidth={1.7} style={{ color: "rgba(255,255,255,0.7)" }} />
+        {now.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
+      </span>
+      <span aria-hidden className="w-px h-4" style={{ background: "rgba(255,255,255,0.25)" }} />
+      <span className="inline-flex items-center gap-1.5 tabular font-semibold">
+        <Clock size={15} strokeWidth={1.7} style={{ color: "rgba(255,255,255,0.7)" }} />
+        {now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
+      </span>
+    </span>
+  );
+}
 
 // The staff top bar. STICKY: it stays pinned while the dashboard scrolls, so
 // Notifications and Logout are always one tap away — which matters when a waiter
@@ -73,6 +106,8 @@ export function StaffNav({
           </span>
         </span>
       </Link>
+
+      <NavClock />
 
       {/* Home — one tap back to the dashboard from a session, queue or menu
           screen. The label collapses on narrow phones; the icon never does. */}

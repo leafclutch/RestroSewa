@@ -90,7 +90,7 @@ function NotificationCard({
             {/* Its place in the queue — the whole point of FIFO is that #1 is
                 worked first, so say which one that is. */}
             <span
-              className="shrink-0 tabular-nums text-[10px] font-semibold w-4 text-center"
+              className="shrink-0 tabular-nums text-[11px] font-semibold w-4 text-center"
               style={{ color: "var(--color-ink-mute)" }}
             >
               {position}
@@ -458,7 +458,7 @@ export function NotificationBell({ initialCount = 0 }: { initialCount?: number }
         <span className="hidden sm:inline">Notifications</span>
         {count > 0 && (
           <span
-            className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-medium flex items-center justify-center"
+            className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-[11px] font-medium flex items-center justify-center"
             style={{ background: "#ef4444", color: "#fff" }}
           >
             {count > 9 ? "9+" : count}

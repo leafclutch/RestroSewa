@@ -8,9 +8,10 @@ import { addWalkIn, openWalkInSlot } from "@/app/actions/pos";
 import type { WalkInOpenResult, WalkInStatus } from "@/app/actions/pos";
 import { walkInLabel, EXTRA_WALK_IN_MAX } from "@/lib/walk-ins";
 import { SECTION_ACCENT } from "@/lib/section-colors";
-import { CountPill } from "@/components/ui/count-pill";
+import { usePublishSectionBadges } from "./section-badges";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Plus, ShoppingBag } from "lucide-react";
+import { TILE, TILE_SHADOW, TILE_MIN_HEIGHT, TILE_FREE_STYLE, TileTop, TileStatus } from "./floor-tile";
 
 const CARD =
   "flex flex-col items-center justify-center rounded-xl border w-full p-2 text-center transition-all";
@@ -55,31 +56,65 @@ const WalkInCard = memo(function WalkInCard({
       <Link
         href={`/employee/session/${slot.session_id}`}
         title={`Walk-in ${label} — active`}
-        className={`${card} hover:brightness-110`}
+        className={compact ? `${card} hover:brightness-110` : `${TILE} hover:brightness-110`}
         // Constant purple FILL (see the --fill-* block): the flipping --sec-walkins token goes
         // light in dark and white text can't sit on it, so the solid card uses the fixed fill.
         style={{
-          minHeight,
+          minHeight: compact ? minHeight : TILE_MIN_HEIGHT,
           background: "var(--fill-purple)",
           borderColor: "var(--fill-purple)",
-          boxShadow: isCurrent ? CURRENT_RING : undefined,
+          boxShadow: isCurrent ? CURRENT_RING : compact ? undefined : TILE_SHADOW,
         }}
       >
-        {!compact && <ShoppingBag aria-hidden size={13} className="mb-0.5" style={{ color: "rgba(255,255,255,0.75)" }} />}
-        <span className={NUMBER} style={{ ...numberStyle, color: "#fff" }}>{label}</span>
-        {!compact && (
-          <span className="text-xs mt-1 truncate max-w-full px-1" style={{ color: "rgba(255,255,255,0.9)" }}>
-            {slot.customer_name || "Active"}
-          </span>
+        {compact ? (
+          <span className={NUMBER} style={{ ...numberStyle, color: "#fff" }}>{label}</span>
+        ) : (
+          <>
+            <TileTop icon={ShoppingBag} number={label} fg="#fff" chip={{ background: "rgba(255,255,255,0.22)", color: "#fff" }} />
+            <TileStatus label={slot.customer_name || "Active"} fg="rgba(255,255,255,0.92)" dot="#4ade80" />
+          </>
         )}
       </Link>
     );
   }
 
-  // Free. Purple-tinted rather than green: an idle W-slot isn't a seat someone can be shown
-  // to, it's a lane waiting for an order — the purple keeps it distinct from the free tables
-  // sitting directly above it in the same page.
+  // Free. Neutral grey on the dashboard (the purple stays in the dot and arrow), so the
+  // solid purple busy lanes are what stand out; the compact rail keeps its purple tint.
   const a = SECTION_ACCENT.walkins;
+  if (!compact) {
+    const body = (
+      <>
+        <TileTop icon={ShoppingBag} number={label} fg="var(--color-ink)" chip={{ background: "var(--color-canvas)", color: a.color }} />
+        <TileStatus label="Free" fg="var(--color-ink-mute)" dot={a.color} />
+      </>
+    );
+    // Read-only (View Walk-ins without Manage): status only, can't be opened. The server
+    // (openWalkInSlot) enforces this too.
+    if (!canManage) {
+      return (
+        <div title={`Walk-in ${label} — free`} className={TILE} style={{ minHeight: TILE_MIN_HEIGHT, ...TILE_FREE_STYLE }}>
+          {body}
+        </div>
+      );
+    }
+    return (
+      <button
+        type="button"
+        disabled={opening}
+        title={`Walk-in ${label} — free`}
+        onClick={() =>
+          startOpen(async () => {
+            onError("");
+            onResult(await openWalkInSlot(slot.no), { no: slot.no, extra: slot.extra });
+          })
+        }
+        className={`${TILE} hover:brightness-95`}
+        style={{ minHeight: TILE_MIN_HEIGHT, ...TILE_FREE_STYLE, opacity: opening ? 0.5 : 1 }}
+      >
+        {body}
+      </button>
+    );
+  }
   // Read-only (View Walk-ins without Manage): show the slot's status but don't let it be
   // opened. The server (openWalkInSlot) enforces this too.
   if (!canManage) {
@@ -147,7 +182,7 @@ function AddWalkInCard({
       }
       className={`${compact ? CARD_COMPACT : CARD} hover:brightness-95`}
       style={{
-        minHeight: compact ? 44 : 88,
+        minHeight: compact ? 44 : TILE_MIN_HEIGHT,
         background: "transparent",
         borderColor: a.color,
         borderStyle: "dashed",
@@ -247,6 +282,16 @@ export function WalkInsGrid({
 
   const free = walkIns.length - active;
 
+  usePublishSectionBadges(
+    compact
+      ? null
+      : [
+          { n: walkIns.length, label: "total", variant: "soft" },
+          { n: active, label: "active", variant: "solid", fill: "var(--fill-purple)" },
+          { n: free, label: "free", variant: "muted" },
+        ]
+  );
+
   return (
     <div>
       {compact ? (
@@ -255,22 +300,15 @@ export function WalkInsGrid({
           className="sticky top-0 z-10 mb-2 pb-2 border-b"
           style={{ background: "var(--color-canvas-soft)", borderColor: "var(--color-hairline)" }}
         >
-          <p className="text-[11px] font-medium uppercase tracking-wide" style={{ color: SECTION_ACCENT.walkins.color }}>
+          <p className="text-[12px] font-medium uppercase tracking-wide" style={{ color: SECTION_ACCENT.walkins.color }}>
             Walk-ins
           </p>
-          <p className="text-[11px] mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
+          <p className="text-[12px] mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
             {active} active · {free} free
           </p>
         </div>
       ) : (
-      <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
-        <p className="text-base font-medium" style={{ color: SECTION_ACCENT.walkins.color }}>Walk-ins</p>
-        <span className="inline-flex items-center gap-1.5 flex-wrap">
-          {free > 0 && <CountPill n={free} label="free" tone={SECTION_ACCENT.walkins} />}
-          {active > 0 && <CountPill n={active} label="active" tone={SECTION_ACCENT.walkins} fill="var(--fill-purple)" />}
-          <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>{walkIns.length} total</span>
-        </span>
-      </div>
+      <p className="text-sm font-semibold mb-3" style={{ color: "var(--color-ink)" }}>Walk-ins</p>
       )}
 
       {error && (
@@ -282,7 +320,7 @@ export function WalkInsGrid({
         style={
           compact
             ? { gridTemplateColumns: "repeat(auto-fill, 48px)" }
-            : { gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))" }
+            : { gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))" }
         }
       >
         {walkIns.map((w) => (

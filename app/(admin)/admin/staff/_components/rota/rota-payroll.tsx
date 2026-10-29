@@ -50,7 +50,7 @@ const STATUS_TOKEN = {
 function Pill({ color, children }: { color: string; children: React.ReactNode }) {
   return (
     <span
-      className="text-[11px] px-2 py-0.5 rounded-full shrink-0 whitespace-nowrap font-medium"
+      className="text-[12px] px-2 py-0.5 rounded-full shrink-0 whitespace-nowrap font-medium"
       style={{ color, background: tint(color, 14) }}
     >
       {children}
@@ -430,7 +430,7 @@ export function RotaPayroll({
                 },
               ].map((m) => (
                 <div key={m.label} className="text-left md:text-right min-w-0">
-                  <p className="text-[11px]" style={{ color: "var(--color-ink-mute)" }}>{m.label}</p>
+                  <p className="text-[12px]" style={{ color: "var(--color-ink-mute)" }}>{m.label}</p>
                   <p className="truncate font-medium" style={{ color: m.tone }}>{cur.money2(m.value)}</p>
                 </div>
               ))}

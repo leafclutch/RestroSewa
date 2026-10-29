@@ -16,7 +16,8 @@ import type { CreditCustomer } from "@/app/actions/credits";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Check, ChevronRight, Plus, Receipt, User, X, Pencil, Lock } from "lucide-react";
+import { Check, ChevronRight, Plus, Receipt, User, X, Pencil, Lock, Wallet, Banknote, MonitorSmartphone, CreditCard, HandCoins, ArrowRight, ConciergeBell } from "lucide-react";
+import { SECTION_ACCENT } from "@/lib/section-colors";
 import { OrderItem } from "@/app/(employee)/employee/_components/order-item";
 import { SessionPrintButtons } from "./print-tickets";
 import type { RestaurantInfo, PrintStation } from "./print-tickets";
@@ -30,13 +31,22 @@ type PaymentMethod = "cash" | "online" | "card" | "mixed" | "credit";
 // cash AND pays some online before the rest goes on their account.
 type DownTender = "cash" | "online" | "card" | "mixed";
 
-const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
-  { value: "cash",   label: "Cash"   },
-  { value: "online", label: "Online" },
-  { value: "card",   label: "Card"   },
-  { value: "mixed",  label: "Mixed"  },
-  { value: "credit", label: "Credit" },
+const PAYMENT_METHODS: { value: PaymentMethod; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
+  { value: "cash",   label: "Cash",          Icon: Banknote },
+  { value: "online", label: "Online",        Icon: MonitorSmartphone },
+  { value: "mixed",  label: "Cash + Online", Icon: Wallet },
+  { value: "credit", label: "Credit",        Icon: HandCoins },
+  { value: "card",   label: "Card",          Icon: CreditCard },
 ];
+
+/** The bill screen's colour: Tables blue, Walk-ins purple. `fill` is the constant solid
+ *  (white text sits on it in both themes); `color`/`soft` are the theme-flipping accent. */
+export type BillAccent = { color: string; soft: string; fill: string };
+export function billAccentFor(type: SessionDetail["type"]): BillAccent {
+  return type === "walk_in"
+    ? { ...SECTION_ACCENT.walkins, fill: "var(--fill-purple)" }
+    : { ...SECTION_ACCENT.tables, fill: "var(--fill-blue)" };
+}
 
 const DOWN_TENDERS: { value: DownTender; label: string }[] = [
   { value: "cash",   label: "Cash"   },
@@ -53,9 +63,14 @@ function PaymentForm({
   setDiscountAmt,
   discountMode,
   setDiscountMode,
+  accent,
+  onClose,
 }: {
   session: SessionDetail;
   canUseCredit: boolean;
+  accent: BillAccent;
+  /** Shown as the card's ✕ when it's open as a popup. */
+  onClose?: () => void;
   /** Whether the restaurant has a discount PIN configured. No PIN = no discounts at all,
    *  so the field isn't shown. The PIN is still verified server-side at payment. */
   discountEnabled: boolean;
@@ -242,8 +257,7 @@ function PaymentForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-xl border px-5 py-5 flex flex-col gap-4"
-      style={{ background: "var(--color-canvas)", borderColor: "var(--color-primary)", borderWidth: 1.5 }}
+      className="flex flex-col gap-4"
     >
       <input type="hidden" name="session_id"   value={session.id} />
       {/* `total_amount` is the NET sale — the payable, not the order total. That's the
@@ -272,14 +286,33 @@ function PaymentForm({
         </>
       )}
 
-      <p className="text-base font-medium" style={{ color: "var(--color-ink)" }}>
-        Close &amp; collect payment
-      </p>
+      <div className="flex items-center gap-3">
+        <span
+          className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: accent.fill, color: "#fff" }}
+        >
+          <Wallet size={21} strokeWidth={1.9} />
+        </span>
+        <p className="text-lg font-semibold flex-1" style={{ color: "var(--color-ink)" }}>
+          Close &amp; collect payment
+        </p>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-canvas-soft"
+            style={{ color: "var(--color-ink-mute)" }}
+          >
+            <X size={18} />
+          </button>
+        )}
+      </div>
 
       {/* Order Total → Discount → Final Payable. Everything below collects against the
           payable, so the cashier sees what they're about to take before choosing how. */}
       <div
-        className="rounded-lg px-4 py-3 flex flex-col gap-2"
+        className="rounded-xl px-4 py-3 flex flex-col gap-2.5"
         style={{ background: "var(--color-canvas-soft)", border: "1px solid var(--color-hairline)" }}
       >
         <div className="flex items-center justify-between text-sm">
@@ -357,36 +390,36 @@ function PaymentForm({
           className="flex items-center justify-between pt-2 border-t"
           style={{ borderColor: "var(--color-hairline)" }}
         >
-          <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Final payable</span>
-          <span className="text-lg font-medium tabular" style={{ color: "var(--color-primary)" }}>
+          <span className="text-base font-semibold" style={{ color: "var(--color-ink)" }}>Final payable</span>
+          <span className="text-2xl font-semibold tabular" style={{ color: accent.color }}>
             {cur.prefix}{payable.toFixed(2)}
           </span>
         </div>
       </div>
 
-      {/* Method selector */}
-      <div className="flex flex-col gap-2">
-        <p className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
-          Payment method
+      {/* Method selector — "Quick Payment" buttons; the chosen one fills solid. */}
+      <div className="flex flex-col gap-2.5">
+        <p className="text-base font-semibold" style={{ color: "var(--color-ink)" }}>
+          Quick Payment
         </p>
-        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${methods.length}, 1fr)` }}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {methods.map((m) => {
             const active = method === m.value;
             const isCredit = m.value === "credit";
+            // Credit keeps its own orange: it's the one choice that leaves money owed.
+            const on = isCredit ? "#ea580c" : accent.fill;
             return (
               <label
                 key={m.value}
-                className="flex items-center gap-2 cursor-pointer justify-center py-2 rounded-lg border text-sm transition-colors"
+                className="flex items-center gap-2 cursor-pointer justify-center px-2 py-2.5 rounded-xl border text-sm font-medium transition-colors leading-tight text-center"
                 style={{
-                  borderColor: active
-                    ? isCredit ? "#f97316" : "var(--color-primary)"
-                    : "var(--color-hairline-input)",
-                  background: active
-                    ? isCredit ? "rgba(249,115,22,0.08)" : "rgba(99,102,241,0.06)"
-                    : "var(--color-canvas-soft)",
-                  color: "var(--color-ink)",
+                  borderColor: active ? on : "var(--color-hairline-input)",
+                  background: active ? on : "var(--color-canvas)",
+                  color: active ? "#fff" : "var(--color-ink)",
+                  boxShadow: active ? "none" : "0 1px 2px rgba(15,23,42,0.05)",
                 }}
               >
+                <m.Icon size={16} />
                 <input
                   type="radio"
                   name="payment_method"
@@ -709,7 +742,7 @@ function PaymentForm({
                     const setOther = side === "cash" ? setDownOnline : setDownCash;
                     return (
                       <div key={side} className="flex flex-col gap-1">
-                        <label className="text-[11px] uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+                        <label className="text-[12px] uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
                           {side === "cash" ? `Cash (${cur.symbol})` : `Online (${cur.symbol})`}
                         </label>
                         <div className="relative">
@@ -800,14 +833,51 @@ function PaymentForm({
         </p>
       )}
 
-      <Button type="submit" variant="primary" disabled={!canSubmit}>
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        className="w-full h-12 rounded-xl text-base font-semibold inline-flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+        style={{ background: method === "credit" ? "#ea580c" : accent.fill, color: "#fff" }}
+      >
         {pending
           ? "Closing…"
           : method === "credit"
           ? `Close & record ${cur.money(creditAmount)} credit`
-          : "Complete & close session"}
-      </Button>
+          : `Check out · ${cur.prefix}${payable.toFixed(2)}`}
+        {!pending && <ArrowRight size={18} />}
+      </button>
     </form>
+  );
+}
+
+/**
+ * The "Close & collect payment" card as a popup: centred on a tablet/desktop, a bottom
+ * sheet on a phone. Escape or a tap outside closes it — nothing is submitted until
+ * Check out is pressed, and the discount typed so far is kept (it lives in SessionClient).
+ */
+export function PaymentPopup({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{ background: "rgba(15,23,42,0.55)" }}
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full sm:max-w-md max-h-[92vh] overflow-y-auto thin-scrollbar rounded-t-2xl sm:rounded-2xl border shadow-xl px-5 py-5"
+        style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+      >
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -879,8 +949,8 @@ function WalkInCustomerPanel({
         <span className="text-xs font-medium flex-1" style={{ color: "var(--color-ink)" }}>
           Customer details <span style={{ color: "var(--color-ink-mute)" }}>· optional</span>
         </span>
-        {pending && <span className="text-[11px]" style={{ color: "var(--color-ink-mute)" }}>Saving…</span>}
-        {!pending && savedFlash && <span className="text-[11px]" style={{ color: "var(--color-success)" }}>Saved</span>}
+        {pending && <span className="text-[12px]" style={{ color: "var(--color-ink-mute)" }}>Saving…</span>}
+        {!pending && savedFlash && <span className="text-[12px]" style={{ color: "var(--color-success)" }}>Saved</span>}
         {canEdit && !editing && (
           <button
             type="button"
@@ -1044,6 +1114,9 @@ export function SessionClient({
   const [discountMode, setDiscountMode] = useState<DiscountMode>("amount");
   const discount = discountEnabled ? resolveDiscount(discountAmt, discountMode, session.total) : 0;
   const hasOrders = session.items.length > 0;
+  const accent = billAccentFor(session.type);
+  // The payment card is a popup now, opened from Pay Now.
+  const [paying, setPaying] = useState(false);
   const pendingItems = session.items.filter((i) => i.item_status !== "served");
   const servedItems  = session.items.filter((i) => i.item_status === "served");
   const isClosed     = session.status === "closed";
@@ -1059,7 +1132,20 @@ export function SessionClient({
     <div className="flex flex-col gap-5 max-w-lg">
       {/* Location label */}
       {locationLabel && (
-        <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>{locationLabel}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-lg font-semibold" style={{ color: "var(--color-ink)" }}>{locationLabel}</p>
+          <span
+            className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full border"
+            style={
+              isClosed
+                ? { background: "var(--color-canvas-soft)", color: "var(--color-ink-mute)", borderColor: "var(--color-hairline-input)" }
+                : { background: accent.soft, color: accent.color, borderColor: accent.color }
+            }
+          >
+            <span aria-hidden className="w-1.5 h-1.5 rounded-full" style={{ background: isClosed ? "var(--color-ink-mute)" : accent.color }} />
+            {isClosed ? "Closed" : "Active"}
+          </span>
+        </div>
       )}
 
       {/* Customer ordering PIN */}
@@ -1102,11 +1188,15 @@ export function SessionClient({
       {/* Items */}
       {session.items.length === 0 ? (
         <div
-          className="rounded-xl border px-6 py-8 text-center"
-          style={{ borderStyle: "dashed", borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
+          className="rounded-xl border-2 px-6 py-12 text-center flex flex-col items-center gap-2"
+          style={{ borderStyle: "dashed", borderColor: "var(--color-hairline-input)", background: "var(--color-canvas-soft)" }}
         >
-          <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
+          <ConciergeBell size={26} strokeWidth={1.6} style={{ color: "var(--color-ink-mute)" }} />
+          <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
             No items yet.
+          </p>
+          <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+            Select items from the menu to add to this order.
           </p>
         </div>
       ) : (
@@ -1127,16 +1217,46 @@ export function SessionClient({
             </div>
           )}
           {servedItems.map((i) => <OrderItem key={i.id} item={i} />)}
-          {/* Total */}
-          <div
-            className="flex justify-between px-4 py-3 border-t"
-            style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}
-          >
-            <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Total</span>
-            <span className="text-sm font-medium tabular" style={{ color: "var(--color-ink)" }}>
-              {cur.money(session.total)}
+        </div>
+      )}
+
+      {/* Subtotal / Total / Pay Now — the bill at a glance. Pay Now opens the payment
+          card as a popup instead of the whole form sitting in this column. */}
+      {hasOrders && (
+        <div
+          className="rounded-2xl border px-5 py-4 flex flex-col gap-2.5"
+          style={{
+            background: "var(--color-canvas)",
+            borderColor: "var(--color-hairline)",
+            boxShadow: "var(--shadow-card)",
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-base font-medium" style={{ color: "var(--color-ink)" }}>Subtotal</span>
+            <span className="text-sm tabular" style={{ color: "var(--color-ink)" }}>{cur.money2(session.total)}</span>
+          </div>
+          {discount > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>Discount</span>
+              <span className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>− {cur.money2(discount)}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between pt-2.5 border-t" style={{ borderColor: "var(--color-hairline)" }}>
+            <span className="text-base font-semibold" style={{ color: "var(--color-ink)" }}>Total</span>
+            <span className="text-xl font-semibold tabular" style={{ color: accent.color }}>
+              {cur.money2(Math.max(0, session.total - discount))}
             </span>
           </div>
+          {!isClosed && canCloseBills && (
+            <button
+              type="button"
+              onClick={() => setPaying(true)}
+              className="mt-1 w-full h-12 rounded-xl text-base font-semibold inline-flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.99]"
+              style={{ background: accent.fill, color: "#fff" }}
+            >
+              <Wallet size={18} /> Pay Now
+            </button>
+          )}
         </div>
       )}
 
@@ -1176,16 +1296,20 @@ export function SessionClient({
               room branch to handle: the room's orders, KOT and folio all live in
               one place. `closeSessionWithPayment` still refuses a room stay
               server-side, in case anyone posts to it directly. */}
-          {canCloseBills && (
-            <PaymentForm
-              session={session}
-              canUseCredit={canUseCredit}
-              discountEnabled={discountEnabled}
-              discountAmt={discountAmt}
-              setDiscountAmt={setDiscountAmt}
-              discountMode={discountMode}
-              setDiscountMode={setDiscountMode}
-            />
+          {canCloseBills && paying && (
+            <PaymentPopup onClose={() => setPaying(false)}>
+              <PaymentForm
+                session={session}
+                canUseCredit={canUseCredit}
+                discountEnabled={discountEnabled}
+                discountAmt={discountAmt}
+                setDiscountAmt={setDiscountAmt}
+                discountMode={discountMode}
+                setDiscountMode={setDiscountMode}
+                accent={accent}
+                onClose={() => setPaying(false)}
+              />
+            </PaymentPopup>
           )}
 
           {!canCreateOrders && !canCloseBills && (

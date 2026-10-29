@@ -71,7 +71,7 @@ export default async function SessionLayout({ children }: { children: React.Reac
           style={{
             borderColor: "var(--color-hairline-input)",
             background: "var(--color-canvas)",
-            boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+            boxShadow: "var(--shadow-card)",
           }}
         >
           <SessionRail

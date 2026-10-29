@@ -95,7 +95,7 @@ function CustomerCard({
               {customer.name}
             </p>
             <span
-              className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full border shrink-0"
+              className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full border shrink-0"
               style={{
                 color: settled ? CREDIT_STATUS_COLOR.fully_paid : CREDIT_STATUS_COLOR.pending,
                 borderColor: `${settled ? CREDIT_STATUS_COLOR.fully_paid : CREDIT_STATUS_COLOR.pending}44`,
@@ -121,7 +121,7 @@ function CustomerCard({
             {settled ? "Settled" : cur.money(customer.balance)}
           </p>
           {!settled && (
-            <p className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>outstanding</p>
+            <p className="text-[11px]" style={{ color: "var(--color-ink-mute)" }}>outstanding</p>
           )}
         </div>
       </div>
@@ -258,7 +258,7 @@ function CreditBillRow({ bill: b, first }: { bill: CreditBill; first: boolean })
           {cur.money2(b.bill_amount)}
         </p>
         <p
-          className="text-[10px] uppercase tracking-wide"
+          className="text-[11px] uppercase tracking-wide"
           style={{ color: CREDIT_STATUS_COLOR[b.status], letterSpacing: "0.06em" }}
         >
           {CREDIT_STATUS_LABEL[b.status]}
@@ -751,7 +751,7 @@ function CustomerDetailModal({
                             {cur.money2(p.amount)}
                           </p>
                           {p.discount_amount > 0 && (
-                            <p className="text-[10px] tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
+                            <p className="text-[11px] tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
                               Cleared {cur.money2(p.amount + p.discount_amount)}
                             </p>
                           )}

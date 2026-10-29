@@ -387,7 +387,7 @@ export function PrintModal({
               BROWSER, not by us — no stylesheet can remove them. They are two one-time
               checkboxes in the print dialog, so the instruction belongs next to the button
               the person holding the printer is about to press. */}
-          <p className="text-[11px] mt-2 text-center leading-snug" style={{ color: "var(--color-ink-mute)" }}>
+          <p className="text-[12px] mt-2 text-center leading-snug" style={{ color: "var(--color-ink-mute)" }}>
             First time on this device: in the print dialog set <strong>Margins: None</strong> and
             untick <strong>Headers and footers</strong> to remove the date, web address and page number.
           </p>

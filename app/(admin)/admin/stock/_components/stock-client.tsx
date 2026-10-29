@@ -139,7 +139,7 @@ function StationPills({ ids, workstations }: { ids: string[]; workstations: Work
         .map((w) => (
           <span
             key={w.id}
-            className="text-[10px] px-1.5 py-0.5 rounded-md whitespace-nowrap"
+            className="text-[11px] px-1.5 py-0.5 rounded-md whitespace-nowrap"
             style={{
               background: `color-mix(in srgb, ${stationColor(w)} 10%, transparent)`,
               color: stationColor(w),
@@ -476,7 +476,7 @@ function DeductForm({
                   )}
                 </div>
                 {have !== undefined && (
-                  <p className="text-[11px] tabular-nums" style={{ color: left !== undefined && left < 0 ? "var(--color-warning)" : "var(--color-ink-mute)" }}>
+                  <p className="text-[12px] tabular-nums" style={{ color: left !== undefined && left < 0 ? "var(--color-warning)" : "var(--color-ink-mute)" }}>
                     {qty(have)} {p?.unit} in stock
                     {left !== undefined && <> → {qty(left)} {p?.unit} after</>}
                   </p>
@@ -892,7 +892,7 @@ function HistoryList({ productId, unit }: { productId: string; unit: string }) {
                   {m.qty > 0 ? "+" : "−"}{qty(Math.abs(m.qty))} {unit}
                 </p>
                 {/* Running balance — what was on hand after this movement. */}
-                <p className="text-[11px] tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
+                <p className="text-[12px] tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
                   {qty(m.balance)} {unit}
                 </p>
               </div>
@@ -1547,9 +1547,9 @@ export function StockClient({
                         </span>
                         <StatusPill status={p.status} />
                         {p.link_count === 0 ? (
-                          <span className="text-[10px]" style={{ color: "var(--color-warning)" }}>unlinked</span>
+                          <span className="text-[11px]" style={{ color: "var(--color-warning)" }}>unlinked</span>
                         ) : (
-                          <span className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>
+                          <span className="text-[11px]" style={{ color: "var(--color-ink-mute)" }}>
                             {p.link_count} menu item{p.link_count !== 1 ? "s" : ""}
                           </span>
                         )}
@@ -1573,7 +1573,7 @@ export function StockClient({
                     <td className="px-4 py-3 text-right tabular-nums font-medium" style={{ color: STOCK_STATUS_COLOR[p.status] }}>
                       {qty(p.closing)}
                       {p.added > 0 && (
-                        <span className="block text-[10px] font-normal" style={{ color: "var(--color-ink-mute)" }}>
+                        <span className="block text-[11px] font-normal" style={{ color: "var(--color-ink-mute)" }}>
                           incl. +{qty(p.added)} added
                         </span>
                       )}

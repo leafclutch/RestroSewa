@@ -113,7 +113,7 @@ export default async function MyRotaPage({
                   {dayHeader(d)}
                 </p>
                 {isToday && (
-                  <p className="text-[11px]" style={{ color: "var(--color-primary)" }}>Today</p>
+                  <p className="text-[12px]" style={{ color: "var(--color-primary)" }}>Today</p>
                 )}
               </div>
 
@@ -126,7 +126,7 @@ export default async function MyRotaPage({
                       <Clock size={13} style={{ color: KIND_TONE.shift }} />
                       {start}–{end}
                       {crossesMidnight(start, end) && (
-                        <span className="text-[11px]" style={{ color: "var(--color-ink-mute)" }}>(+1 day)</span>
+                        <span className="text-[12px]" style={{ color: "var(--color-ink-mute)" }}>(+1 day)</span>
                       )}
                     </p>
                     <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>

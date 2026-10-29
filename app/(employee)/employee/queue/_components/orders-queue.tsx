@@ -4,8 +4,9 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { getMyOrderQueue, updateOrderItemStatus } from "@/app/actions/pos";
 import type { QueueOrder, QueueOrderItem } from "@/app/actions/pos";
 import { useRealtime } from "@/lib/realtime/use-realtime";
-import { Clock, User } from "lucide-react";
+import { Armchair, BedDouble, Clock, ConciergeBell, ShoppingBag, User } from "lucide-react";
 import { useCurrency } from "@/components/currency-provider";
+import { SECTION_ACCENT } from "@/lib/section-colors";
 
 // Orders now arrive by push. This is a safety net for a dropped SSE stream only.
 const FALLBACK_POLL_MS = 60_000;
@@ -38,6 +39,14 @@ function timeSince(iso: string) {
   return `${h}h ${mins % 60}m ago`;
 }
 
+/** Where the order came from, in that section's own colour and icon — a table order reads
+ *  Tables-blue, a room order Rooms-teal, a walk-in Walk-ins-purple, same as the dashboard. */
+function originOf(o: QueueOrder) {
+  if (o.room_number) return { ...SECTION_ACCENT.rooms, Icon: BedDouble };
+  if (o.session_type === "walk_in") return { ...SECTION_ACCENT.walkins, Icon: ShoppingBag };
+  return { ...SECTION_ACCENT.tables, Icon: Armchair };
+}
+
 function locationLabel(o: QueueOrder) {
   if (o.table_number) return `Table ${o.table_number}`;
   if (o.room_number) return `Room ${o.room_number}`;
@@ -66,7 +75,12 @@ function ItemRow({
       <div className="flex-1 min-w-0">
         <p className="text-sm" style={{ color: "var(--color-ink)", opacity: item.item_status === "served" ? 0.5 : 1 }}>
           {item.quantity > 1 && (
-            <span className="mr-1 text-xs font-medium" style={{ color: "var(--color-ink-mute)" }}>×{item.quantity}</span>
+            <span
+              className="mr-1.5 inline-flex items-center justify-center min-w-[24px] h-5 px-1 rounded-md text-xs font-semibold tabular align-middle"
+              style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink)", border: "1px solid var(--color-hairline)" }}
+            >
+              ×{item.quantity}
+            </span>
           )}
           {item.item_name}
           {item.is_custom && (
@@ -124,37 +138,51 @@ function OrderCard({
 }) {
   const cur = useCurrency();
   const meta = STATUS_META[order.status];
+  const origin = originOf(order);
   return (
-    <div className="rounded-xl border overflow-hidden" style={{ background: "var(--color-canvas)", borderColor: meta.border }}>
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: "var(--color-hairline)", background: meta.bg }}>
+    <div
+      className="rounded-2xl border-[1.5px] overflow-hidden flex flex-col"
+      style={{ background: "var(--color-canvas)", borderColor: origin.color, boxShadow: "var(--shadow-card)" }}
+    >
+      {/* Header — tinted in the origin's colour, the solid icon tile says where at a glance. */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: "var(--color-hairline)", background: origin.soft }}>
+        <span
+          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: origin.fill, color: "#fff" }}
+        >
+          <origin.Icon size={19} strokeWidth={1.9} />
+        </span>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
+          <p className="text-base font-semibold truncate" style={{ color: "var(--color-ink)" }}>
             {locationLabel(order)}
           </p>
           <p className="text-xs flex items-center gap-2 flex-wrap" style={{ color: "var(--color-ink-mute)" }}>
-            <span className="inline-flex items-center gap-1"><Clock size={11} />{timeSince(order.created_at)}</span>
+            <span className="inline-flex items-center gap-1"><Clock size={12} />{timeSince(order.created_at)}</span>
             {order.customer_name && (
-              <span className="inline-flex items-center gap-1"><User size={11} />{order.customer_name}{order.customer_phone ? ` · ${order.customer_phone}` : ""}</span>
+              <span className="inline-flex items-center gap-1"><User size={12} />{order.customer_name}{order.customer_phone ? ` · ${order.customer_phone}` : ""}</span>
             )}
           </p>
         </div>
-        <span className="text-xs px-2 py-0.5 rounded-full font-medium shrink-0" style={{ color: meta.color, background: "var(--color-canvas)", border: `1px solid ${meta.border}` }}>
+        <span
+          className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full font-semibold shrink-0 border"
+          style={{ color: meta.color, background: meta.bg, borderColor: meta.color }}
+        >
+          <span aria-hidden className="w-1.5 h-1.5 rounded-full" style={{ background: meta.color }} />
           {meta.label}
         </span>
       </div>
 
       {/* Items */}
-      <div>
+      <div className="flex-1">
         {order.items.map((it) => (
           <ItemRow key={it.id} item={it} canManage={canManage} onUpdate={onUpdate} busy={busyItems.has(it.id)} />
         ))}
       </div>
 
       {/* Footer total */}
-      <div className="flex justify-between px-4 py-2 border-t" style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}>
+      <div className="flex items-center justify-between px-4 py-2.5 border-t" style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}>
         <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>{order.items.length} item{order.items.length !== 1 ? "s" : ""}</span>
-        <span className="text-xs font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>{cur.money(order.total)}</span>
+        <span className="text-sm font-semibold tabular" style={{ color: origin.color }}>{cur.money(order.total)}</span>
       </div>
     </div>
   );
@@ -242,10 +270,12 @@ export function OrdersQueue({
   if (orders.length === 0) {
     return (
       <div
-        className="rounded-xl border px-4 py-6 text-center"
-        style={{ borderStyle: "dashed", borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
+        className="rounded-xl border-2 px-4 py-8 text-center flex flex-col items-center gap-2"
+        style={{ borderStyle: "dashed", borderColor: "var(--color-hairline-input)", background: "var(--color-canvas-soft)" }}
       >
-        <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>No active orders.</p>
+        <ConciergeBell size={24} strokeWidth={1.6} style={{ color: "var(--color-ink-mute)" }} />
+        <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>No active orders.</p>
+        <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>New orders from tables, rooms and walk-ins appear here.</p>
       </div>
     );
   }
@@ -257,10 +287,17 @@ export function OrdersQueue({
     <div className="flex flex-col gap-6">
       {pendingOrders.length > 0 && (
         <section>
-          <p className="text-xs uppercase tracking-wide mb-2 font-medium" style={{ color: "var(--color-warning)", letterSpacing: "0.06em" }}>
+          <p className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: "var(--color-ink)" }}>
             Pending
+            <span
+              className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full text-xs font-semibold"
+              style={{ background: "var(--fill-amber)", color: "#fff" }}
+            >
+              {pendingOrders.length}
+            </span>
           </p>
-          <div className="flex flex-col gap-3">
+          {/* A grid of order cards, like the room cards — several orders side by side on a tablet. */}
+          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
             {pendingOrders.map((o) => (
               <OrderCard key={o.order_id} order={o} canManage={canManage} onUpdate={handleUpdate} busyItems={busyItems} />
             ))}

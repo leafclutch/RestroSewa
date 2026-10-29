@@ -64,24 +64,15 @@ export function SessionSplitView({
         className="hidden lg:flex gap-3 lg:fixed lg:bottom-0 z-10"
         style={{ top: NAV_HEIGHT, left: RAIL_BOX_WIDTH, right: 0, paddingTop: 12, paddingBottom: 12, paddingRight: 12 }}
       >
-        <div
-          className="w-[460px] shrink-0 overflow-y-auto thin-scrollbar rounded-xl border p-4 sm:p-5"
-          style={{
-            borderColor: "var(--color-hairline-input)",
-            background: "var(--color-canvas)",
-            boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-          }}
-        >
-          {children}
-        </div>
-
+        {/* Menu in the middle, the order on the right (rail · menu · order): the menu is
+            where the hands are while taking an order, the bill is glanced at beside it. */}
         {showMenu && (
           <div
             className="flex-1 min-w-0 flex flex-col rounded-xl border overflow-hidden"
             style={{
               borderColor: "var(--color-hairline-input)",
               background: "var(--color-canvas)",
-              boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+              boxShadow: "var(--shadow-card)",
             }}
           >
             <MenuBrowser
@@ -99,6 +90,17 @@ export function SessionSplitView({
             />
           </div>
         )}
+
+        <div
+          className={`${showMenu ? "w-[400px] xl:w-[420px] shrink-0" : "flex-1 max-w-xl"} overflow-y-auto thin-scrollbar rounded-xl border p-4 sm:p-5`}
+          style={{
+            borderColor: "var(--color-hairline-input)",
+            background: "var(--color-canvas)",
+            boxShadow: "var(--shadow-card)",
+          }}
+        >
+          {children}
+        </div>
       </div>
     </>
   );
