@@ -2,6 +2,8 @@
 
 import { useState, useActionState, useTransition, useMemo, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+// Type only (erased at build): the enum's runtime value is the plain string "full".
+import type { PrefetchKind } from "next/dist/client/components/router-reducer/router-reducer-types";
 import { submitOrder } from "@/app/actions/pos";
 import type { ActionResult, CartItem } from "@/app/actions/pos";
 import type { CategoryRow, MenuItemRow, VariantRow } from "@/app/actions/menu";
@@ -9,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FoodMark } from "@/components/ui/food-mark";
 import { assignCategoryHues, styleOf } from "@/lib/category-colors";
-import { Minus, Plus, Search, ShoppingBag, SquarePen, TriangleAlert, X } from "lucide-react";
+import { ListPlus, Minus, Plus, Search, ShoppingBag, SquarePen, TriangleAlert, X } from "lucide-react";
 import { useCurrency } from "@/components/currency-provider";
 
 // A staff-typed off-menu line held in the cart before submit. `price` is a string while
@@ -54,6 +56,7 @@ export function MenuBrowser({
   workstations = [],
   onOrderPlaced,
   returnHref,
+  desktopReturnHref,
 }: {
   sessionId: string;
   categories: CategoryRow[];
@@ -79,6 +82,13 @@ export function MenuBrowser({
    * through the table session route's layout before that page redirects.
    */
   returnHref?: string;
+  /**
+   * The phone-only "Add items" page passes where to go when the window is DESKTOP width
+   * (1024px+): there the room / table screen already has this menu built in beside the
+   * order, so staying on a menu-only page is a dead end — someone who opened it on a
+   * phone-sized window and then widened it was stuck here. The split panes leave it out.
+   */
+  desktopReturnHref?: string;
 }) {
   const cur = useCurrency();
   const router = useRouter();
@@ -216,6 +226,29 @@ export function MenuBrowser({
   const customTotal = customLines.reduce((a, l) => a + (parseFloat(l.price) || 0) * l.quantity, 0);
   const totalCount = cartCount + customCount;
   const grandTotal = cartTotal + customTotal;
+
+  // Desktop width on the phone-only page: back to the full screen, whose menu is right
+  // there. Only while nothing is waiting in the cart — leaving would throw an untaken
+  // order away; once it is placed (or emptied) this fires and takes them back.
+  // Warmed once, up front: the room / table screen is fetched in the background while
+  // this page is open, so a widened window (or the Back button) switches over instantly
+  // instead of sitting on a loading screen.
+  useEffect(() => {
+    // FULL, not the default: on a dynamic page the default fetches only the loading
+    // shell, which is exactly the loading screen this is here to skip.
+    if (desktopReturnHref) router.prefetch(desktopReturnHref, { kind: "full" as PrefetchKind });
+  }, [desktopReturnHref, router]);
+
+  useEffect(() => {
+    if (!desktopReturnHref) return;
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const check = () => {
+      if (mq.matches && totalCount === 0) router.replace(desktopReturnHref, { scroll: false });
+    };
+    check();
+    mq.addEventListener("change", check);
+    return () => mq.removeEventListener("change", check);
+  }, [desktopReturnHref, totalCount, router]);
   const stationName = (id: string | null) => workstations.find((w) => w.id === id)?.name ?? null;
 
   const cPriceNum = parseFloat(cPrice);
@@ -265,8 +298,15 @@ export function MenuBrowser({
     );
   }
 
-  // One menu card. Shared by a single category's grid and by "All", which lays the
-  // same cards out under each category's heading.
+  // One menu card: the name at the top left, the price at the bottom left, and a small
+  // round + at the bottom right. The WHOLE card is the tap target — tap anywhere to add
+  // one (an item with sizes opens its picker instead); the + just marks it. Once the dish
+  // is in the order the + becomes a small − count + stepper. The card wears its
+  // CATEGORY's colour (a faint tint, a border and the price in the hue) so dishes group by
+  // colour; the buttons wear the screen's own colour. The hue is only ever a tint behind
+  // text in the hue, never white on a solid hue: the --cat-* tokens are foreground colours
+  // that turn light in dark mode. Every card is the same height — the name is held to two
+  // lines — so a long name can't make one card taller than the rest of its row.
   const renderItem = (item: MenuItemRow) => {
     const qty = qtyOfItem(item.id);
     const opts = variantsOf.get(item.id) ?? [];
@@ -276,94 +316,139 @@ export function MenuBrowser({
     const from = hasVariants
       ? Math.min(...opts.map((v) => Number(v.price)))
       : Number(item.price);
-
-    // Each card wears its category's hue on a 3px left edge, so a dish is tied to its
-    // category at a glance — the cue that matters most in search results, where items
-    // from different categories sit side by side. A card in the cart deepens to the full
-    // category border + tint; the Add/±/quantity controls stay brand purple (the "this is
-    // the action" colour, consistent app-wide).
     const cat = catStyleOf(item.category_id);
+    const inCart = qty > 0;
+    // The stepper's own buttons must not ALSO trigger the card's add.
+    const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+
     return (
+      // A div with button semantics, not a <button>: the − / + inside it are buttons of
+      // their own, and a button may not contain another.
       <div
         key={item.id}
-        className="rounded-xl border p-3.5 flex flex-col gap-2"
-        // All four sides as LONGHANDS. Mixing the `borderColor` shorthand with a
-        // `borderLeftColor` longhand made React warn on every re-render — i.e. on
-        // every tap of + or − while taking an order — which buried anything real
-        // in the console. Same appearance, no warning.
+        role="button"
+        tabIndex={0}
+        aria-label={hasVariants ? `Choose a size of ${item.name}` : `Add ${item.name}`}
+        onClick={() => handleAdd(item)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleAdd(item);
+          }
+        }}
+        className="rounded-xl border-[1.5px] p-2.5 @lg:p-3 flex flex-col gap-2 cursor-pointer select-none transition-[transform,background-color,border-color] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2"
         style={{
-          background: qty > 0 ? cat.soft : "var(--color-canvas)",
-          borderTopColor: qty > 0 ? cat.color : "var(--color-hairline)",
-          borderRightColor: qty > 0 ? cat.color : "var(--color-hairline)",
-          borderBottomColor: qty > 0 ? cat.color : "var(--color-hairline)",
-          borderLeftColor: cat.color,
-          borderLeftWidth: 3,
+          background: `color-mix(in srgb, ${cat.color} ${inCart ? 12 : 6}%, var(--color-canvas))`,
+          borderColor: inCart ? cat.color : `color-mix(in srgb, ${cat.color} 35%, var(--color-hairline))`,
+          boxShadow: inCart ? `0 0 0 1px ${cat.color}, var(--shadow-card)` : "var(--shadow-card)",
+          outlineColor: "var(--color-primary)",
         }}
       >
-        <div className="flex items-start gap-1.5">
-          <span className="mt-0.5">
-            <FoodMark type={item.food_type} size={12} />
-          </span>
-          <p className="text-sm leading-tight flex-1" style={{ color: "var(--color-ink)" }}>
-            {item.name}
-          </p>
-        </div>
-        {/* A guest may ask the waiter, not read the QR menu — so the note is here too. */}
-        {item.allergy_info && (
-          <p className="text-xs leading-snug flex items-start gap-1" style={{ color: "var(--color-ruby)" }}>
-            <TriangleAlert size={11} className="mt-0.5 shrink-0" />
-            <span>{item.allergy_info}</span>
-          </p>
-        )}
-        <p className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>
-          {hasVariants && <span className="text-xs">from </span>}{cur.money(from)}
-        </p>
-
-        <div className="flex items-center gap-2 mt-auto">
-          {/* An item with variants always routes through the picker, so
-              it keeps a single "Add" even when some are already in the
-              cart — a bare +/- would have no variant to apply to. */}
-          {qty === 0 || hasVariants ? (
-            <button
-              type="button"
-              onClick={() => handleAdd(item)}
-              className="flex-1 h-9 rounded-lg text-sm flex items-center justify-center gap-1"
-              style={{ background: "var(--color-primary)", color: "#fff" }}
+        <div className="min-w-0">
+          <div className="flex items-start gap-1.5">
+            <span className="mt-[4px] shrink-0">
+              <FoodMark type={item.food_type} size={11} />
+            </span>
+            {/* Two lines' worth of height is always reserved, so every card in a row matches. */}
+            <p
+              title={item.name}
+              className="flex-1 min-h-[2.75em] text-[15px] font-semibold leading-[1.375] line-clamp-2"
+              style={{ color: "var(--color-ink)" }}
             >
-              <Plus size={15} /> {hasVariants ? (qty > 0 ? `Add · ${qty}` : "Choose") : "Add"}
-            </button>
+              {item.name}
+            </p>
+            {/* A guest may ask the waiter, not read the QR menu — the note is on hover. */}
+            {item.allergy_info && (
+              <span className="mt-[3px] shrink-0" title={item.allergy_info} style={{ color: "var(--color-ruby)" }}>
+                <TriangleAlert size={13} />
+              </span>
+            )}
+          </div>
+          {/* Mixed results while searching: say which category each one is from. */}
+          {searching && (
+            <p className="text-xs font-semibold truncate mt-0.5" style={{ color: cat.color }}>
+              {categories.find((c) => c.id === item.category_id)?.name}
+            </p>
+          )}
+        </div>
+
+        {/* Price on the left; the small + (or − count +) on the right. */}
+        {/* Wraps on a narrow card (a phone's two columns): the − count + drops under the
+            price, right-aligned, rather than squeezing the price to nothing. */}
+        <div className="mt-auto flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+          <p className="text-sm tabular whitespace-nowrap" style={{ color: cat.color }}>
+            {hasVariants && <span style={{ color: "var(--color-ink-mute)" }}>from </span>}
+            <span className="font-bold">{cur.money(from)}</span>
+          </p>
+
+          {/* An item with sizes always routes through the picker, so it keeps the single
+              mark even when some are already in the order — a bare −/+ would have no size
+              to apply to; the count sits beside it instead. */}
+          {qty === 0 || hasVariants ? (
+            <span className="flex items-center gap-1 shrink-0">
+              {hasVariants && qty > 0 && (
+                <span className="text-sm font-bold tabular" style={{ color: "var(--color-ink)" }}>{qty}</span>
+              )}
+              <span
+                aria-hidden
+                title={hasVariants ? "Choose a size" : "Add"}
+                className="w-8 h-8 rounded-full flex items-center justify-center"
+                style={{ background: "var(--color-primary)", color: "#fff" }}
+              >
+                {hasVariants ? <ListPlus size={16} strokeWidth={2.3} /> : <Plus size={17} strokeWidth={2.6} />}
+              </span>
+            </span>
           ) : (
-            <div className="flex items-center gap-1.5 flex-1">
+            <span className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
                 aria-label={`One less ${item.name}`}
-                onClick={() => adjust(keyOf(item.id, null), -1)}
-                className="w-9 h-9 rounded-lg flex items-center justify-center border"
-                style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline-input)" }}
+                onClick={(e) => { stop(e); adjust(keyOf(item.id, null), -1); }}
+                onKeyDown={stop}
+                // Solid red: taking one back is the "undo" of the card, and has to be found
+                // at a glance beside the teal +, never tapped by mistake for it.
+                className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:brightness-110"
+                style={{ background: "#dc2626", color: "#fff", boxShadow: "0 1px 3px rgba(220,38,38,0.35)" }}
               >
-                <Minus size={15} style={{ color: "var(--color-ink)" }} />
+                <Minus size={15} strokeWidth={2.8} />
               </button>
-              <span
-                className="flex-1 text-center text-base font-medium tabular"
-                style={{ color: "var(--color-ink)" }}
-              >
+              <span key={qty} className="tally-pop min-w-6 text-center text-base font-bold tabular" style={{ color: "var(--color-ink)" }}>
                 {qty}
               </span>
               <button
                 type="button"
                 aria-label={`One more ${item.name}`}
-                onClick={() => adjust(keyOf(item.id, null), 1)}
-                className="w-9 h-9 rounded-lg flex items-center justify-center"
-                style={{ background: "var(--color-primary)" }}
+                onClick={(e) => { stop(e); adjust(keyOf(item.id, null), 1); }}
+                onKeyDown={stop}
+                className="w-8 h-8 rounded-full flex items-center justify-center"
+                style={{ background: "var(--color-primary)", color: "#fff" }}
               >
-                <Plus size={15} style={{ color: "#fff" }} />
+                <Plus size={15} strokeWidth={2.6} />
               </button>
-            </div>
+            </span>
           )}
         </div>
       </div>
     );
   };
+
+  // Cards flow to the pane's width, not the screen's: this menu lives in a phone page,
+  // a split-view pane and the room screen's column, each a different width. Every card
+  // is at least 160px; as many fit as the space allows.
+  // A narrow pane (a phone) always gets two even columns — at 160px minimum a 360px
+  // phone fitted only ONE card per row; from 512px of pane up, cards flow by width.
+  const GRID = "grid gap-2.5 grid-cols-2 @lg:gap-3 @lg:grid-cols-[repeat(auto-fill,minmax(160px,1fr))]";
+
+  // The category list, as data, for both the wide rail and the narrow chip row.
+  const tabs = [
+    { id: ALL_CATEGORY_ID, name: "All", count: availableItems.length, color: "var(--color-primary)" },
+    ...categories.map((c) => ({
+      id: c.id,
+      name: c.name,
+      count: availableItems.filter((i) => i.category_id === c.id).length,
+      color: catStyleOf(c.id).color,
+    })),
+  ];
 
   return (
     // `flex-1 min-h-0`, NOT `h-full`. This is a flex child sitting BELOW the page's
@@ -372,21 +457,24 @@ export function MenuBrowser({
     // order button on it — off the bottom of the screen. `min-h-0` is the other half:
     // a flex item defaults to `min-height:auto`, so without it a long menu refuses to
     // shrink and shoves the footer off again.
-    <div className="flex flex-col flex-1 min-h-0">
-      {/* Search — the fastest path to a dish. Non-empty query hides the tabs and searches every
-          category at once. */}
-      <div className={`px-4 pt-3 pb-2.5 shrink-0 ${searching ? "border-b" : ""}`} style={{ borderColor: "var(--color-hairline)" }}>
-        <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--color-ink-mute)" }} />
+    //
+    // `@container`: the layout below answers to THIS pane's width (rail vs chips),
+    // because the same menu is a phone page, a split-view pane and a room column.
+    <div className="@container flex flex-col flex-1 min-h-0">
+      {/* Search — the fastest path to a dish — with "Custom item" beside it. A non-empty
+          query sets the categories aside and searches every one of them at once. */}
+      <div className="px-4 pt-3.5 pb-3 shrink-0 flex items-center gap-2 border-b" style={{ borderColor: "var(--color-hairline)" }}>
+        <div className="relative flex-1 min-w-0">
+          <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--color-ink-mute)" }} />
           <input
             type="text"
             inputMode="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search menu…"
-            aria-label="Search menu"
-            className="w-full h-11 rounded-xl border pl-9 pr-9 text-base"
-            style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+            placeholder="Search the menu"
+            aria-label="Search the menu"
+            className="w-full h-11 rounded-xl border pl-10 pr-9 text-base"
+            style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas-soft)", color: "var(--color-ink)" }}
           />
           {query && (
             <button
@@ -401,118 +489,156 @@ export function MenuBrowser({
           )}
         </div>
 
-        {/* Off-menu line — only for staff with `manage_custom_items`. */}
+        {/* Off-menu line — only for staff with `manage_custom_items`. The label folds
+            away on a narrow pane; the icon never does. */}
         {canAddCustom && (
           <button
             type="button"
             onClick={() => setCustomOpen(true)}
-            className="mt-2 inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border"
-            style={{ borderColor: "var(--color-hairline-input)", color: "var(--color-primary)", background: "var(--color-canvas)" }}
+            title="Add a custom item"
+            className="shrink-0 h-11 inline-flex items-center gap-1.5 text-sm font-semibold px-3 rounded-xl border-[1.5px]"
+            style={{ borderColor: "var(--color-primary)", color: "var(--color-primary)", background: "var(--color-canvas)" }}
           >
-            <SquarePen size={14} /> Add custom item
+            <SquarePen size={16} />
+            <span className="hidden @md:inline">Custom item</span>
           </button>
         )}
       </div>
 
-      {/* Category tabs — EVERY tab wears its category colour by default (tinted chip + coloured
-          text), so the whole row is colourful at rest and a category is recognisable before it's
-          read. Tapping one makes it *harder*, not merely colourful: a solid colour border, a ring
-          and bold weight. Tints/text, never a white-on-fill pill (--cat-* are foreground tokens
-          that invert behind white text in dark). Hidden while searching. */}
+      {/* Narrow pane: the categories as one scrolling row of chips. Each chip wears its
+          category's hue as a tint behind text in the hue; the chosen one gets a ring and
+          bold. Tints and coloured text only — never white on a category fill (--cat-* are
+          foreground tokens that invert in dark). Hidden while searching.
+          Any number of categories: the row scrolls sideways — by swipe, by the slim
+          scrollbar, or by an ordinary mouse wheel (turned sideways here) — and the chosen
+          chip is brought into view. A long name is cut with "…" at a sane width, in full
+          on hover, so one category can't take the whole row. */}
       {!searching && (
         <div
-          className="flex gap-1.5 overflow-x-auto px-4 py-2.5 border-b shrink-0"
+          className="@2xl:hidden flex gap-2 overflow-x-auto thin-scrollbar px-4 py-3 border-b shrink-0"
           style={{ borderColor: "var(--color-hairline)" }}
+          onWheel={(e) => {
+            if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY;
+          }}
         >
-          {/* "All" leads, in the app's primary colour — it isn't a category, so it
-              doesn't take one of the category hues. Same outline → filled states. */}
-          {(() => {
-            const active = activeCategoryId === ALL_CATEGORY_ID;
+          {tabs.map((t) => {
+            const active = activeCategoryId === t.id;
             return (
               <button
+                key={t.id}
                 type="button"
-                onClick={() => setActiveCategoryId(ALL_CATEGORY_ID)}
-                className="px-3.5 py-2 rounded-lg text-sm whitespace-nowrap shrink-0 border transition-all"
+                onClick={(e) => {
+                  setActiveCategoryId(t.id);
+                  e.currentTarget.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+                }}
+                aria-pressed={active}
+                title={t.name}
+                className="h-11 max-w-[13rem] px-4 rounded-full text-sm whitespace-nowrap truncate shrink-0 border-[1.5px] transition-colors"
                 style={{
-                  background: active ? "color-mix(in srgb, var(--color-primary) 18%, var(--color-canvas))" : "transparent",
-                  color: "var(--color-primary)",
-                  borderColor: "var(--color-primary)",
-                  boxShadow: active ? "inset 0 0 0 1px var(--color-primary)" : "none",
-                  fontWeight: active ? 600 : 400,
+                  background: `color-mix(in srgb, ${t.color} ${active ? 26 : 14}%, var(--color-canvas))`,
+                  color: t.color,
+                  borderColor: active ? t.color : `color-mix(in srgb, ${t.color} 45%, transparent)`,
+                  boxShadow: active ? `inset 0 0 0 1px ${t.color}` : "none",
+                  fontWeight: active ? 700 : 600,
                 }}
               >
-                All
-              </button>
-            );
-          })()}
-          {categories.map((c) => {
-            const active = activeCategoryId === c.id;
-            const cat = catStyleOf(c.id);
-            return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => setActiveCategoryId(c.id)}
-                className="px-3.5 py-2 rounded-lg text-sm whitespace-nowrap shrink-0 border transition-all"
-                style={{
-                  // Every tab is a coloured OUTLINE chip at rest — the border+text carry the colour
-                  // and read cleanly on the near-white light canvas (a bare soft tint had no edge
-                  // and vanished into the background). Tapping FILLS it with a stronger mid-tint of
-                  // the same hue + bold weight + a doubled border, so selected is clearly harder in
-                  // both themes. Mid-tint via color-mix, never a white-on-fill pill (--cat-* invert
-                  // behind white text in dark).
-                  background: active ? `color-mix(in srgb, ${cat.color} 18%, var(--color-canvas))` : "transparent",
-                  color: cat.color,
-                  borderColor: cat.color,
-                  boxShadow: active ? `inset 0 0 0 1px ${cat.color}` : "none",
-                  fontWeight: active ? 600 : 400,
-                }}
-              >
-                {c.name}
+                {t.name}
               </button>
             );
           })}
         </div>
       )}
 
-      {/* Items grid */}
-      {/* The ONLY scrolling region. `min-h-0` again, for the same reason as the root:
-          this is what makes the menu scroll instead of growing the column. */}
-      <div className="flex-1 min-h-0 overflow-y-auto menu-scrollbar p-4">
-        {visibleItems.length === 0 ? (
-          <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
-            {searching ? `No items match “${query.trim()}”.` : "No items in this category."}
-          </p>
-        ) : showingAll ? (
-          /* "All" — every dish, still grouped under its category heading in the admin's
-             order, the same way the customer site's "All" reads. Empty categories drop
-             out rather than render a bare heading. */
-          <div className="flex flex-col gap-5">
-            {groupedItems.map(({ category, items: catItems }) => {
-              const cat = catStyleOf(category.id);
+      <div className="flex flex-1 min-h-0">
+        {/* Wide pane: the categories as a rail down the left, like the section keys on a
+            till — no sideways scrolling. Each sits on a tint of its hue; the chosen one
+            deepens and gets a ring. Hidden while searching. Any number of categories: the
+            rail scrolls on its own, apart from the dishes. A long name wraps onto as many
+            lines as it needs — each key is `shrink-0`, so a long list can't squash the
+            keys and clip their names. */}
+        {!searching && (
+          <nav
+            aria-label="Menu categories"
+            className="hidden @2xl:flex flex-col gap-1 w-48 @5xl:w-56 shrink-0 min-h-0 overflow-y-auto thin-scrollbar p-2.5 border-r"
+            style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
+          >
+            {tabs.map((t) => {
+              const active = activeCategoryId === t.id;
               return (
-                <section key={category.id}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <h3 className="text-sm font-semibold" style={{ color: cat.color }}>
-                      {category.name}
-                    </h3>
-                    <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                      {catItems.length}
-                    </span>
-                    <span className="flex-1 h-px ml-1" style={{ background: "var(--color-hairline)" }} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                    {catItems.map(renderItem)}
-                  </div>
-                </section>
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setActiveCategoryId(t.id)}
+                  aria-pressed={active}
+                  className="w-full shrink-0 flex items-center gap-2.5 min-h-11 px-3 py-2 rounded-lg text-left text-sm transition-colors"
+                  style={{
+                    background: `color-mix(in srgb, ${t.color} ${active ? 24 : 10}%, var(--color-canvas))`,
+                    color: t.color,
+                    fontWeight: active ? 700 : 600,
+                    boxShadow: active ? `inset 0 0 0 1.5px ${t.color}` : "none",
+                  }}
+                >
+                  <span className="flex-1 min-w-0 leading-snug break-words">{t.name}</span>
+                  <span className="text-xs font-semibold tabular shrink-0 px-1.5 rounded-md" style={{ color: t.color, background: `color-mix(in srgb, ${t.color} 16%, var(--color-canvas))` }}>
+                    {t.count}
+                  </span>
+                </button>
               );
             })}
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-            {visibleItems.map(renderItem)}
-          </div>
+          </nav>
         )}
+
+        {/* Items — the ONLY scrolling region. `min-h-0` again, for the same reason as the
+            root: this is what makes the menu scroll instead of growing the column. */}
+        <div className="flex-1 min-w-0 min-h-0 overflow-y-auto menu-scrollbar px-4 pt-4 pb-5" style={{ background: "var(--color-canvas-soft)" }}>
+          {visibleItems.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-14 text-center">
+              <Search size={26} style={{ color: "var(--color-ink-mute)", opacity: 0.6 }} />
+              <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
+                {searching
+                  ? `Nothing matches “${query.trim()}”. Check the spelling, or add it as a custom item.`
+                  : "Nothing available in this category right now."}
+              </p>
+            </div>
+          ) : showingAll ? (
+            /* "All" — every dish, still grouped under its category heading in the admin's
+               order, the same way the customer site's "All" reads. Empty categories drop
+               out rather than render a bare heading. */
+            <div className="flex flex-col gap-7">
+              {groupedItems.map(({ category, items: catItems }) => {
+                const cat = catStyleOf(category.id);
+                return (
+                  <section key={category.id}>
+                    <div
+                      className="flex items-center gap-2.5 mb-3 px-3 py-2 rounded-lg border"
+                      style={{
+                        background: `color-mix(in srgb, ${cat.color} 12%, var(--color-canvas))`,
+                        borderColor: `color-mix(in srgb, ${cat.color} 35%, transparent)`,
+                      }}
+                    >
+                      <h3 className="text-lg font-bold leading-snug flex-1 min-w-0 break-words" style={{ color: cat.color }}>
+                        {category.name}
+                      </h3>
+                      <span
+                        className="text-xs font-bold tabular px-2 py-0.5 rounded-full shrink-0 whitespace-nowrap"
+                        style={{ background: "var(--color-canvas)", color: cat.color }}
+                      >
+                        {catItems.length} {catItems.length === 1 ? "item" : "items"}
+                      </span>
+                    </div>
+                    <div className={GRID}>
+                      {catItems.map(renderItem)}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          ) : (
+            <div className={GRID}>
+              {visibleItems.map(renderItem)}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Variant picker */}
@@ -572,10 +698,11 @@ export function MenuBrowser({
                           type="button"
                           aria-label={`One less ${v.name}`}
                           onClick={() => adjust(keyOf(picking.id, v.id), -1)}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center"
-                          style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink)" }}
+                          // Solid red, like the − on the menu cards.
+                          className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:brightness-110"
+                          style={{ background: "#dc2626", color: "#fff", boxShadow: "0 1px 3px rgba(220,38,38,0.35)" }}
                         >
-                          <Minus size={14} />
+                          <Minus size={15} strokeWidth={2.8} />
                         </button>
                         <span
                           className="w-6 text-center text-sm font-medium tabular"
@@ -587,7 +714,7 @@ export function MenuBrowser({
                           type="button"
                           aria-label={`One more ${v.name}`}
                           onClick={() => adjust(keyOf(picking.id, v.id), 1)}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-white"
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-white"
                           style={{ background: "var(--color-primary)" }}
                         >
                           <Plus size={14} />
@@ -701,7 +828,7 @@ export function MenuBrowser({
         >
           {/* Each variant is its own line, so a staff member can see that the
               order is 1 Small and 2 Large before they send it. */}
-          <div className="flex flex-col gap-0.5 max-h-24 overflow-y-auto">
+          <div className="flex flex-col gap-1 max-h-28 overflow-y-auto thin-scrollbar">
             {cartEntries.map(([key, qty]) => {
               const { itemId, variantId } = parseKey(key);
               return (
@@ -754,22 +881,42 @@ export function MenuBrowser({
             ))}
           </div>
 
+          {state?.error && (
+            <p className="text-xs" style={{ color: "var(--color-ruby)" }}>{state.error}</p>
+          )}
+          {/* Count + total on the left, one big Place order on the right. */}
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <ShoppingBag size={16} style={{ color: "var(--color-primary)" }} />
-              <span className="text-sm" style={{ color: "var(--color-ink)" }}>
-                {totalCount} item{totalCount !== 1 ? "s" : ""}
+            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+              <span
+                className="relative w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                style={{ background: "color-mix(in srgb, var(--color-primary) 12%, var(--color-canvas))", color: "var(--color-primary)" }}
+              >
+                <ShoppingBag size={18} />
+                <span
+                  className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 rounded-full text-[11px] font-bold flex items-center justify-center tabular"
+                  style={{ background: "var(--color-primary)", color: "#fff" }}
+                >
+                  {totalCount}
+                </span>
               </span>
-              <span className="text-sm tabular" style={{ color: "var(--color-ink-mute)" }}>
-                · {cur.money(grandTotal)}
-              </span>
+              <div className="min-w-0">
+                <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                  {totalCount} item{totalCount !== 1 ? "s" : ""} in order
+                </p>
+                <p className="text-lg font-bold tabular leading-tight" style={{ color: "var(--color-ink)" }}>
+                  {cur.money(grandTotal)}
+                </p>
+              </div>
             </div>
-            {state?.error && (
-              <p className="text-xs" style={{ color: "var(--color-ruby)" }}>{state.error}</p>
-            )}
-            <Button type="button" variant="primary" disabled={pending} onClick={handlePlaceOrder}>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={handlePlaceOrder}
+              className="h-12 px-5 rounded-xl text-base font-semibold inline-flex items-center gap-2 transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50"
+              style={{ background: "var(--color-primary)", color: "#fff" }}
+            >
               {pending ? "Placing…" : "Place order"}
-            </Button>
+            </button>
           </div>
         </div>
       )}

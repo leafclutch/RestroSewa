@@ -135,7 +135,13 @@ export default async function AddItemsPage({
   const { categories: activeCategories, items: allItems, variants, canAddCustom, workstations } = menuData;
 
   return (
-    <div className="flex flex-col" style={{ height: SCREEN_UNDER_NAV }}>
+    // A room stay's menu wears the room screen's theme (rooms teal, `.room-surface` in
+    // globals.css), the same as the menu built into the room screen on a desktop — not
+    // the app's default colour. A table's stays as it is.
+    <div
+      className={`flex flex-col ${session.room_stay_id ? "room-surface" : ""}`}
+      style={{ height: SCREEN_UNDER_NAV }}
+    >
       {/* Header */}
       <div
         className="flex items-center gap-3 px-4 py-3 border-b shrink-0"
@@ -165,6 +171,9 @@ export default async function AddItemsPage({
         canAddCustom={canAddCustom}
         workstations={workstations}
         returnHref={backHref}
+        // This page is the PHONE way in. At desktop width the room / table screen has
+        // the same menu beside the order, so a widened window goes back there.
+        desktopReturnHref={backHref}
       />
     </div>
   );

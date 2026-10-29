@@ -343,6 +343,49 @@ html:not(.dark) .admin-surface {
   --color-hairline-input: #7389aa;
 }
 
+/* ── Menu key count ───────────────────────────────────────────────────────────
+ * The count badge on a staff menu key pops when it changes — the one motion on the menu,
+ * and only ever in answer to a tap, so the cashier sees the tap land. Off for anyone who
+ * has asked for less motion.
+ */
+@keyframes tally-pop {
+  0% { transform: scale(0.6); }
+  60% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+.tally-pop { animation: tally-pop 220ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .tally-pop { animation: none; }
+}
+
+/* ── Room screen surface ───────────────────────────────────────────────────────
+ * A guest's room screen (folio + its menu) runs in the ROOMS TEAL (the dashboard tile's colour) rather than the app's indigo:
+ * every primary-coloured control inside it — the menu's category chips and Add buttons,
+ * Back, the checkout pills — turns teal, the same way `.customer-surface` re-themes the
+ * QR menu. `--room-fill` is the solid that white text sits on; `--room-ink` is the teal
+ * used as text/borders, lightened in dark so it still reads on the dark canvas.
+ */
+.room-surface {
+  --color-primary: #0f766e;
+  --color-primary-deep: #115e59;
+  --color-primary-press: #134e4a;
+  --color-primary-soft: #14b8a6;
+  --color-primary-subdued: #99f6e4;
+  /* The dashboard's own Rooms colours, so the room screen matches its tile. */
+  --room-fill: var(--fill-teal);
+  --room-ink: var(--sec-rooms);
+}
+
+.dark .room-surface {
+  --color-primary: #0d9488;
+  --color-primary-deep: #0f766e;
+  --color-primary-press: #115e59;
+  --color-primary-soft: #2dd4bf;
+  --color-primary-subdued: #134e4a;
+  --room-fill: var(--fill-teal);
+  --room-ink: var(--sec-rooms);
+}
+
 /* ── Customer QR menu surface ──────────────────────────────────────────────────
  * The customer site has its own TEAL accent (not the app's indigo) and a set of hardcoded
  * status colours. Both live here as tokens so the site can have a real dark theme (it follows the
