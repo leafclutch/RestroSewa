@@ -205,9 +205,21 @@ export async function loginWithPin(
     if (!legacy.error && legacy.data.user) {
       error = null;
       // Best-effort: a failure here just means the fallback is used again next time.
-      await createAdminClient()
+      const { error: migrateErr } = await createAdminClient()
         .auth.admin.updateUserById(legacy.data.user.id, { password: pinToAuthPassword(pin) })
-        .catch(() => {});
+        .catch((e: unknown) => ({ error: e }));
+      // Changing a password makes Supabase Auth sign out EVERY session of that account —
+      // including the one this very login just opened. Left like that, the person reached
+      // the dashboard with a revoked session and was bounced straight back to the sign-in:
+      // "I have to log in twice". So once the password has moved, sign in again with it,
+      // which hands back a fresh session the change can no longer revoke.
+      if (!migrateErr) {
+        const fresh = await supabase.auth.signInWithPassword({
+          email: syntheticEmail,
+          password: pinToAuthPassword(pin),
+        });
+        if (fresh.error) error = fresh.error;
+      }
     }
   }
 
