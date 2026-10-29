@@ -255,7 +255,7 @@ function HistoryCard({ history: initialHistory }: { history: ReportDeliveryRow[]
                         {failed ? "Failed" : "Delivered"}
                       </span>
                       {failed && r.error && (
-                        <span className="block text-[11px] mt-1 max-w-[220px] truncate" title={r.error} style={{ color: "var(--color-ink-mute)" }}>
+                        <span className="block text-[12px] mt-1 max-w-[220px] truncate" title={r.error} style={{ color: "var(--color-ink-mute)" }}>
                           {r.error}
                         </span>
                       )}

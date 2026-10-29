@@ -37,7 +37,7 @@ export default async function EmployeePayrollPage() {
   return (
     <div className={`p-4 sm:p-5 mx-auto ${payoutMode === "advanced" ? "max-w-6xl" : "max-w-3xl"}`}>
       <Link
-        href="/employee/dashboard"
+        href="/employee/dashboard?focus=payroll"
         className="inline-flex items-center gap-1 text-sm mb-4"
         style={{ color: "var(--color-ink-mute)" }}
       >

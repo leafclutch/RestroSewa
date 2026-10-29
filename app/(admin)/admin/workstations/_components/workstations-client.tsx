@@ -290,7 +290,7 @@ function ReceiptPrinterSettings({ paperWidth }: { paperWidth: PaperWidth }) {
             />
             <span className="min-w-0">
               <span className="block text-sm" style={{ color: "var(--color-ink)" }}>{o.label}</span>
-              <span className="block text-[11px]" style={{ color: "var(--color-ink-mute)" }}>{o.hint}</span>
+              <span className="block text-[12px]" style={{ color: "var(--color-ink-mute)" }}>{o.hint}</span>
             </span>
           </label>
         ))}

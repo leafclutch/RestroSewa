@@ -214,7 +214,7 @@ function Pill({
 }) {
   return (
     <span
-      className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg leading-none"
+      className="inline-flex items-center gap-1 text-[12px] font-medium px-2 py-1 rounded-lg leading-none"
       style={{ color, background: bg }}
     >
       {Icon && <Icon size={11} />}
@@ -1090,7 +1090,7 @@ function ItemCard({
         </h3>
         <span className="shrink-0 text-[15px] sm:text-base tabular" style={{ color: "var(--color-ink)", fontWeight: 600 }}>
           {hasVariants && (
-            <span className="text-[11px] font-normal mr-0.5" style={{ color: "var(--color-ink-mute)" }}>
+            <span className="text-[12px] font-normal mr-0.5" style={{ color: "var(--color-ink-mute)" }}>
               from
             </span>
           )}
@@ -1314,12 +1314,12 @@ function BottomNav({
       <span className="relative">
         <span className={pulse ? "rs-ring" : ""} style={{ display: "inline-flex" }}><Icon size={21} /></span>
         {!!badge && badge > 0 && (
-          <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold text-white flex items-center justify-center" style={{ background: "var(--color-ruby)" }}>
+          <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full text-[11px] font-bold text-white flex items-center justify-center" style={{ background: "var(--color-ruby)" }}>
             {badge > 9 ? "9+" : badge}
           </span>
         )}
       </span>
-      <span className="text-[10px] font-medium">{label}</span>
+      <span className="text-[11px] font-medium">{label}</span>
     </button>
   );
 
@@ -2005,7 +2005,7 @@ export function CustomerMenu({
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold leading-tight truncate" style={{ color: "var(--color-ink)" }}>{restaurantName}</p>
             {locationLabel && (
-              <span className="inline-flex items-center gap-1 text-[11px] mt-0.5 px-1.5 py-0.5 rounded-md" style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink-mute)" }}>
+              <span className="inline-flex items-center gap-1 text-[12px] mt-0.5 px-1.5 py-0.5 rounded-md" style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink-mute)" }}>
                 <MapPin size={10} /> {locationLabel}
               </span>
             )}
@@ -2031,7 +2031,7 @@ export function CustomerMenu({
           >
             <Bell size={18} className={alertCount > 0 ? "rs-ring" : ""} />
             {alertCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold text-white flex items-center justify-center" style={{ background: "var(--color-ruby)" }}>
+              <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full text-[11px] font-bold text-white flex items-center justify-center" style={{ background: "var(--color-ruby)" }}>
                 {alertCount > 9 ? "9+" : alertCount}
               </span>
             )}
@@ -2127,7 +2127,7 @@ export function CustomerMenu({
                     variant="plain"
                   />
                   <div className="flex-1 min-w-0">
-                    <p className="text-[11px] uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.6)", letterSpacing: "0.14em" }}>Welcome</p>
+                    <p className="text-[12px] uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.6)", letterSpacing: "0.14em" }}>Welcome</p>
                     <h1 className="text-xl sm:text-2xl leading-tight truncate" style={{ color: "#fff", fontWeight: 600, letterSpacing: "-0.5px" }}>{restaurantName}</h1>
                   </div>
                   {locationLabel && (
@@ -2192,7 +2192,7 @@ export function CustomerMenu({
                   >
                     <CatIcon size={15} />
                     {c.name}
-                    <span className="text-[11px] px-1.5 rounded-full" style={{ background: active ? "color-mix(in srgb, var(--color-canvas) 22%, transparent)" : "var(--color-canvas-soft)", color: active ? "var(--color-canvas)" : "var(--color-ink-mute)" }}>
+                    <span className="text-[12px] px-1.5 rounded-full" style={{ background: active ? "color-mix(in srgb, var(--color-canvas) 22%, transparent)" : "var(--color-canvas-soft)", color: active ? "var(--color-canvas)" : "var(--color-ink-mute)" }}>
                       {count}
                     </span>
                   </button>
@@ -2302,7 +2302,7 @@ export function CustomerMenu({
           >
             <span className="relative w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "rgba(255,255,255,0.18)" }}>
               <ShoppingBag size={18} />
-              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center" style={{ background: "#fff", color: "var(--color-primary)" }}>{cartCount}</span>
+              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full text-[11px] font-bold flex items-center justify-center" style={{ background: "#fff", color: "var(--color-primary)" }}>{cartCount}</span>
             </span>
             <span className="flex-1 text-left">
               <span className="block text-xs" style={{ color: "rgba(255,255,255,0.8)" }}>{cartCount} item{cartCount !== 1 ? "s" : ""} in cart</span>

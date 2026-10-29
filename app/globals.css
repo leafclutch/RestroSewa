@@ -16,6 +16,25 @@
  * ones that ever flipped). We keep literals here, so no `inline`.
  */
 @theme {
+  /* One typeface everywhere: Tailwind's `font-sans` resolves to the app font too. */
+  --font-sans: var(--font-app), system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* The whole type scale sits about 1px above Tailwind's defaults: card descriptions,
+     labels and body text were too small to read at arm's length on a counter tablet.
+     Only text scales — spacing and layout keep their size. */
+  --text-xs: 0.84375rem;        /* 13.5px (Tailwind: 12) */
+  --text-xs--line-height: 1.2rem;
+  --text-sm: 0.9375rem;         /* 15px (14) */
+  --text-sm--line-height: 1.375rem;
+  --text-base: 1.0625rem;       /* 17px (16) */
+  --text-base--line-height: 1.6rem;
+  --text-lg: 1.1875rem;         /* 19px (18) */
+  --text-lg--line-height: 1.75rem;
+  --text-xl: 1.3125rem;         /* 21px (20) */
+  --text-xl--line-height: 1.85rem;
+  --text-2xl: 1.5625rem;        /* 25px (24) */
+  --text-2xl--line-height: 2.05rem;
+
   /* ── Colors ──────────────────────────────────────────────── */
   --color-primary: #533afd;
   --color-primary-deep: #4434d4;
@@ -28,11 +47,13 @@
      secondary inks rather than from --color-ink (already ~14:1 on white).
      --color-ink-mute was #64748d = 4.74:1 — technically AA, but only just, and it's used for
      nearly every label and subtitle on the dashboard. Now ~6.7:1: still clearly secondary,
-     but readable at 12-14px on a bright screen in a bright room. */
+     but readable at 12-14px on a bright screen in a bright room.
+     2026-10-26: one more step darker (#4d5b74 → #3e4a60, ~8.6:1) — descriptions in the
+     cards still read as faint and soft; this keeps them secondary but crisp. */
   --color-ink: #0d253d;
   --color-ink-secondary: #1e2f45;
-  --color-ink-mute: #4d5b74;
-  --color-ink-mute-2: #4d5b74;
+  --color-ink-mute: #3e4a60;
+  --color-ink-mute-2: #3e4a60;
 
   --color-canvas: #ffffff;
   --color-canvas-soft: #f6f9fc;
@@ -41,9 +62,11 @@
   /* Every card, section, divider and grid line in light mode is one of these. #e3e8ee sat so
      close to the white canvas that surfaces had no edge — the single biggest reason light felt
      flat next to dark, where the borders read clearly against the dark canvas. Stepped down
-     enough to define a card without drawing a hard box around it. */
-  --color-hairline: #d5dde7;
-  --color-hairline-input: #8fa6c2;
+     enough to define a card without drawing a hard box around it.
+     2026-10-26: a further step (#d5dde7 → #bfcbdb) — card edges, outer and inner, still
+     didn't read clearly enough on a counter tablet. */
+  --color-hairline: #bfcbdb;
+  --color-hairline-input: #8199b8;
 
   --color-ruby: #ea2261;
   --color-magenta: #f96bee;
@@ -90,6 +113,12 @@
 }
 
 :root {
+  /* Card elevation. `-card` for inner cards (tiles, stat boxes, room cards), `-card-lg`
+     for the big outer section cards. Tinted with the ink's navy rather than pure black,
+     so the shadow reads as depth instead of grime. */
+  --shadow-card: 0 1px 3px rgba(13, 37, 61, 0.1), 0 4px 12px rgba(13, 37, 61, 0.1);
+  --shadow-card-lg: 0 2px 4px rgba(13, 37, 61, 0.08), 0 10px 28px rgba(13, 37, 61, 0.13);
+
   /* Declare the page's colour scheme so a dark-mode phone's browser does NOT algorithmically
    * "force-dark" it. `only light` opts the light surfaces (customer menu, marketing, and the app
    * whenever `.dark` is off) OUT of Chrome/Android Auto-Dark — which otherwise re-tinted the
@@ -123,11 +152,18 @@
    */
   --fill-amber: #b45309;
   --fill-green: #15803d;
+  --fill-sales: #15913f; /* Sales' own lighter green (vs Menu's emerald), deep enough for white text (~4:1) */
   --fill-blue: #1d4ed8;
   --fill-indigo: #4338ca;
   --fill-purple: #7e22ce;
   --fill-teal: #0f766e;
   --fill-red: #b91c1c;
+  --fill-sky: #0369a1;
+  --fill-pink: #be185d;
+  --fill-lime: #4d7c0f;
+  --fill-fuchsia: #a21caf;
+  --fill-orange: #c2410c;
+  --fill-slate: #334155;
 
   /* ── Dashboard accents ────────────────────────────────────────────────────────
    * Deliberately NOT in @theme. These are applied dynamically — the section a card
@@ -145,10 +181,17 @@
   --sec-tables: #1d4ed8;         --sec-tables-soft: #eff6ff;
   --sec-walkins: #7e22ce;        --sec-walkins-soft: #faf5ff;
   --sec-rooms: #0f766e;          --sec-rooms-soft: #f0fdfa;
-  --sec-sales: #15803d;          --sec-sales-soft: #f0fdf4;
+  --sec-sales: #16a34a;          --sec-sales-soft: #dcfce7;
   --sec-credits: #4338ca;        --sec-credits-soft: #eef2ff;
   --sec-menu: #047857;           --sec-menu-soft: #ecfdf5;
   --sec-notifications: #b91c1c;  --sec-notifications-soft: #fef2f2;
+  /* The back-office sections, each on a hue no other section uses. */
+  --sec-stock: #0369a1;          --sec-stock-soft: #f0f9ff;
+  --sec-purchases: #be185d;      --sec-purchases-soft: #fdf2f8;
+  --sec-vendors: #4d7c0f;        --sec-vendors-soft: #f7fee7;
+  --sec-itemsales: #a21caf;      --sec-itemsales-soft: #fdf4ff;
+  --sec-expenses: #c2410c;       --sec-expenses-soft: #fff1e7;
+  --sec-payroll: #334155;        --sec-payroll-soft: #f1f5f9;
 
   /* ── Status ───────────────────────────────────────────────────────────────────
    * ONE meaning per colour, shared by tables, walk-ins and rooms: a cashier scanning 55
@@ -183,6 +226,10 @@
    * browser won't try to re-tint an already-dark page). Only the dashboards ever get `.dark`. */
   color-scheme: dark;
 
+  /* Shadows need far more opacity to register on a dark canvas. */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-card-lg: 0 2px 4px rgba(0, 0, 0, 0.5), 0 10px 28px rgba(0, 0, 0, 0.45);
+
   /* ── Dark Mode Variable Overrides ────────────────────────── */
   --color-primary: #818cf8;
   --color-primary-deep: #6366f1;
@@ -197,15 +244,16 @@
 
   --color-ink: #f3f4f6;
   --color-ink-secondary: #e5e7eb;
-  --color-ink-mute: #9ca3af;
-  --color-ink-mute-2: #9ca3af;
+  /* Brighter than the old #9ca3af, matching the light theme's crisper secondary text. */
+  --color-ink-mute: #b4bcc8;
+  --color-ink-mute-2: #b4bcc8;
 
   --color-canvas: #0f111a;
   --color-canvas-soft: #07080d;
   --color-canvas-cream: #1e293b;
 
-  --color-hairline: #1e2230;
-  --color-hairline-input: #2e344a;
+  --color-hairline: #2b3144;
+  --color-hairline-input: #3b4360;
 
   --color-ruby: #f43f5e;
   --color-magenta: #fb7185;
@@ -242,10 +290,16 @@
   --sec-tables: #60a5fa;         --sec-tables-soft: rgba(96, 165, 250, 0.14);
   --sec-walkins: #c084fc;        --sec-walkins-soft: rgba(192, 132, 252, 0.14);
   --sec-rooms: #2dd4bf;          --sec-rooms-soft: rgba(45, 212, 191, 0.14);
-  --sec-sales: #4ade80;          --sec-sales-soft: rgba(74, 222, 128, 0.14);
+  --sec-sales: #86efac;          --sec-sales-soft: rgba(134, 239, 172, 0.16);
   --sec-credits: #818cf8;        --sec-credits-soft: rgba(129, 140, 248, 0.14);
   --sec-menu: #34d399;           --sec-menu-soft: rgba(52, 211, 153, 0.14);
   --sec-notifications: #f87171;  --sec-notifications-soft: rgba(248, 113, 113, 0.14);
+  --sec-stock: #38bdf8;          --sec-stock-soft: rgba(56, 189, 248, 0.14);
+  --sec-purchases: #f472b6;      --sec-purchases-soft: rgba(244, 114, 182, 0.14);
+  --sec-vendors: #a3e635;        --sec-vendors-soft: rgba(163, 230, 53, 0.14);
+  --sec-itemsales: #e879f9;      --sec-itemsales-soft: rgba(232, 121, 249, 0.14);
+  --sec-expenses: #fb923c;       --sec-expenses-soft: rgba(251, 146, 60, 0.14);
+  --sec-payroll: #cbd5e1;        --sec-payroll-soft: rgba(203, 213, 225, 0.14);
 
   --st-available: #4ade80;    --st-available-soft: rgba(74, 222, 128, 0.14);
   --st-occupied: #60a5fa;     --st-occupied-soft: rgba(96, 165, 250, 0.14);
@@ -285,8 +339,104 @@
  * dark mode. Dark keeps the global hairline (which already reads well on the dark canvas).
  */
 html:not(.dark) .admin-surface {
-  --color-hairline: #cbd5e3;
-  --color-hairline-input: #7d93b2;
+  --color-hairline: #b6c3d5;
+  --color-hairline-input: #7389aa;
+}
+
+/* ── Dashboard: landing on a section ─────────────────────────────────────────
+ * When the dashboard is about to jump to a section (a reload with a saved section, or a
+ * ?focus link), an inline script marks <html data-dash-restoring> before the first paint.
+ * The sections stay hidden behind a skeleton while they are positioned, then fade in
+ * already in place — instead of painting at the top on Orders and visibly jumping. The
+ * loader itself only appears if that takes a moment (same delay as .rs-wait-in). The
+ * section bar above stays visible throughout.
+ */
+.dash-restore-loader { display: none; }
+html[data-dash-restoring] [data-dash-body] { visibility: hidden; opacity: 0; }
+/* The skeleton fills the screen under the sticky section bar (top bar 56px + section bar
+   ~88px), on the page's own background, while the real sections are positioned behind it. */
+html[data-dash-restoring] .dash-restore-loader {
+  display: block;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: calc(56px + 88px + env(safe-area-inset-top, 0px));
+  z-index: 20;
+  overflow: hidden;
+  background: var(--color-canvas);
+  pointer-events: none;
+  animation: rs-wait-in 140ms ease-out 120ms backwards;
+}
+/* Fades in when the mark is lifted (a transition, so it plays at the reveal, not on mount). */
+[data-dash-body] { transition: opacity 220ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-dash-restoring] .dash-restore-loader { animation: none; }
+  [data-dash-body] { transition: none; }
+}
+
+/* ── Menu key count ───────────────────────────────────────────────────────────
+ * The count badge on a staff menu key pops when it changes — the one motion on the menu,
+ * and only ever in answer to a tap, so the cashier sees the tap land. Off for anyone who
+ * has asked for less motion.
+ */
+@keyframes tally-pop {
+  0% { transform: scale(0.6); }
+  60% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+.tally-pop { animation: tally-pop 220ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .tally-pop { animation: none; }
+}
+
+/* ── Room screen surface ───────────────────────────────────────────────────────
+ * A guest's room screen (folio + its menu) runs in the ROOMS TEAL (the dashboard tile's colour) rather than the app's indigo:
+ * every primary-coloured control inside it — the menu's category chips and Add buttons,
+ * Back, the checkout pills — turns teal, the same way `.customer-surface` re-themes the
+ * QR menu. `--room-fill` is the solid that white text sits on; `--room-ink` is the teal
+ * used as text/borders, lightened in dark so it still reads on the dark canvas.
+ */
+.room-surface {
+  --color-primary: #0f766e;
+  --color-primary-deep: #115e59;
+  --color-primary-press: #134e4a;
+  --color-primary-soft: #14b8a6;
+  --color-primary-subdued: #99f6e4;
+  /* The dashboard's own Rooms colours, so the room screen matches its tile. */
+  --room-fill: var(--fill-teal);
+  --room-ink: var(--sec-rooms);
+}
+
+.dark .room-surface {
+  --color-primary: #0d9488;
+  --color-primary-deep: #0f766e;
+  --color-primary-press: #115e59;
+  --color-primary-soft: #2dd4bf;
+  --color-primary-subdued: #134e4a;
+  --room-fill: var(--fill-teal);
+  --room-ink: var(--sec-rooms);
+}
+
+/* ── Walk-in screen surface ────────────────────────────────────────────────────
+ * A walk-in's order screen (order panel + menu, and its phone add-items page) runs in the
+ * WALK-INS PURPLE — the dashboard tile's colour — rather than the app's indigo, the same
+ * way `.room-surface` turns a room teal. Solid purple deep enough for white text.
+ */
+.walkin-surface {
+  --color-primary: #7e22ce;
+  --color-primary-deep: #6b21a8;
+  --color-primary-press: #581c87;
+  --color-primary-soft: #a855f7;
+  --color-primary-subdued: #e9d5ff;
+}
+
+.dark .walkin-surface {
+  --color-primary: #9333ea;
+  --color-primary-deep: #7e22ce;
+  --color-primary-press: #6b21a8;
+  --color-primary-soft: #c084fc;
+  --color-primary-subdued: #3b0764;
 }
 
 /* ── Customer QR menu surface ──────────────────────────────────────────────────
@@ -334,19 +484,73 @@ html:not(.dark) .admin-surface {
 
 /* ── Base ────────────────────────────────────────────────────── */
 body {
-  font-family: var(--font-inter, "Inter", "SF Pro Display", system-ui, -apple-system, sans-serif);
+  font-family: var(--font-app, "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif);
   color: var(--color-ink);
   background: var(--color-canvas);
-  font-weight: 300;
-  font-feature-settings: "ss01";
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* 450 — between the usual steps, which the variable font draws as a real cut. 300 read
+     dull, 400 still a touch soft on Windows; 450 renders crisper without looking bold.
+     No `-webkit-font-smoothing: antialiased`: on macOS it thins every glyph, the opposite
+     of what's wanted here (it has no effect on Windows either way). */
+  font-weight: 450;
+  /* Text with no size class follows the scale too (17px rather than the browser's 16). */
+  font-size: var(--text-base);
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
+}
+
+/* Small text heavier still (550) with a hair of tracking, so 11–13px captions stay sharp
+   and their letters don't run together. In the base layer on purpose: an explicit
+   font-normal / font-semibold utility on the same element still wins. */
+@layer base {
+  .text-xs,
+  .text-\[11px\],
+  .text-\[12px\] {
+    font-weight: 550;
+    letter-spacing: 0.01em;
+  }
+}
+
+/* Inner cards inside a dashboard section (Sales/Credits stat boxes, list panels, Stock
+   tiles …) — every bordered, rounded box gets the card shadow. Base layer, so a component
+   that sets its own shadow (inline or a shadow-* utility) keeps it. Inputs, buttons and
+   selects are excluded: they are controls, not cards. */
+@layer base {
+  [data-section-body] :is(div, section, li, a, article).border:is(.rounded-lg, .rounded-xl, .rounded-2xl) {
+    box-shadow: var(--shadow-card);
+  }
+}
+
+/* Hover feedback on everything clickable — buttons, button-like links (table / walk-in /
+   room tiles, Open room), filter chips, payment-method choices. A light wash is LAYERED
+   over the element's own colour as a background-image, so every button keeps its colour
+   and simply lights up. `!important` because most of these set their colour inline with
+   the `background` shorthand, which would otherwise reset the image. Mouse/trackpad only:
+   on touch a hover state sticks after the tap. Disabled controls get nothing, and nor
+   does anything whose own background is already a gradient (the customer menu's buttons
+   and toasts) — the wash would replace that gradient instead of sitting on it. Card
+   open/close toggles (`aria-expanded`) are left out too: a section header is a fold, not
+   a button, and the wash read as a stray highlight across it. */
+:root { --hover-wash: color-mix(in srgb, var(--color-primary) 7%, transparent); }
+.dark { --hover-wash: rgba(255, 255, 255, 0.07); }
+
+@media (hover: hover) {
+  :where(
+    button:not(:disabled),
+    a[href][class*="rounded"],
+    [role="button"]:not([aria-disabled="true"]),
+    label:has(> input[type="radio"]:not(:disabled)),
+    label:has(> input[type="checkbox"]:not(:disabled)),
+    summary
+  ):not([style*="gradient"]):not([aria-expanded]):hover {
+    background-image: linear-gradient(var(--hover-wash), var(--hover-wash)) !important;
+  }
 }
 
 /* ── Typography utilities ────────────────────────────────────── */
+/* Equal-width figures, so amounts line up in columns and a ticking total doesn't jitter. */
 .tabular {
-  font-feature-settings: "tnum";
-  letter-spacing: -0.42px;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.2px;
 }
 
 /* ═══ Native feel ═════════════════════════════════════════════════════════════
@@ -463,6 +667,22 @@ header {
 
 @media (prefers-reduced-motion: reduce) {
   .rs-page {
+    animation: none;
+  }
+}
+
+/* A loading skeleton that only appears if the wait is real: invisible for the first
+   ~220ms, then a soft fade. A quick navigation finishes inside that window, so it never
+   flashes a loader; a slow one gets a clear "loading" screen. */
+@keyframes rs-wait-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.rs-wait-in {
+  animation: rs-wait-in 180ms ease-out 220ms backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rs-wait-in {
     animation: none;
   }
 }

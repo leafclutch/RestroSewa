@@ -61,7 +61,7 @@ function Card({
         </p>
         <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)" }}>{label}</p>
         {hint && (
-          <p className="text-[11px] mt-0.5" style={{ color: hintTone ?? "var(--color-ink-mute)" }}>
+          <p className="text-[12px] mt-0.5" style={{ color: hintTone ?? "var(--color-ink-mute)" }}>
             {hint}
           </p>
         )}

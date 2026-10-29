@@ -1,0 +1,24 @@
+-- =============================================================
+-- EXPLICIT service_role GRANTS FOR THE SALARY-CYCLE TABLES
+--
+-- From 2026-10-30 hosted Supabase stops granting Data API access to new tables
+-- in "public" automatically — including tables recreated by replaying these
+-- migrations into a new project or branch. Any table PostgREST must reach needs
+-- an explicit GRANT in the migration that creates it.
+--
+-- Every table-creating migration since 20260801000000_service_role_grants.sql
+-- does that, except 20260824000000_salary_cycles.sql: salary_cycles and
+-- staff_attendance_days only ever got their privileges from the
+-- `alter default privileges` in that earlier file. That still works, but it is
+-- the one place the schema leans on default privileges instead of saying it
+-- outright, so it is closed here rather than left to be the surprise on the
+-- next fresh replay.
+--
+-- service_role only, same as everything else — anon and authenticated hold
+-- nothing by design (20260801000001_lock_down_anon_access.sql).
+--
+-- Idempotent, and a no-op against every existing database: these are the
+-- privileges the two tables already have.
+-- =============================================================
+
+grant select, insert, update, delete on table salary_cycles, staff_attendance_days to service_role;

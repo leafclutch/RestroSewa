@@ -2,12 +2,46 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { logout } from "@/app/actions/auth";
-import { CalendarDays, Home, LogOut } from "lucide-react";
+import { CalendarDays, Clock, Home, LogOut } from "lucide-react";
 import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import { NotificationBell } from "./notification-bell";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { DASH_SECTION_KEY, DASH_RESTORING_ATTR } from "./dashboard-restore";
+
+/**
+ * Today's date and a ticking clock, for the top bar. Read on the client only (empty on
+ * the server, filled after mount): the server's clock and zone are not the till's, and
+ * rendering it there would mismatch on hydration. Hidden on phones, where the bar has
+ * no room to spare.
+ */
+function NavClock() {
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+    const t = setInterval(() => setNow(new Date()), 15_000);
+    return () => clearInterval(t);
+  }, []);
+  if (!now) return <span className="hidden md:block w-[230px]" aria-hidden />;
+
+  return (
+    <span
+      className="hidden md:inline-flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm whitespace-nowrap"
+      style={{ background: "rgba(255,255,255,0.08)", color: "#fff" }}
+    >
+      <span className="inline-flex items-center gap-1.5">
+        <CalendarDays size={15} strokeWidth={1.7} style={{ color: "rgba(255,255,255,0.7)" }} />
+        {now.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
+      </span>
+      <span aria-hidden className="w-px h-4" style={{ background: "rgba(255,255,255,0.25)" }} />
+      <span className="inline-flex items-center gap-1.5 tabular font-semibold">
+        <Clock size={15} strokeWidth={1.7} style={{ color: "rgba(255,255,255,0.7)" }} />
+        {now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
+      </span>
+    </span>
+  );
+}
 
 // The staff top bar. STICKY: it stays pinned while the dashboard scrolls, so
 // Notifications and Logout are always one tap away — which matters when a waiter
@@ -34,6 +68,22 @@ export function StaffNav({
   const atHome = pathname === "/employee/dashboard";
   const atRota = pathname === "/employee/rota";
 
+  // Home is a fresh start: forget the section the dashboard remembers for a reload, and
+  // land at the TOP. Already on the dashboard, a link to the same page would do nothing,
+  // so it scrolls up itself (and drops any ?focus / ?session left in the address).
+  const goHome = (e: React.MouseEvent) => {
+    // Ctrl/Cmd/Shift/middle-click opens the dashboard in another tab or window: leave this
+    // tab's remembered section alone and let the browser do that.
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    try { window.sessionStorage.removeItem(DASH_SECTION_KEY); } catch { /* storage blocked */ }
+    document.documentElement.removeAttribute(DASH_RESTORING_ATTR);
+    if (atHome) {
+      e.preventDefault();
+      if (window.location.search) window.history.replaceState(null, "", "/employee/dashboard");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
   return (
     <header
       // z-40 keeps it above the dashboard's own sticky section-nav (z-30), which
@@ -54,7 +104,7 @@ export function StaffNav({
       {/* Brand / user — tapping it returns to the dashboard. Staff work for the
           RESTAURANT, so its logo leads here; HRestroSewa is the platform underneath
           and doesn't compete for the space. */}
-      <Link href="/employee/dashboard" className="flex-1 min-w-0 flex items-center gap-2.5">
+      <Link href="/employee/dashboard" onClick={goHome} className="flex-1 min-w-0 flex items-center gap-2.5">
         <RestaurantLogo
           name={restaurantName}
           logoUrl={restaurantLogo}
@@ -74,10 +124,13 @@ export function StaffNav({
         </span>
       </Link>
 
+      <NavClock />
+
       {/* Home — one tap back to the dashboard from a session, queue or menu
           screen. The label collapses on narrow phones; the icon never does. */}
       <Link
         href="/employee/dashboard"
+        onClick={goHome}
         aria-label="Home"
         aria-current={atHome ? "page" : undefined}
         className="flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-sm transition-colors"

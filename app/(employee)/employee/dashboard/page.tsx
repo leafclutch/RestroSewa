@@ -142,7 +142,7 @@ export default async function EmployeeDashboardPage({
   // discount and a PIN only to be refused on submit.
   const canDiscount = hasPermission(restaurantUser, PERMISSIONS.APPLY_DISCOUNTS);
 
-  const SCROLLABLE: SectionKey[] = ["orders", "tables", "walkins", "rooms", "sales", "credits", "menu", "stock", "purchases", "vendors", "itemSales"];
+  const SCROLLABLE: SectionKey[] = ["orders", "tables", "walkins", "rooms", "sales", "credits", "menu", "stock", "purchases", "vendors", "itemSales", "expenses", "payroll"];
   const focusSection: SectionKey | null = openCreditId
     ? "credits"
     : highlightSessionId

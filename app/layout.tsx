@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import { Manrope } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import { RegisterServiceWorker } from "@/components/pwa/register-sw";
@@ -7,13 +7,15 @@ import { APPLE_SPLASH } from "@/lib/pwa/apple-splash";
 import { cookies } from "next/headers";
 import { ThemeSync } from "@/components/ui/theme-sync";
 
-// 500/600 are loaded because 54 files use font-medium/font-semibold. Without the real cuts the
-// browser synthesises them — smeared, slightly-too-wide letterforms that read as blurry on the
-// dense dashboard tables. Body stays 300 (see globals.css); these are for emphasis only.
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600"],
-  variable: "--font-inter",
+// The one typeface for the whole app — staff, admin, the customer menu. Manrope: open, sharp
+// letterforms that stay legible at small sizes on a counter tablet, and real tabular figures
+// (see `.tabular`) so prices line up in columns. Loaded as the VARIABLE font, so every weight
+// from 200 to 800 is a real cut, never a browser-synthesised bold. `latin-ext` covers the
+// currency signs and accented guest names. Printed tickets keep their monospace on purpose:
+// thermal receipts align columns by character.
+const appFont = Manrope({
+  subsets: ["latin", "latin-ext"],
+  variable: "--font-app",
   display: "swap",
 });
 
@@ -80,7 +82,7 @@ export default async function RootLayout({
   const theme = cookieStore.get("theme")?.value || "light";
 
   return (
-    <html lang="en" className={`${inter.variable} ${theme}`} suppressHydrationWarning>
+    <html lang="en" className={`${appFont.variable} ${theme}`} suppressHydrationWarning>
       <head>
         {/*
           Declared by hand, NOT via `metadata.manifest`, for one attribute:

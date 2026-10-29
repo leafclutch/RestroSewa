@@ -117,7 +117,7 @@ export function MenuPhotos({ images }: { images: MenuImage[] }) {
         }}
       >
         <BookOpen size={16} />
-        <span className="text-[11px] font-semibold tracking-wide" style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}>
+        <span className="text-[12px] font-semibold tracking-wide" style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}>
           Menu card
         </span>
       </button>

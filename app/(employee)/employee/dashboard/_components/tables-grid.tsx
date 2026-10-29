@@ -8,10 +8,11 @@ import { openTableSession, markTableClean } from "@/app/actions/pos";
 import type { TableStatus } from "@/app/actions/pos";
 import { STATUS_STYLE, cleaningFor } from "@/lib/status-colors";
 import { SECTION_ACCENT } from "@/lib/section-colors";
-import { CountPill } from "@/components/ui/count-pill";
+import { usePublishSectionBadges } from "./section-badges";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { TransferModal } from "@/app/(employee)/employee/_components/transfer-modal";
-import { Sparkles, LayoutGrid, MoveRight } from "lucide-react";
+import { Sparkles, LayoutGrid, MoveRight, Armchair } from "lucide-react";
+import { TILE, TILE_SHADOW, TILE_MIN_HEIGHT, TILE_FREE_STYLE, TileTop, TileStatus } from "./floor-tile";
 
 const CARD =
   "flex flex-col items-center justify-center rounded-xl border w-full p-2 text-center transition-all";
@@ -95,26 +96,30 @@ const TableCard = memo(function TableCard({
           // touch fires ~100ms before the click lands and is plenty.
           prefetch={false}
           onPointerDown={() => router.prefetch(`/employee/session/${table.session_id}`)}
-          className={`${card} hover:brightness-110`}
+          className={compact ? `${card} hover:brightness-110` : `${TILE} hover:brightness-110`}
           // Constant blue FILL, not s.color: the status token flips to a light blue in dark that
           // the white number can't sit on. This keeps the in-use card a solid readable blue in both.
           // `isCurrent` adds an OUTER ring via box-shadow rather than changing the border
           // itself — the border stays the fill color (so the tile's own shape stays crisp),
           // the ring sits a couple pixels outside it as a "you are here" mark.
           style={{
-            minHeight,
+            minHeight: compact ? minHeight : TILE_MIN_HEIGHT,
             background: "var(--fill-blue)",
             borderColor: "var(--fill-blue)",
-            boxShadow: isCurrent ? "0 0 0 3px var(--color-canvas), 0 0 0 5px var(--color-primary)" : undefined,
+            boxShadow: isCurrent ? "0 0 0 3px var(--color-canvas), 0 0 0 5px var(--color-primary)" : compact ? undefined : TILE_SHADOW,
           }}
         >
-          <span className={NUMBER} style={{ ...numberStyle, color: "#fff" }}>
-            {table.number}
-          </span>
-          {!compact && (
-            <span className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.9)" }}>
-              Active
+          {compact ? (
+            <span className={NUMBER} style={{ ...numberStyle, color: "#fff" }}>
+              {table.number}
             </span>
+          ) : (
+            <>
+              {/* No arrow of its own: an active table's arrow IS the Shift button below,
+                  laid over this slot, so it only shows when the table can be moved. */}
+              <TileTop icon={Armchair} number={table.number} fg="#fff" reserveRight={canShift} />
+              <TileStatus label="Active" fg="rgba(255,255,255,0.92)" dot="#4ade80" />
+            </>
           )}
         </Link>
         {canShift && !compact && (
@@ -123,10 +128,11 @@ const TableCard = memo(function TableCard({
             aria-label={`Shift table ${table.number}`}
             title="Shift to another table"
             onClick={() => onShift(table)}
-            className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center transition-colors"
+            // Sits exactly over TileTop's empty arrow slot (tile border 1.5px + padding).
+            className="absolute top-[9.5px] right-[9.5px] w-6 h-6 rounded-full flex items-center justify-center transition-colors"
             style={{ background: "rgba(255,255,255,0.22)", color: "#fff" }}
           >
-            <MoveRight size={12} />
+            <MoveRight size={13} strokeWidth={2.2} />
           </button>
         )}
       </div>
@@ -139,6 +145,39 @@ const TableCard = memo(function TableCard({
   if (table.state === "cleaning") {
     const s = STATUS_STYLE.cleaning;
     const waited = cleaningFor(table.cleaning_since);
+    if (!compact) {
+      // Dashboard: the SAME tile as a free or busy table — same TILE box, same height,
+      // icon · number on top, one short line under it — so a table going to cleaning
+      // doesn't make its row taller than the rest. The line under the number is the
+      // action itself: a short "Clean" button (how long it has waited is on hover).
+      return (
+        <div
+          title={`Table ${table.number} — needs cleaning${waited ? ` (${waited})` : ""}`}
+          className={TILE}
+          style={{
+            minHeight: TILE_MIN_HEIGHT,
+            background: s.soft,
+            borderColor: s.color,
+            boxShadow: TILE_SHADOW,
+            opacity: cleaning ? 0.5 : 1,
+          }}
+        >
+          <TileTop icon={Armchair} number={table.number} fg={s.color} />
+          <button
+            type="button"
+            disabled={cleaning}
+            onClick={() => onClean(table.id)}
+            className="self-center max-w-full min-w-0 inline-flex items-center justify-center gap-1 whitespace-nowrap overflow-hidden text-[12px] font-semibold leading-none px-2 py-[3px] rounded-md border transition-colors"
+            style={{ borderColor: s.color, color: s.color, background: "var(--color-canvas)" }}
+          >
+            <Sparkles size={11} className="shrink-0" />
+            {/* One short word, so it always fits inside the tile; how long it has
+                waited is on hover (the tile's title). */}
+            {cleaning ? "…" : "Clean"}
+          </button>
+        </div>
+      );
+    }
     return (
       <div
         title={`Table ${table.number} — needs cleaning`}
@@ -154,14 +193,14 @@ const TableCard = memo(function TableCard({
           onClick={() => onClean(table.id)}
           // nowrap + 11px: at text-xs the label wrapped to two lines inside a 92px card and
           // squashed the number above it. It has to stay one line at the narrowest column.
-          className="mt-1 inline-flex items-center gap-1 whitespace-nowrap text-[11px] px-1.5 py-0.5 rounded-md border transition-colors"
+          className="mt-1 inline-flex items-center gap-1 whitespace-nowrap text-[12px] px-1.5 py-0.5 rounded-md border transition-colors"
           style={{ borderColor: s.color, color: s.color, background: "transparent" }}
         >
           <Sparkles size={10} className="shrink-0" />
           {cleaning ? "…" : compact ? "Clean" : "Mark clean"}
         </button>
         {waited && !compact && (
-          <span className="text-[11px] mt-0.5" style={{ color: s.color, opacity: 0.85 }}>
+          <span className="text-[12px] mt-0.5" style={{ color: s.color, opacity: 0.85 }}>
             {waited}
           </span>
         )}
@@ -174,6 +213,27 @@ const TableCard = memo(function TableCard({
   // attention. A free table stays in the Tables blue (just lighter); activating it deepens the
   // same blue to the solid fill above. Only the INTENSITY changes — the colour family holds.
   const a = SECTION_ACCENT.tables;
+  if (!compact) {
+    // Dashboard: free tiles go neutral grey so the solid blue busy ones are what the eye
+    // finds; the Tables blue survives in the dot.
+    return (
+      <button
+        type="button"
+        disabled={opening}
+        title={`Table ${table.number} — free`}
+        onClick={() => onOpen(table.id)}
+        className={`${TILE} hover:brightness-95`}
+        style={{
+          minHeight: TILE_MIN_HEIGHT,
+          ...TILE_FREE_STYLE,
+          opacity: opening ? 0.5 : 1,
+        }}
+      >
+        <TileTop icon={Armchair} number={table.number} fg="var(--color-ink)" />
+        <TileStatus label="Free" fg="var(--color-ink-mute)" dot={a.color} />
+      </button>
+    );
+  }
   return (
     <button
       type="button"
@@ -320,6 +380,18 @@ export function TablesGrid({
   const dirty = tables.filter((t) => t.state === "cleaning").length;
   const free = tables.filter((t) => t.state === "available").length;
 
+  // The counts live in the section card's header now (see section-badges.tsx).
+  usePublishSectionBadges(
+    compact || tables.length === 0
+      ? null
+      : [
+          { n: tables.length, label: "total", variant: "soft" },
+          { n: active, label: "active", variant: "solid", fill: "var(--fill-blue)" },
+          { n: free, label: "free", variant: "muted" },
+          ...(dirty > 0 ? [{ n: dirty, label: "cleaning", variant: "soft" as const, tone: STATUS_STYLE.cleaning }] : []),
+        ]
+  );
+
   return (
     <div>
       {compact ? (
@@ -330,26 +402,15 @@ export function TablesGrid({
           className="sticky top-0 z-10 mb-2 pb-2 border-b"
           style={{ background: "var(--color-canvas-soft)", borderColor: "var(--color-hairline)" }}
         >
-          <p className="text-[11px] font-medium uppercase tracking-wide" style={{ color: SECTION_ACCENT.tables.color }}>
+          <p className="text-[12px] font-medium uppercase tracking-wide" style={{ color: SECTION_ACCENT.tables.color }}>
             Tables
           </p>
-          <p className="text-[11px] mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
+          <p className="text-[12px] mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
             {active} active · {free} free{dirty > 0 ? ` · ${dirty} cleaning` : ""}
           </p>
         </div>
       ) : (
-        <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
-          <p className="text-base font-medium" style={{ color: SECTION_ACCENT.tables.color }}>Tables</p>
-          {/* Counts echo the cards: free = the section's tinted blue (outline), active = the same
-              blue solid, cleaning = the cross-cutting orange. Summary and grid teach each other.
-              Zero-count states are dropped rather than shown as "0", which is noise on a small screen. */}
-          <span className="inline-flex items-center gap-1.5 flex-wrap">
-            {free > 0 && <CountPill n={free} label="free" tone={SECTION_ACCENT.tables} />}
-            {active > 0 && <CountPill n={active} label="active" tone={STATUS_STYLE.active} fill="var(--fill-blue)" />}
-            {dirty > 0 && <CountPill n={dirty} label="cleaning" tone={STATUS_STYLE.cleaning} />}
-            <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>{tables.length} total</span>
-          </span>
-        </div>
+        <p className="text-sm font-semibold mb-3" style={{ color: "var(--color-ink)" }}>Tables</p>
       )}
 
       {tables.length === 0 ? (
@@ -389,7 +450,7 @@ export function TablesGrid({
                 // as many 48px columns as fit — two, at this rail's width —
                 // and leaves the remainder unused rather than inflating tiles.
                 ? { gridTemplateColumns: "repeat(auto-fill, 48px)" }
-                : { gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))" }
+                : { gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))" }
             }
           >
             {tables.map((t) => (
