@@ -9,6 +9,7 @@ import { SubscriptionWatermark } from "@/components/subscription-watermark";
 import { subscriptionDaysRemaining } from "@/lib/subscription";
 import { CurrencyProvider } from "@/components/currency-provider";
 import { normalizeCurrency } from "@/lib/currency";
+import { isAdvancedPayout } from "@/lib/payout-mode";
 
 // Overrides the root's light theme colour for the staff surface only.
 //
@@ -72,6 +73,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
         restaurantLogo={restaurant?.logo_url ?? null}
         displayName={restaurantUser.display_name}
         notificationCount={notificationCount}
+        showRota={isAdvancedPayout(restaurant?.settings)}
       />
       {/* Wraps only the staff surface. Pulling down refetches the current route's
           server components — the floor plan, the queue, the bill — through the same

@@ -7,6 +7,7 @@ import type { ActionResult } from "@/app/actions/restaurants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ChevronLeft } from "lucide-react";
+import { PayoutModeField } from "@/components/payout-mode-field";
 
 type BusinessType = "restaurant" | "hotel" | "restaurant_hotel";
 type Tier = "free" | "basic" | "pro";
@@ -285,6 +286,9 @@ export default function NewRestaurantPage() {
             </div>
           )}
         </div>
+
+        {/* Staff payout — default monthly payroll, or rota/hourly for foreign clients */}
+        <PayoutModeField />
 
         {/* Customer ordering configuration */}
         <div

@@ -1027,19 +1027,19 @@ export function FinanceClient({
           <p className="text-lg font-medium tabular-nums" style={{ color: report.closingCreditToUs > 0 ? OWED_TO_US : "var(--color-ink)" }}>
             {cur.money(report.closingCreditToUs)}
           </p>
-          <p className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>Customers owe us</p>
+          <p className="text-[11px]" style={{ color: "var(--color-ink-mute)" }}>Customers owe us</p>
         </div>
         <div className="rounded-xl border px-4 py-3" style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}>
           <p className="text-xs mb-1" style={{ color: "var(--color-ink-mute)" }}>Credit by us</p>
           <p className="text-lg font-medium tabular-nums" style={{ color: report.closingCreditByUs > 0 ? WE_OWE : "var(--color-ink)" }}>
             {cur.money(report.closingCreditByUs)}
           </p>
-          <p className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>We owe vendors</p>
+          <p className="text-[11px]" style={{ color: "var(--color-ink-mute)" }}>We owe vendors</p>
         </div>
         <div className="rounded-xl border px-4 py-3" style={{ background: "var(--color-primary)", borderColor: "var(--color-primary)" }}>
           <p className="text-xs mb-1" style={{ color: "rgba(255,255,255,0.75)" }}>Net balance</p>
           <p className="text-lg font-medium tabular-nums" style={{ color: "#fff" }}>{cur.money(report.closingNet)}</p>
-          <p className="text-[10px] tabular-nums" style={{ color: "rgba(255,255,255,0.7)" }}>
+          <p className="text-[11px] tabular-nums" style={{ color: "rgba(255,255,255,0.7)" }}>
             {netMovement >= 0 ? "+" : "−"}{cur.money(Math.abs(netMovement))} this period
           </p>
         </div>
@@ -1351,7 +1351,7 @@ export function FinanceClient({
                 style={{ borderTop: "1px solid var(--color-hairline)", background: "var(--color-canvas-soft)" }}
               >
                 <p
-                  className="text-[11px] uppercase tracking-wide"
+                  className="text-[12px] uppercase tracking-wide"
                   style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
                 >
                   Bought from

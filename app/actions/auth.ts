@@ -2,6 +2,8 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { pinToAuthPassword } from "@/lib/auth/pin-password";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
@@ -190,10 +192,24 @@ export async function loginWithPin(
 
   const syntheticEmail = `emp-${restaurantUserId}@restrosewa.internal`;
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({
+  // The PIN is stored through `pinToAuthPassword` (Supabase Auth rejects passwords
+  // under 6 characters). Accounts made before that still hold the raw PIN: try it
+  // second, and on success move the account onto the mapped password. Either way
+  // this is ONE attempt for the lockout, recorded once below.
+  let { error } = await supabase.auth.signInWithPassword({
     email: syntheticEmail,
-    password: pin,
+    password: pinToAuthPassword(pin),
   });
+  if (error) {
+    const legacy = await supabase.auth.signInWithPassword({ email: syntheticEmail, password: pin });
+    if (!legacy.error && legacy.data.user) {
+      error = null;
+      // Best-effort: a failure here just means the fallback is used again next time.
+      await createAdminClient()
+        .auth.admin.updateUserById(legacy.data.user.id, { password: pinToAuthPassword(pin) })
+        .catch(() => {});
+    }
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (service as any).rpc("record_pin_attempt", {

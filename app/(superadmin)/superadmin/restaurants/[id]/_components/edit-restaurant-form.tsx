@@ -6,6 +6,8 @@ import type { ActionResult, RestaurantDetail } from "@/app/actions/restaurants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { X } from "lucide-react";
+import { PayoutModeField } from "@/components/payout-mode-field";
+import { normalizePayoutMode, normalizeRotaPayPeriod } from "@/lib/payout-mode";
 
 const labelCls = "text-xs uppercase tracking-wide font-medium";
 const labelStyle = { color: "var(--color-ink-mute)", letterSpacing: "0.06em" };
@@ -116,6 +118,14 @@ export function EditRestaurantForm({
             defaultValue={restaurant.subscription_extra_days ?? 0}
           />
         </Field>
+      </div>
+
+      {/* ── Staff Payout ── */}
+      <div className="pt-3 border-t" style={{ borderColor: "var(--color-hairline)" }}>
+        <PayoutModeField
+          defaultMode={normalizePayoutMode(restaurant.settings)}
+          defaultPeriod={normalizeRotaPayPeriod(restaurant.settings)}
+        />
       </div>
 
       {/* ── Ordering Config ── */}

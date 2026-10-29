@@ -16,7 +16,8 @@ const OUTER_PAD = 12;
 const GAP = 12;
 const RAIL_WIDTH = 132;
 
-// The rail's box reserves its own trailing 12px as the gap to the next column
-// (no padding-right on the rail itself) — so the split-view's box starts
-// exactly here and needs no left padding of its own, or the gap would double.
+// The rail sits on the RIGHT edge (order · menu · rail). Its box is this wide:
+// the 12px gap to the menu column on its left, the rail, and the 12px outer
+// padding on its right — so the split-view's box ends exactly at `right:` this
+// and needs no right padding of its own, or the gap would double.
 export const RAIL_BOX_WIDTH = OUTER_PAD + RAIL_WIDTH + GAP;

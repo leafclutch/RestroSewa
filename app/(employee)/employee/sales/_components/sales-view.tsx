@@ -141,12 +141,14 @@ function StatTile({
       type="button"
       onClick={onClick}
       disabled={!clickable}
-      className="rounded-xl border px-4 py-3 text-left transition-colors disabled:cursor-default"
+      className="rounded-xl border px-4 py-3 text-left transition-all disabled:cursor-default"
       // The selected period wears Sales' green. Constant green FILL (not the flipping accent):
       // in dark the accent goes light-green and the white text on this tile can't sit on it.
+      // A button, so the dashboard's automatic inner-card shadow skips it — set here.
       style={{
-        background: active ? "var(--fill-green)" : "var(--color-canvas)",
-        borderColor: active ? "var(--fill-green)" : "var(--color-hairline)",
+        background: active ? "var(--fill-sales)" : "var(--color-canvas)",
+        borderColor: active ? "var(--fill-sales)" : "var(--color-hairline)",
+        boxShadow: active ? "var(--shadow-card-lg)" : "var(--shadow-card)",
       }}
     >
       <p className="text-xs mb-1" style={{ color: active ? "rgba(255,255,255,0.75)" : "var(--color-ink-mute)" }}>
@@ -228,11 +230,11 @@ function TxnCard({
         {/* The full bill value — a credit bill is billed in full, so this is what
             it contributed to Sales. What's still owed is called out below it. */}
         <p className="text-sm font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>{cur.money(txn.amount)}</p>
-        <p className="text-[10px] uppercase tracking-wide" style={{ color: tone, letterSpacing: "0.06em" }}>
+        <p className="text-[11px] uppercase tracking-wide" style={{ color: tone, letterSpacing: "0.06em" }}>
           {SETTLEMENT_LABEL[settlement]}
         </p>
         {onCredit && txn.credit_unpaid > 0 && (
-          <p className="text-[10px] tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
+          <p className="text-[11px] tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
             {cur.money(txn.credit_unpaid)} on credit
           </p>
         )}

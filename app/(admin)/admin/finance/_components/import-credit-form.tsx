@@ -70,7 +70,7 @@ export function ImportCreditForm({ onDone }: { onDone: () => void }) {
           <Input id="ic_phone" name="phone" placeholder="98…" inputMode="tel" autoComplete="off" />
           {/* The phone is how a returning customer is recognised, so it decides
               whether this lands on an existing account or opens a new one. */}
-          <p className="text-[11px]" style={{ color: "var(--color-ink-mute)" }}>
+          <p className="text-[12px]" style={{ color: "var(--color-ink-mute)" }}>
             Used to match an existing account, so they keep one Credit ID.
           </p>
         </div>
@@ -101,7 +101,7 @@ export function ImportCreditForm({ onDone }: { onDone: () => void }) {
           />
           {/* Dating it correctly is what puts the debt on the right day in the
               finance report and the ledger, rather than the day it was typed. */}
-          <p className="text-[11px]" style={{ color: "var(--color-ink-mute)" }}>
+          <p className="text-[12px]" style={{ color: "var(--color-ink-mute)" }}>
             The debt will show from this date.
           </p>
         </div>

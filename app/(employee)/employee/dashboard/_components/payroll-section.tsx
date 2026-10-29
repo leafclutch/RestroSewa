@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Users, Wallet, CircleAlert, ArrowRight } from "lucide-react";
 import { getPayrollSheet } from "@/app/actions/payroll";
+import { getRotaPayrollSheet } from "@/app/actions/rota";
+import { hoursLabel, rangeLabel } from "@/lib/rota";
 import { accentOf } from "@/lib/section-colors";
 
 import { getCurrentCurrency } from "@/lib/currency-server";
@@ -19,24 +21,45 @@ import { getCurrentCurrency } from "@/lib/currency-server";
  */
 export async function PayrollSection() {
   const cur = await getCurrentCurrency();
-  const sheet = await getPayrollSheet();
   const accent = accentOf("payroll");
 
-  const month = new Date(sheet.month).toLocaleDateString("en-IN", {
-    month: "long",
-    year: "numeric",
-  });
+  let caption: string;
+  let tiles: { label: string; value: string; tone: string; Icon: typeof Users }[];
 
-  const tiles: { label: string; value: string; tone: string; Icon: typeof Users }[] = [
-    { label: "On payroll", value: String(sheet.rows.length), tone: "var(--color-ink)", Icon: Users },
-    { label: "Paid", value: cur.money(sheet.totalPaid), tone: "var(--color-ink)", Icon: Wallet },
-    {
-      label: "Remaining",
-      value: cur.money(sheet.totalRemaining),
-      tone: sheet.totalRemaining > 0 ? "var(--color-warning)" : "var(--color-success)",
-      Icon: CircleAlert,
-    },
-  ];
+  // Advanced payout (rota, hourly): the current pay period's wages instead of the month.
+  const rota = await getRotaPayrollSheet();
+  if (rota) {
+    caption = `${rangeLabel(rota.periodStart, rota.periodEnd)} · ${hoursLabel(rota.totalHours)} rostered`;
+    tiles = [
+      { label: "Gross wages", value: cur.money(rota.totalGross), tone: "var(--color-ink)", Icon: Users },
+      { label: "Paid", value: cur.money(rota.totalPaid), tone: "var(--color-ink)", Icon: Wallet },
+      {
+        label: "Remaining",
+        value: cur.money(rota.totalRemaining),
+        tone: rota.totalRemaining > 0 ? "var(--color-warning)" : "var(--color-success)",
+        Icon: CircleAlert,
+      },
+    ];
+  } else {
+    const sheet = await getPayrollSheet();
+    const month = new Date(sheet.month).toLocaleDateString("en-IN", {
+      month: "long",
+      year: "numeric",
+    });
+    caption =
+      month +
+      (sheet.notOnPayroll.length > 0 ? ` · ${sheet.notOnPayroll.length} staff with no salary set` : "");
+    tiles = [
+      { label: "On payroll", value: String(sheet.rows.length), tone: "var(--color-ink)", Icon: Users },
+      { label: "Paid", value: cur.money(sheet.totalPaid), tone: "var(--color-ink)", Icon: Wallet },
+      {
+        label: "Remaining",
+        value: cur.money(sheet.totalRemaining),
+        tone: sheet.totalRemaining > 0 ? "var(--color-warning)" : "var(--color-success)",
+        Icon: CircleAlert,
+      },
+    ];
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -64,9 +87,7 @@ export async function PayrollSection() {
       </div>
 
       <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-        {month}
-        {sheet.notOnPayroll.length > 0 &&
-          ` · ${sheet.notOnPayroll.length} staff with no salary set`}
+        {caption}
       </p>
 
       <Link

@@ -5,6 +5,17 @@ Versioning is informal (the app ships continuously); dates anchor the entries.
 
 ## [Unreleased] — 2026-08
 
+### Added — Advanced payout: rota-based hourly payroll (2026-10-14)
+- **Super Admin → create/edit restaurant → "Staff payout"**: *Default staff payout* (the existing
+  monthly salary system, unchanged — every existing client stays on it) or *Advanced payout* (rota,
+  UK/US style) with a Weekly / Fortnightly / Monthly pay period.
+- **Admin → Staff** on an advanced restaurant shows **Rota & Payroll** instead of the monthly payroll:
+  a Mon–Sun board (role code GM/AM/DM/TL/TM, start–end incl. past-midnight shifts, unpaid break,
+  Holiday with paid hours, Sick, Day off, manager's actual-time correction, "Copy last week") and a
+  **Wages** tab — hours × hourly rate per pay period, advances and payments (cash/online/mixed),
+  Unpaid / Partially Paid / Paid. Wage payments appear in Finance as staff salary expenses.
+- **Staff app → "My Rota"** button in the top bar: the staff member's own week, read-only.
+
 ### Fixed — Reset Finance & Sales Data now clears expenses and savings (2026-08-17)
 - **Extra expenses and savings survived a reset entirely.** Rent, electricity, fuel, internet,
   marketing — and every saving deposit and withdrawal — stayed on the books after a reset that says

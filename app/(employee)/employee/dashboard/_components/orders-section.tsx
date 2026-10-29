@@ -59,38 +59,55 @@ export function OrdersSection({
   return (
     <div
       className="rounded-2xl border overflow-hidden"
-      // Mirrors SectionCard's top+left accent edges — see the note there.
+      // Mirrors SectionCard: a full outline in the section's amber, and the big-card shadow.
       style={{
         background: "var(--color-canvas)",
-        borderColor: "var(--color-hairline)",
-        borderTopColor: accent.color,
-        borderTopWidth: 2,
-        borderLeftColor: accent.color,
-        borderLeftWidth: 3,
+        borderColor: accent.color,
+        borderWidth: 2,
+        boxShadow: "var(--shadow-card-lg)",
       }}
     >
       <button
         type="button"
         onClick={() => setOverride(!open)}
         aria-expanded={open}
-        className="w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 text-left"
+        className="w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 text-left transition-colors hover:bg-canvas-soft"
       >
         <span
-          className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
-          style={{ background: accent.soft, color: accent.color }}
+          className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border"
+          style={{ background: accent.soft, color: accent.color, borderColor: accent.color }}
         >
-          <ListOrdered size={20} strokeWidth={1.9} />
+          <ListOrdered size={21} strokeWidth={1.9} />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-lg font-medium" style={{ color: accent.color }}>Orders</span>
-          <span className="block text-sm truncate" style={{ color: "var(--color-ink-mute)" }}>{subtitle}</span>
+          <span className="block text-lg font-semibold" style={{ color: "var(--color-ink)" }}>Orders</span>
+          <span className="block text-sm truncate" style={{ color: "var(--color-ink-mute)" }}>
+            {hasOrders ? "Live kitchen & bar queue" : subtitle}
+          </span>
         </span>
+        {/* Header counts, in the same badge style as Tables / Walk-ins / Rooms. */}
+        {hasOrders && (
+          <span className="hidden sm:inline-flex items-center gap-1.5">
+            <span
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full border whitespace-nowrap"
+              style={{ background: accent.soft, color: accent.color, borderColor: accent.color }}
+            >
+              <span className="tabular font-semibold">{stats.total}</span> total
+            </span>
+            <span
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full border whitespace-nowrap"
+              style={{ background: "var(--fill-amber)", color: "#fff", borderColor: "var(--fill-amber)" }}
+            >
+              <span className="tabular font-semibold">{stats.pending}</span> pending
+            </span>
+          </span>
+        )}
         {flash && (
           <span
             // Green = "something new arrived and it's good news", not the section's amber —
             // this badge is an event, not an identity. Constant green FILL so white text stays
             // readable in dark (st-available flips to a light green white can't sit on).
-            className="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full animate-pulse"
+            className="shrink-0 text-[12px] font-semibold px-2 py-0.5 rounded-full animate-pulse"
             style={{ background: "var(--fill-green)", color: "#fff" }}
           >
             New order
@@ -98,25 +115,27 @@ export function OrdersSection({
         )}
         {hasOrders && (
           <span
-            // The section's own count badge. Uses the constant amber FILL (not accent.color):
-            // in dark the accent flips to a light amber that white text can't sit on.
-            className={`shrink-0 min-w-[24px] h-[24px] px-1.5 rounded-full text-sm font-semibold flex items-center justify-center ${flash ? "animate-pulse" : ""}`}
+            // Phones: the single count badge (the two header badges above are sm+). Constant
+            // amber FILL, not accent.color: in dark the accent flips to a light amber that
+            // white text can't sit on.
+            className={`sm:hidden shrink-0 min-w-[24px] h-[24px] px-1.5 rounded-full text-sm font-semibold flex items-center justify-center ${flash ? "animate-pulse" : ""}`}
             style={{ background: "var(--fill-amber)", color: "#fff" }}
           >
             {stats.total}
           </span>
         )}
         <ChevronDown
-          size={18}
+          size={20}
+          strokeWidth={2}
           className="shrink-0 transition-transform duration-300"
-          style={{ color: "var(--color-ink-mute)", transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}
+          style={{ color: "var(--color-ink)", transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}
         />
       </button>
 
       {/* Animated expand/collapse via the grid-rows 0fr→1fr technique. */}
       <div style={{ display: "grid", gridTemplateRows: open ? "1fr" : "0fr", transition: "grid-template-rows 0.3s ease" }}>
         <div style={{ overflow: "hidden", minHeight: 0 }}>
-          <div className="border-t px-3 sm:px-4 py-4" style={{ borderColor: "var(--color-hairline)" }}>
+          <div data-section-body className="mx-4 sm:mx-5 border-t py-4" style={{ borderColor: "var(--color-hairline)" }}>
             <OrdersQueue initialOrders={initialOrders} canManage={canManage} onStats={handleStats} />
           </div>
         </div>

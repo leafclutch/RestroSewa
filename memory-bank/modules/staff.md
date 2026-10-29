@@ -31,6 +31,12 @@ around fast floor work and realtime.
   Its card reads `getPayrollSheet`, which computes its own totals — `getPayrollSummary` is gated
   on `view_finance` and is the wrong source for a payroll-only staffer.
 
+- **My Rota** (`/employee/rota`) — only when the restaurant is on advanced payout (StaffNav
+  `showRota`). Own shifts only (`getMyRota` filters on the caller); pay shown only to payroll holders.
+- **Payroll on advanced payout** — `/employee/payroll`, the dashboard card and `/admin/staff` all
+  switch to the rota board + wage sheet (`app/(admin)/admin/staff/_components/rota/*`,
+  `app/actions/rota.ts`). See `database.md` → Rota payroll.
+
 # Business Rules
 - Section visibility is permission-derived (`getStaffNav` + direct `*_ACCESS` checks); each thin
   page re-checks server-side.

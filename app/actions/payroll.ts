@@ -172,6 +172,9 @@ export async function getPayrollHistory(
       .select("id, salary_month, cycle_id, amount, kind, method, notes, created_at, paid_by")
       .eq("restaurant_user_id", staffId)
       .eq("restaurant_id", ru.restaurant_id)
+      // Rota (advanced payout) wages share this table but belong to a pay period,
+      // not to a salary month — they'd otherwise land in that month's history.
+      .is("rota_period_id", null)
       .order("created_at", { ascending: false }),
     // `payable` is a PostgREST computed column: `cycle_payable_amount(salary_cycles)`.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

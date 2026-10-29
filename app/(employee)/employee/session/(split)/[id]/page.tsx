@@ -134,22 +134,26 @@ export default async function SessionPage({
       sessionId={id}
       canCreateOrders={canCreateOrders}
       menuData={menuData}
+      // A walk-in's screen wears the walk-ins purple (`.walkin-surface`), like its tile.
+      surface={session.type === "walk_in" ? "walkin-surface" : undefined}
+      // Solid brand-primary fill, not a soft pill — a back button gets tapped constantly
+      // on a busy floor and needs to read as an actual button at a glance. Passed as the
+      // header so on a desktop it sits above the order column's scroll, not inside it.
+      header={
+        // Back to the SECTION this came from (Tables or Walk-ins), not the top of the
+        // dashboard — `?focus` scrolls the dashboard straight to it.
+        <Link
+          href={`/employee/dashboard?focus=${session.type === "walk_in" ? "walkins" : "tables"}`}
+          className="inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 -ml-1 rounded-lg transition-colors hover:brightness-110 active:brightness-95"
+          style={{ color: "#fff", background: "var(--color-primary)" }}
+        >
+          <ChevronLeft size={15} />
+          Back
+        </Link>
+      }
     >
       {/* Tells the persistent left rail which list this session belongs to. */}
       <RailKind sessionId={id} kind={session.type === "walk_in" ? "walkins" : "tables"} />
-      {/* Solid brand-primary fill, not a soft pill — the soft tint (previous
-          version, and still what pills elsewhere use) reads as calm, passive
-          UI chrome. A back button gets tapped constantly on a busy floor and
-          needs to read as an actual button at a glance, so it gets the same
-          filled, high-contrast treatment as a primary action. */}
-      <Link
-        href="/employee/dashboard"
-        className="inline-flex items-center gap-1 text-sm font-semibold mb-4 px-3 py-1.5 -ml-1 rounded-lg transition-colors hover:brightness-110 active:brightness-95"
-        style={{ color: "#fff", background: "var(--color-primary)" }}
-      >
-        <ChevronLeft size={15} />
-        Back
-      </Link>
 
       <div className="flex items-center justify-between mb-5">
         <h1

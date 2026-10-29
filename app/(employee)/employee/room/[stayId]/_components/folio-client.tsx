@@ -36,9 +36,14 @@ import { DiscountUnitToggle } from "@/app/(employee)/employee/_components/discou
 import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
 import { billMethodLabel } from "@/lib/billing/payment-method";
 import {
-  BedDouble, ChevronLeft, Clock, Lock, Pencil, Plus, Printer, Trash2, User, UtensilsCrossed, Wallet, X, XCircle,
+  ArrowRight, Banknote, BedDouble, CalendarDays, ChevronLeft, Clock, CreditCard, HandCoins, Lock,
+  MonitorSmartphone, Moon, Pencil, Plus, Printer, Receipt, Sparkles, Trash2, User, UtensilsCrossed, Wallet, X, XCircle,
 } from "lucide-react";
 import { useCurrency } from "@/components/currency-provider";
+import { MenuBrowser } from "@/app/(employee)/employee/session/(plain)/[id]/add/_components/menu-browser";
+import type { AddItemsMenuData } from "@/lib/menu-browser-data";
+import { NAV_HEIGHT } from "@/app/(employee)/employee/session/_components/layout-metrics";
+import { PaymentPopup } from "@/app/(employee)/employee/session/(split)/[id]/_components/session-client";
 
 // Pinned to the restaurant's zone — a check-in stamp on a bill has to say the
 // wall-clock time at the hotel, not the time in whatever region the server is in.
@@ -84,19 +89,131 @@ function Line({
   );
 }
 
-function GroupHeader({ icon, title, total }: { icon: React.ReactNode; title: string; total: string }) {
+/**
+ * The room screen's colour system: ONE accent — the rooms teal (`.room-surface` in
+ * globals.css) — on neutral cards. `INK` is the teal used for text, icons and borders;
+ * `FILL` is the solid that white text sits on. Red is kept only for cancelling a stay
+ * and orange only for credit; nothing else on this screen is coloured.
+ */
+const INK = "var(--room-ink)";
+const FILL = "var(--room-fill)";
+
+/** A soft wash of a colour, readable in both themes. */
+const wash = (tone: string, pct = 10) => `color-mix(in srgb, ${tone} ${pct}%, var(--color-canvas))`;
+
+/**
+ * One section of the room screen. Every section is its own card — white, bordered,
+ * shadowed — with the same header (green icon chip · title · figure on the right), so the
+ * screen reads as a stack of separate, labelled blocks.
+ */
+function Card({
+  id, icon, title, right, children, className = "",
+}: {
+  id?: string;
+  icon: React.ReactNode;
+  title: string;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div
-      className="flex items-center gap-2 px-4 py-2 border-b"
-      style={{ background: "var(--color-canvas-soft)", borderColor: "var(--color-hairline)" }}
+    <section
+      id={id}
+      className={`rounded-2xl border overflow-hidden scroll-mt-4 ${className}`}
+      style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)", boxShadow: "var(--shadow-card)" }}
     >
-      <span style={{ color: "var(--color-ink-mute)" }}>{icon}</span>
-      <p className="text-xs uppercase tracking-wide flex-1 font-medium"
-         style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
-        {title}
-      </p>
-      <span className="text-xs tabular" style={{ color: "var(--color-ink-mute)" }}>{total}</span>
+      <div className="flex items-center gap-2.5 px-4 py-3 border-b" style={{ borderColor: "var(--color-hairline)" }}>
+        <span
+          className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+          style={{ background: wash(INK, 14), color: INK }}
+        >
+          {icon}
+        </span>
+        <p className="text-base font-semibold flex-1 min-w-0 truncate" style={{ color: "var(--color-ink)" }}>{title}</p>
+        {right != null && (
+          <span className="text-base font-semibold tabular" style={{ color: "var(--color-ink)" }}>{right}</span>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** One tile of the quick-action bar: a green icon over a short label, on a white tile. */
+function QuickAction({
+  icon, label, onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex flex-col items-center justify-center gap-1.5 rounded-xl border px-1.5 sm:px-2 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold text-center leading-tight transition-all active:scale-[0.98]"
+      style={{
+        background: "var(--color-canvas)",
+        borderColor: "var(--color-hairline)",
+        color: "var(--color-ink)",
+        boxShadow: "var(--shadow-card)",
+      }}
+    >
+      <span className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: FILL, color: "#fff" }}>
+        {icon}
+      </span>
+      {label}
+    </button>
+  );
+}
+
+/** A label · amount line of the Bill card; `strong` for the subtotal and what is left. */
+function BillRow({
+  label, detail, amount, strong,
+}: {
+  label: string;
+  detail?: string;
+  amount: number;
+  strong?: boolean;
+}) {
+  const cur = useCurrency();
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <div className="min-w-0">
+        <p className={`text-sm ${strong ? "font-semibold" : ""}`} style={{ color: strong ? "var(--color-ink)" : "var(--color-ink-mute)" }}>
+          {label}
+        </p>
+        {detail && <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>{detail}</p>}
+      </div>
+      <span className={`text-sm tabular shrink-0 ${strong ? "font-semibold" : ""}`} style={{ color: "var(--color-ink)" }}>
+        {cur.money2(amount)}
+      </span>
     </div>
+  );
+}
+
+/** The room screen's solid teal action button. */
+function ActionButton({
+  icon, children, onClick, disabled, full, className = "",
+}: {
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  full?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`${full ? "w-full" : ""} ${className} inline-flex items-center justify-center gap-1.5 h-10 px-4 rounded-lg text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50`}
+      style={{ background: FILL, color: "#fff" }}
+    >
+      {icon}
+      {children}
+    </button>
   );
 }
 
@@ -116,42 +233,70 @@ function AddChargeForm({ stayId, onDone }: { stayId: string; onDone: () => void 
         await action(fd);
         onDone();
       }}
-      className="px-4 py-3 border-t flex flex-col gap-2.5"
+      className="px-4 py-3.5 border-t flex flex-col gap-3"
       style={{ borderColor: "var(--color-hairline)" }}
     >
       <input type="hidden" name="stay_id" value={stayId} />
-      <div className="flex flex-col sm:flex-row gap-2">
-        <select
-          name="type"
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-          className="h-10 rounded-sm border px-2 text-sm sm:w-40"
+      {/* Laid out for the card's width, not the screen's: this form sits in a ~460px
+          column beside the menu on a desktop, where a one-row layout keyed to `sm:`
+          squeezed the note field to nothing. Type + amount share a row; the note gets
+          its own; the buttons sit under them. `min-w-0` lets each field shrink cleanly. */}
+      <div className="grid grid-cols-2 gap-2.5">
+        <label className="flex flex-col gap-1 min-w-0">
+          <span className="text-xs font-medium" style={{ color: "var(--color-ink-mute)" }}>Charge type</span>
+          <select
+            name="type"
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            className="h-10 w-full min-w-0 rounded-lg border px-2 text-sm"
+            style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+          >
+            {CHARGE_TYPES.map((t) => (
+              <option key={t.key} value={t.key}>{t.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 min-w-0">
+          <span className="text-xs font-medium" style={{ color: "var(--color-ink-mute)" }}>Amount</span>
+          <input
+            name="amount"
+            type="number"
+            min="0.01"
+            step="0.01"
+            inputMode="decimal"
+            placeholder="0.00"
+            required
+            className="h-10 w-full min-w-0 rounded-lg border px-3 text-sm tabular"
+            style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+          />
+        </label>
+        <label className="col-span-2 flex flex-col gap-1 min-w-0">
+          <span className="text-xs font-medium" style={{ color: "var(--color-ink-mute)" }}>Note (optional)</span>
+          <input
+            name="description"
+            placeholder="e.g. 2 shirts, mini bar soda"
+            className="h-10 w-full min-w-0 rounded-lg border px-3 text-sm"
+            style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+          />
+        </label>
+      </div>
+      <div className="grid grid-cols-2 gap-2.5">
+        <button
+          type="button"
+          onClick={onDone}
+          className="h-10 rounded-lg border text-sm font-medium"
           style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
         >
-          {CHARGE_TYPES.map((t) => (
-            <option key={t.key} value={t.key}>{t.label}</option>
-          ))}
-        </select>
-        <input
-          name="description"
-          placeholder="Note (optional)"
-          className="h-10 rounded-sm border px-3 text-sm flex-1"
-          style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
-        />
-        <input
-          name="amount"
-          type="number"
-          min="0.01"
-          step="0.01"
-          inputMode="decimal"
-          placeholder="Amount"
-          required
-          className="h-10 rounded-sm border px-3 text-sm tabular sm:w-32"
-          style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
-        />
-        <Button type="submit" variant="secondary" disabled={pending} className="shrink-0">
-          {pending ? "Adding…" : "Add"}
-        </Button>
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={pending}
+          className="h-10 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-all hover:brightness-110 disabled:opacity-50"
+          style={{ background: FILL, color: "#fff" }}
+        >
+          <Plus size={15} /> {pending ? "Adding…" : "Add charge"}
+        </button>
       </div>
       {state && "error" in state && (
         <p className="text-xs" style={{ color: "var(--color-ruby)" }}>{state.error}</p>
@@ -179,10 +324,24 @@ function AddAdvanceForm({ stayId, onDone }: { stayId: string; onDone: () => void
       {/* The SAME fields the check-in modal uses, so a deposit taken at the desk and one
           taken three days later cannot validate differently. */}
       <AdvanceFields mode="required" onValidChange={setValid} />
-      <div className="flex justify-end">
-        <Button type="submit" variant="secondary" disabled={pending || !valid} className="shrink-0">
-          {pending ? "Recording…" : "Record advance"}
-        </Button>
+      {/* Same footer as the extra-charge form: Cancel · the green action, half each. */}
+      <div className="grid grid-cols-2 gap-2.5">
+        <button
+          type="button"
+          onClick={onDone}
+          className="h-10 rounded-lg border text-sm font-medium"
+          style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={pending || !valid}
+          className="h-10 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-all hover:brightness-110 disabled:opacity-50"
+          style={{ background: FILL, color: "#fff" }}
+        >
+          <Plus size={15} /> {pending ? "Recording…" : "Record advance"}
+        </button>
       </div>
       {state && "error" in state && (
         <p className="text-xs" style={{ color: "var(--color-ruby)" }}>{state.error}</p>
@@ -208,14 +367,18 @@ function NightBoundary({
   shiftHours,
   shiftBy,
   canShift,
+  editing,
+  setEditing,
 }: {
   stayId: string;
   at: string;
   shiftHours: number;
   shiftBy: string | null;
   canShift: boolean;
+  /** Held by the screen, so the quick-action bar at the top can open it too. */
+  editing: boolean;
+  setEditing: (v: boolean) => void;
 }) {
-  const [editing, setEditing] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -238,40 +401,52 @@ function NightBoundary({
     });
   }
 
+  // Highlighted: an amber panel, because "until when can I stay?" is the question the
+  // desk is asked most, and pushing it later is a routine courtesy that must be findable.
   return (
-    <div className="px-4 py-2.5 border-t" style={{ borderColor: "var(--color-hairline)" }}>
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-          <Clock size={11} className="inline mb-0.5 mr-1" />
-          Next night starts <strong style={{ color: "var(--color-ink)" }}>{when}</strong>
-          {shiftHours > 0 && (
-            <>
-              {" "}
-              (+{shiftHours}h{shiftBy ? `, by ${shiftBy}` : ""})
-            </>
+    <div
+      id="room-extra-time"
+      className="mx-3 my-3 rounded-xl border px-3.5 py-3 scroll-mt-4"
+      style={{ background: wash(INK, 8), borderColor: `color-mix(in srgb, ${INK} 30%, transparent)` }}
+    >
+      <div className="flex items-center gap-3 flex-wrap">
+        <span
+          className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
+          style={{ background: FILL, color: "#fff" }}
+        >
+          <Clock size={17} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Next night starts</p>
+          <p className="text-sm font-semibold" style={{ color: "var(--color-ink)" }}>
+            {when}
+            {shiftHours > 0 && (
+              <span className="ml-1.5 text-xs font-semibold px-1.5 py-0.5 rounded-md" style={{ background: FILL, color: "#fff" }}>
+                +{shiftHours}h
+              </span>
+            )}
+          </p>
+          {shiftHours > 0 && shiftBy && (
+            <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Extra time given by {shiftBy}</p>
           )}
-        </p>
+        </div>
         {canShift && !editing && (
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="text-xs"
-            style={{ color: "var(--color-primary)" }}
-          >
-            {shiftHours > 0 ? "Change" : "Give more time"}
-          </button>
+          <ActionButton icon={<Clock size={15} />} onClick={() => setEditing(true)} className="w-full sm:w-auto">
+            {shiftHours > 0 ? "Change time" : "Give more time"}
+          </ActionButton>
         )}
       </div>
 
       {editing && (
-        <div className="flex items-center gap-2 mt-2 flex-wrap">
+        <div className="flex items-center gap-2 mt-3 flex-wrap">
           <select
             defaultValue={String(shiftHours)}
             onChange={(e) => save(Number(e.target.value))}
             disabled={pending}
-            className="h-8 rounded-lg border px-2 text-xs"
+            aria-label="Extra time"
+            className="h-9 flex-1 sm:flex-none min-w-[150px] rounded-lg border px-2 text-sm"
             style={{
-              borderColor: "var(--color-hairline-input)",
+              borderColor: INK,
               color: "var(--color-ink)",
               background: "var(--color-canvas)",
             }}
@@ -289,8 +464,8 @@ function NightBoundary({
               setEditing(false);
               setError(null);
             }}
-            className="text-xs"
-            style={{ color: "var(--color-ink-mute)" }}
+            className="h-9 px-3 rounded-lg border text-sm font-medium"
+            style={{ borderColor: "var(--color-hairline-input)", color: "var(--color-ink)", background: "var(--color-canvas)" }}
           >
             Cancel
           </button>
@@ -699,12 +874,13 @@ function CheckOutForm({
   };
 
   type Method = "cash" | "online" | "card" | "mixed" | "credit";
-  const METHODS: { key: Method; label: string }[] = [
-    { key: "cash", label: "Cash" },
-    { key: "online", label: "Online" },
-    { key: "card", label: "Card" },
-    { key: "mixed", label: "Cash + Online" },
-    ...(canUseCredit ? [{ key: "credit" as const, label: "Credit" }] : []),
+  // Same Quick Payment set, order and icons as a table's payment popup.
+  const METHODS: { key: Method; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
+    { key: "cash", label: "Cash", Icon: Banknote },
+    { key: "online", label: "Online", Icon: MonitorSmartphone },
+    { key: "mixed", label: "Cash + Online", Icon: Wallet },
+    ...(canUseCredit ? [{ key: "credit" as const, label: "Credit", Icon: HandCoins }] : []),
+    { key: "card", label: "Card", Icon: CreditCard },
   ];
 
   return (
@@ -900,35 +1076,46 @@ function CheckOutForm({
         </>
       ) : (
         <>
-      {/* Payable */}
+      {/* Payable — the table popup's "Final payable" line. */}
       <div
-        className="flex items-baseline justify-between rounded-lg border px-4 py-3"
-        style={{ borderColor: "var(--color-primary)", background: "rgba(99,102,241,0.06)" }}
+        className="flex items-center justify-between rounded-xl px-4 py-3"
+        style={{ background: "var(--color-canvas-soft)", border: "1px solid var(--color-hairline)" }}
       >
-        <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
-          {applied > 0 ? "Balance payable" : "Payable now"}
+        <span className="text-base font-semibold" style={{ color: "var(--color-ink)" }}>
+          {applied > 0 ? "Balance payable" : "Final payable"}
         </span>
-        <span className="text-xl tabular" style={{ color: "var(--color-primary)", fontWeight: 300 }}>
+        <span className="text-2xl font-semibold tabular" style={{ color: "var(--room-ink)" }}>
           {cur.money2(balance)}
         </span>
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
-        {METHODS.map((m) => (
-          <button
-            key={m.key}
-            type="button"
-            onClick={() => setMethod(m.key)}
-            className="text-xs px-3 py-1.5 rounded-full border transition-colors"
-            style={{
-              borderColor: method === m.key ? "var(--color-primary)" : "var(--color-hairline)",
-              background: method === m.key ? "var(--color-primary)" : "var(--color-canvas)",
-              color: method === m.key ? "#fff" : "var(--color-ink)",
-            }}
-          >
-            {m.label}
-          </button>
-        ))}
+      {/* Method selector — "Quick Payment" buttons; the chosen one fills solid. */}
+      <div className="flex flex-col gap-2.5">
+        <p className="text-base font-semibold" style={{ color: "var(--color-ink)" }}>Quick Payment</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {METHODS.map((m) => {
+            const active = method === m.key;
+            // Credit keeps its own orange: the one choice that leaves money owed.
+            const on = m.key === "credit" ? "#ea580c" : "var(--room-fill)";
+            return (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => setMethod(m.key)}
+                className="flex items-center justify-center gap-2 px-2 py-2.5 rounded-xl border text-sm font-medium leading-tight text-center transition-colors"
+                style={{
+                  borderColor: active ? on : "var(--color-hairline-input)",
+                  background: active ? on : "var(--color-canvas)",
+                  color: active ? "#fff" : "var(--color-ink)",
+                  boxShadow: active ? "none" : "0 1px 2px rgba(15,23,42,0.05)",
+                }}
+              >
+                <m.Icon size={16} />
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {method === "mixed" && (
@@ -1103,18 +1290,19 @@ function CheckOutForm({
         <p className="text-xs" style={{ color: "var(--color-ruby)" }}>{state.error}</p>
       )}
 
-      <Button
+      <button
         type="submit"
-        variant="primary"
         disabled={pending || !mixedOk || !creditOk || !discountPinValid || !refundSplitOk}
-        className="w-full"
+        className="w-full h-12 rounded-xl text-base font-semibold inline-flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+        style={{ background: method === "credit" && refundDue <= 0 ? "#ea580c" : "var(--room-fill)", color: "#fff" }}
       >
         {pending
           ? "Checking out…"
           : refundDue > 0
           ? `Check out · refund ${cur.money2(refundDue)}`
           : `Check out · ${cur.money2(balance)}`}
-      </Button>
+        {!pending && <ArrowRight size={18} />}
+      </button>
     </form>
   );
 }
@@ -1127,7 +1315,12 @@ export function FolioClient({
   canCheckOut, canDiscount, canUseCredit, discountEnabled = false,
   canPrintTickets = false, canPrintBill = false,
   canTakeAdvance = false, canEditAdvance = false, canCheckIn = false, canCancelStay = false,
+  menuData = null, transferHistory = null,
 }: {
+  /** The add-items menu for the right-hand column; null = no menu (no permission). */
+  menuData?: AddItemsMenuData | null;
+  /** Where the guest has been moved from, if anywhere — shown above the room card. */
+  transferHistory?: React.ReactNode;
   view: RoomFolioView;
   /** The stay's session, in the same shape a table's screen uses. */
   session: SessionDetail | null;
@@ -1167,6 +1360,12 @@ export function FolioClient({
   const cur = useCurrency();
   const [adding, setAdding] = useState(false);
   const [addingAdvance, setAddingAdvance] = useState(false);
+  // The extra-time picker's open state, held here so the quick-action bar can open it.
+  const [timeEditing, setTimeEditing] = useState(false);
+  // The checkout card is a popup, opened from Pay Now — same as a table's bill.
+  const [paying, setPaying] = useState(false);
+  // Phone: the menu as a full-screen panel over the room (desktop has it as a column).
+  const [phoneMenuOpen, setPhoneMenuOpen] = useState(false);
   const [billOpen, setBillOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const router = useRouter();
@@ -1195,6 +1394,24 @@ export function FolioClient({
   const [discountMode, setDiscountMode] = useState<DiscountMode>("amount");
   const liveDiscount =
     discountEnabled && canDiscount ? resolveDiscount(discountAmt, discountMode, f.subtotal) : 0;
+
+  // The Bill card can take the discount too, without opening Pay Now — it is the SAME
+  // state the payment popup reads, so whatever is typed here is already filled in there
+  // (the PIN that authorizes it is still asked for at checkout). While one is typed, the
+  // card's figures are re-worked with it, the same sum the checkout form does; the server
+  // rebuilds all of it from the database at checkout regardless.
+  const canEditDiscount = open && canCheckOut && canDiscount && discountEnabled;
+  const live = open && liveDiscount > 0;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const billTaxable = f.subtotal - (live ? liveDiscount : f.discount);
+  const billTax = live ? r2((billTaxable * f.taxPercent) / 100) : f.tax;
+  const billService = live ? r2((billTaxable * f.servicePercent) / 100) : f.service;
+  const billTotal = live
+    ? r2(billTaxable * (1 + f.taxPercent / 100 + f.servicePercent / 100))
+    : f.grandTotal;
+  const billBalance = live ? r2(Math.max(0, billTotal - f.advancePaid)) : f.balanceDue;
+  const billRefund = live ? r2(Math.max(0, f.advancePaid - billTotal)) : f.refundDue;
+  const billOwed = billRefund > 0 ? billRefund : f.advancePaid > 0 ? billBalance : billTotal;
 
   // Once the guest has checked out the SAME document is a receipt, not a bill: it has to
   // say PAID (or what is still owed), how it was tendered and who took the money. It used
@@ -1227,78 +1444,169 @@ export function FolioClient({
   const pendingItems = items.filter((i) => i.item_status !== "served");
   const servedItems = items.filter((i) => i.item_status === "served");
 
+  // The menu column: tablet/desktop, an open stay, and staff who can order.
+  const showMenu = open && canCreateOrders && !!session && !!menuData;
+
+  // Extra time exists only while there is a next night to push.
+  const canShiftTime = canCheckIn && !!f.nextBoundary;
+  // A quick action opens its form, then brings it into view once it has rendered.
+  const jumpTo = (id: string) =>
+    requestAnimationFrame(() =>
+      document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })
+    );
+
   return (
-    <div className="max-w-2xl mx-auto px-3 sm:px-5 py-4 pb-16 flex flex-col gap-4">
+    // With a menu: two fixed columns under the top bar — the room on the left, the menu
+    // on the right. `top/left/right/bottom` only apply once `lg:fixed` positions the box;
+    // below lg it is static and the room is one centred column, as before.
+    <div
+      className={showMenu ? "room-surface lg:fixed lg:flex lg:gap-3 lg:p-3 z-10" : "room-surface"}
+      style={showMenu ? { top: NAV_HEIGHT, left: 0, right: 0, bottom: 0 } : undefined}
+    >
+    {/* Desktop: the room column is a Back bar on top and the scrolling details under it,
+        so Back stays put while the column scrolls. Below lg this wrapper is a plain box
+        and Back sits in the page as before. */}
+    <div className={showMenu ? "lg:w-[460px] xl:w-[500px] lg:shrink-0 lg:flex lg:flex-col lg:min-h-0" : ""}>
+    {showMenu && (
+      <div className="hidden lg:block shrink-0 px-1 pb-3">
+        <Link
+        href="/employee/dashboard?focus=rooms"
+        className="inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors hover:brightness-110 active:brightness-95"
+        style={{ color: "#fff", background: "var(--color-primary)" }}
+      >
+        <ChevronLeft size={15} />
+        Back
+      </Link>
+      </div>
+    )}
+    <div
+      // `[&>*]:shrink-0`: in this height-capped scrolling column, flex would otherwise SHRINK
+      // the cards to fit — and a card with `overflow-hidden` shrinks to nothing, hiding the
+      // bill, extra time, extras and advances. Each card keeps its full height and the
+      // column scrolls instead.
+      className={
+        showMenu
+          ? "max-w-2xl mx-auto px-3 sm:px-5 py-4 pb-16 flex flex-col gap-4 lg:mx-0 lg:max-w-none lg:flex-1 lg:min-h-0 lg:overflow-y-auto thin-scrollbar lg:px-1 lg:py-0 lg:pb-6 lg:[&>*]:shrink-0"
+          : "max-w-2xl mx-auto px-3 sm:px-5 py-4 pb-16 flex flex-col gap-4"
+      }
+    >
       {/* A room-service order placed from the guest's phone changes this bill, so
           the folio re-reads itself when orders move — no refresh, no stale total. */}
       <RealtimeRefresh topics={["orders", "tables"]} />
+
+      {transferHistory}
 
       {/* Same solid brand-primary "Back" button as the table session screen — a
           button tapped constantly on a busy floor has to read as one at a glance.
           `self-start` so the flex column doesn't stretch it full width. */}
       <Link
-        href="/employee/dashboard"
-        className="self-start inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 -ml-1 rounded-lg transition-colors hover:brightness-110 active:brightness-95"
+        href="/employee/dashboard?focus=rooms"
+        className={`self-start inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 -ml-1 rounded-lg transition-colors hover:brightness-110 active:brightness-95 ${showMenu ? "lg:hidden" : ""}`}
         style={{ color: "#fff", background: "var(--color-primary)" }}
       >
         <ChevronLeft size={15} />
         Back
       </Link>
 
-      {/* Guest */}
-      <div
-        className="rounded-2xl border px-5 py-4"
-        style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+      {/* ─── 1. The stay ───────────────────────────────────────────────────────
+          A green band naming the room, then who is staying and the stay in four plain
+          tiles. The only solid colour on the screen besides the action buttons. */}
+      <section
+        className="rounded-2xl border overflow-hidden"
+        style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)", boxShadow: "var(--shadow-card)" }}
       >
-        <div className="flex items-start gap-3">
+        <div className="flex items-center gap-3 px-4 py-3.5" style={{ background: FILL, color: "#fff" }}>
           <span
-            className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
-            style={{ background: "var(--color-canvas-soft)", color: "var(--color-primary)" }}
+            className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+            style={{ background: "rgba(255,255,255,0.18)" }}
           >
-            <BedDouble size={19} strokeWidth={1.6} />
+            <BedDouble size={22} strokeWidth={1.8} />
           </span>
           <div className="flex-1 min-w-0">
-            <p className="text-base font-medium" style={{ color: "var(--color-ink)" }}>
-              Room {view.room_number}
-              <span className="text-sm ml-2" style={{ color: "var(--color-ink-mute)" }}>{view.type_name}</span>
-            </p>
-            <p className="text-sm truncate" style={{ color: "var(--color-ink)" }}>
-              <User size={12} className="inline mr-1" style={{ verticalAlign: "-1px" }} />
-              {view.guest_name}
-              {view.guest_count > 1 && (
-                <span style={{ color: "var(--color-ink-mute)" }}> · {view.guest_count} guests</span>
-              )}
-              {view.guest_phone && (
-                <span style={{ color: "var(--color-ink-mute)" }}> · {view.guest_phone}</span>
-              )}
-            </p>
+            <p className="text-xl font-bold leading-tight">Room {view.room_number}</p>
+            <p className="text-sm" style={{ color: "rgba(255,255,255,0.85)" }}>{view.type_name}</p>
           </div>
-          {!open && (
+          <span
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full shrink-0"
+            style={{ background: "rgba(255,255,255,0.2)", color: "#fff" }}
+          >
+            <span aria-hidden className="w-1.5 h-1.5 rounded-full" style={{ background: open ? "#86efac" : "#cbd5e1" }} />
+            {open ? "Occupied" : "Checked out"}
+          </span>
+        </div>
+
+        <div className="px-4 pt-3.5 pb-4 flex flex-col gap-3">
+          <div className="flex items-center gap-2.5">
             <span
-              className="text-xs px-2 py-0.5 rounded-full shrink-0"
-              style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink-mute)" }}
+              className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+              style={{ background: wash(INK, 14), color: INK }}
             >
-              Checked out
+              <User size={15} />
             </span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold truncate" style={{ color: "var(--color-ink)" }}>{view.guest_name}</p>
+              <p className="text-xs truncate" style={{ color: "var(--color-ink-mute)" }}>
+                {view.guest_count} {view.guest_count === 1 ? "guest" : "guests"}
+                {view.guest_phone ? ` · ${view.guest_phone}` : ""}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {(
+              [
+                [CalendarDays, "Check-in", when(f.checkIn)],
+                [Clock, open ? "Now" : "Check-out", when(f.checkOut)],
+                [Moon, "Stay", f.duration],
+                [BedDouble, "Nights charged", String(f.nights)],
+              ] as const
+            ).map(([Icon, label, value]) => (
+              <div
+                key={label}
+                className="rounded-xl px-3 py-2"
+                style={{ background: "var(--color-canvas-soft)" }}
+              >
+                <p className="flex items-center gap-1.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                  <Icon size={13} style={{ color: INK }} />
+                  {label}
+                </p>
+                <p className="text-[13px] sm:text-sm font-semibold tabular mt-0.5 leading-snug break-words" style={{ color: "var(--color-ink)" }}>{value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ─── Quick actions ────────────────────────────────────────────────────
+          The desk's everyday jobs on a stay. A tap opens that form in its card below
+          and scrolls to it. */}
+      {open && (canShiftTime || canAddCharges || canTakeAdvance) && (
+        <div className="grid grid-cols-3 gap-2">
+          {canShiftTime && (
+            <QuickAction
+              icon={<Clock size={18} />}
+              label="Give more time"
+              onClick={() => { setTimeEditing(true); jumpTo("room-charges"); }}
+            />
+          )}
+          {canAddCharges && (
+            <QuickAction
+              icon={<Sparkles size={18} />}
+              label="Extra charge"
+              onClick={() => { setAdding(true); jumpTo("room-extras"); }}
+            />
+          )}
+          {canTakeAdvance && (
+            <QuickAction
+              icon={<Wallet size={18} />}
+              label="Take advance"
+              onClick={() => { setAddingAdvance(true); jumpTo("room-advances"); }}
+            />
           )}
         </div>
+      )}
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
-          {[
-            ["Check-in", when(f.checkIn)],
-            [open ? "Now" : "Check-out", when(f.checkOut)],
-            ["Stay", f.duration],
-            ["Nights charged", String(f.nights)],
-          ].map(([label, value]) => (
-            <div key={label}>
-              <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>{label}</p>
-              <p className="text-sm" style={{ color: "var(--color-ink)" }}>{value}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ─── Orders ───────────────────────────────────────────────────────────
+      {/* ─── 2. Orders ─────────────────────────────────────────────────────────
           THE fix. A QR order from the room lands here the moment it is placed,
           and the KOT prints from right here — the same OrderItem rows and the
           same SessionPrintButtons a table uses. Staff no longer go through "Add a
@@ -1306,22 +1614,13 @@ export function FolioClient({
           That page is now only what its name says: for orders taken by phone or
           in person. */}
       {session && (
-        <div
-          className="rounded-2xl border overflow-hidden"
-          style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+        <Card
+          icon={<UtensilsCrossed size={16} />}
+          title={pendingItems.length > 0 ? `Orders · ${pendingItems.length} pending` : "Orders"}
+          right={cur.money2(f.foodTotal)}
         >
-          <GroupHeader
-            icon={<UtensilsCrossed size={13} />}
-            title={
-              pendingItems.length > 0
-                ? `Orders · ${pendingItems.length} pending`
-                : "Orders"
-            }
-            total={cur.money2(f.foodTotal)}
-          />
-
           {items.length === 0 ? (
-            <p className="px-4 py-2.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>
+            <p className="px-4 py-4 text-sm" style={{ color: "var(--color-ink-mute)" }}>
               No food ordered yet. The guest can order from the room QR, or you can add one.
             </p>
           ) : (
@@ -1334,7 +1633,7 @@ export function FolioClient({
                   className="px-4 py-1.5 border-t"
                   style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}
                 >
-                  <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Served</p>
+                  <p className="text-xs font-medium" style={{ color: "var(--color-ink-mute)" }}>Served</p>
                 </div>
               )}
               {servedItems.map((i) => (
@@ -1343,10 +1642,10 @@ export function FolioClient({
             </>
           )}
 
-          {open && (
+          {open && (items.length > 0 || canCreateOrders) && (
             <div
-              className="flex flex-col sm:flex-row gap-2 px-4 py-3 border-t"
-              style={{ borderColor: "var(--color-hairline)" }}
+              className={`flex flex-col sm:flex-row gap-2 px-4 py-3 border-t ${items.length === 0 && showMenu ? "lg:hidden" : ""}`}
+              style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}
             >
               {items.length > 0 && (
                 <div className="flex-1">
@@ -1366,26 +1665,36 @@ export function FolioClient({
                 </div>
               )}
               {canCreateOrders && (
-                <Link href={`/employee/session/${session.id}/add`} className="shrink-0">
-                  <Button variant="secondary" className="w-full flex items-center justify-center gap-1.5">
+                showMenu ? (
+                  // Phone: open the menu IN this screen (see the phone menu panel below),
+                  // not on a separate page — so widening the window just swaps to the
+                  // desktop layout, with no navigation and no loading screen between.
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setPhoneMenuOpen(true)}
+                    className="shrink-0 lg:hidden w-full sm:w-auto flex items-center justify-center gap-1.5"
+                  >
                     <Plus size={13} /> Add order
                   </Button>
-                </Link>
+                ) : (
+                  <Link href={`/employee/session/${session.id}/add`} className="shrink-0">
+                    <Button variant="secondary" className="w-full flex items-center justify-center gap-1.5">
+                      <Plus size={13} /> Add order
+                    </Button>
+                  </Link>
+                )
               )}
             </div>
           )}
-        </div>
+        </Card>
       )}
 
-      {/* The bill */}
-      <div
-        className="rounded-2xl border overflow-hidden"
-        style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
-      >
-        <GroupHeader icon={<BedDouble size={13} />} title="Room" total={cur.money2(f.roomTotal)} />
+      {/* ─── 3. Room charges ───────────────────────────────────────────────────
+          The nights, and directly under them when the next night starts and the
+          courtesy that pushes it later — that is the number it explains. */}
+      <Card id="room-charges" icon={<BedDouble size={16} />} title="Room charges" right={cur.money2(f.roomTotal)}>
         <Line label={f.room.label} detail={f.room.detail} amount={f.room.amount} />
-        {/* When this bill next grows, and the courtesy that can push it later.
-            Directly under the room charge because that is the number it explains. */}
         {open && f.nextBoundary && (
           <NightBoundary
             stayId={view.stay_id}
@@ -1393,144 +1702,74 @@ export function FolioClient({
             shiftHours={view.priceShiftHours}
             shiftBy={view.priceShiftBy}
             canShift={canCheckIn}
+            editing={timeEditing}
+            setEditing={setTimeEditing}
           />
         )}
+      </Card>
 
-        <GroupHeader
-          icon={<Plus size={13} />}
-          title="Extras & services"
-          total={cur.money2(f.extrasTotal)}
-        />
-        {f.extras.length === 0 ? (
-          <p className="px-4 py-2.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>
-            Nothing added.
-          </p>
-        ) : (
-          f.extras.map((l) => (
-            <Line
-              key={l.key}
-              label={l.label}
-              detail={l.detail}
-              amount={l.amount}
-              onRemove={
-                canAddCharges && open
-                  ? () => startRemove(async () => { await removeRoomCharge(l.key); })
-                  : undefined
-              }
-            />
-          ))
-        )}
-        {canAddCharges && open && (
-          adding ? (
-            <AddChargeForm stayId={view.stay_id} onDone={() => setAdding(false)} />
+      {/* ─── 4. Extras & services ──────────────────────────────────────────── */}
+      {(f.extras.length > 0 || (canAddCharges && open)) && (
+        <Card id="room-extras" icon={<Sparkles size={16} />} title="Extras & services" right={cur.money2(f.extrasTotal)}>
+          {f.extras.length === 0 ? (
+            <p className="px-4 py-3 text-sm" style={{ color: "var(--color-ink-mute)" }}>
+              Nothing added yet — laundry, mini bar, an extra bed and so on go here.
+            </p>
           ) : (
-            <button
-              type="button"
-              onClick={() => setAdding(true)}
-              disabled={removing}
-              className="w-full flex items-center gap-1.5 px-4 py-2.5 text-xs border-t"
-              style={{ color: "var(--color-primary)", borderColor: "var(--color-hairline)" }}
-            >
-              <Plus size={13} /> Add a charge
-            </button>
-          )
-        )}
-
-        {/* Food, as a bill LINE — the working list, with its serve and cancel
-            controls, lives in the Orders card above. It used to be listed here
-            instead, read-only, with the only way through to the real thing being
-            a link that said "Add a room-service order". */}
-        <GroupHeader
-          icon={<UtensilsCrossed size={13} />}
-          title="Food & beverage"
-          total={cur.money2(f.foodTotal)}
-        />
-        {f.food.length === 0 ? (
-          <p className="px-4 py-2.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>
-            No orders on this room.
-          </p>
-        ) : (
-          f.food.map((l) => <Line key={l.key} label={l.label} detail={l.detail} amount={l.amount} />)
-        )}
-
-        {/* Totals */}
-        <div className="border-t" style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}>
-          <Line label="Subtotal" amount={f.subtotal} muted />
-          {f.discount > 0 && <Line label="Discount" amount={-f.discount} muted />}
-          {f.tax > 0 && <Line label={`Tax (${f.taxPercent}%)`} amount={f.tax} muted />}
-          {f.service > 0 && <Line label={`Service charge (${f.servicePercent}%)`} amount={f.service} muted />}
-          <div
-            className="flex items-baseline justify-between px-4 py-3 border-t"
-            style={{ borderColor: "var(--color-hairline)" }}
-          >
-            <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Grand total</span>
-            <span className="text-lg tabular" style={{ color: "var(--color-ink)", fontWeight: 400 }}>
-              {cur.money2(f.grandTotal)}
-            </span>
-          </div>
-
-          {/* A deposit is a PAYMENT against the bill, so it sits below the grand total
-              rather than reducing it — the sale recorded at checkout is the whole stay. */}
-          {f.advancePaid > 0 && (
-            <>
+            f.extras.map((l) => (
               <Line
-                label="Advance received"
-                detail={[
-                  advanceCash > 0 ? `Cash ${cur.money2(advanceCash)}` : null,
-                  advanceOnline > 0 ? `Online ${cur.money2(advanceOnline)}` : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || undefined}
-                amount={-f.advancePaid}
-                muted
+                key={l.key}
+                label={l.label}
+                detail={l.detail}
+                amount={l.amount}
+                onRemove={
+                  canAddCharges && open
+                    ? () => startRemove(async () => { await removeRoomCharge(l.key); })
+                    : undefined
+                }
               />
-              <div
-                className="flex items-baseline justify-between px-4 py-3 border-t"
-                style={{ borderColor: "var(--color-hairline)" }}
-              >
-                <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
-                  {f.refundDue > 0 ? "Refund due" : "Balance payable"}
-                </span>
-                <span
-                  className="text-lg tabular"
-                  style={{ color: "var(--color-primary)", fontWeight: 400 }}
-                >
-                  {cur.money2(f.refundDue > 0 ? f.refundDue : f.balanceDue)}
-                </span>
-              </div>
-            </>
+            ))
           )}
-        </div>
-      </div>
+          {canAddCharges && open && (
+            adding ? (
+              <div style={{ background: "var(--color-canvas-soft)" }}>
+                <AddChargeForm stayId={view.stay_id} onDone={() => setAdding(false)} />
+              </div>
+            ) : (
+              <div className="px-4 py-3 border-t" style={{ borderColor: "var(--color-hairline)" }}>
+                <ActionButton icon={<Plus size={15} />} onClick={() => setAdding(true)} disabled={removing} full>
+                  Add extra charge
+                </ActionButton>
+              </div>
+            )
+          )}
+        </Card>
+      )}
 
-      {/* Advance payments — the deposits taken against this stay. Money in, before there
-          is a sale, so it belongs beside the folio rather than inside it. */}
+      {/* ─── 5. Advance payments ───────────────────────────────────────────────
+          The deposits taken against this stay. Money in, before there is a sale, so
+          it is its own card rather than a line inside the bill. */}
       {(view.advances.length > 0 || (open && canTakeAdvance)) && (
-        <div
-          className="rounded-2xl border overflow-hidden"
-          style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
-        >
-          <GroupHeader
-            icon={<Wallet size={13} />}
-            title="Advance payments"
-            total={cur.money2(f.advancePaid)}
-          />
+        <Card id="room-advances" icon={<Wallet size={16} />} title="Advance payments" right={cur.money2(f.advancePaid)}>
           {view.advances.length === 0 ? (
-            <p className="px-4 py-2.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>
+            <p className="px-4 py-3 text-sm" style={{ color: "var(--color-ink-mute)" }}>
               No advance taken for this stay.
             </p>
           ) : (
-            view.advances.map((a) => (
+            view.advances.map((a, idx) => (
               <div
                 key={a.id}
-                className="flex items-center gap-2 px-4 py-2.5 border-t"
+                className={`flex flex-wrap items-center gap-x-2.5 gap-y-2 px-4 py-2.5 ${idx > 0 ? "border-t" : ""}`}
                 style={{ borderColor: "var(--color-hairline)" }}
               >
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm" style={{ color: "var(--color-ink)" }}>
+                  <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
                     {/* A negative row is a refund handed back, not a deposit taken. */}
                     {a.amount < 0 ? "Refund returned" : "Advance"}
-                    <span className="text-xs ml-1.5" style={{ color: "var(--color-ink-mute)" }}>
+                    <span
+                      className="text-xs font-medium ml-1.5 px-1.5 py-0.5 rounded-md"
+                      style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink-mute)" }}
+                    >
                       {billMethodLabel(a.method)}
                     </span>
                   </p>
@@ -1539,11 +1778,11 @@ export function FolioClient({
                     {a.note ? ` · ${a.note}` : ""}
                   </p>
                 </div>
-                <span className="text-sm tabular" style={{ color: "var(--color-ink)" }}>
+                <span className="text-sm font-semibold tabular" style={{ color: "var(--color-ink)" }}>
                   {cur.money2(a.amount)}
                 </span>
                 {open && canEditAdvance && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 ml-auto">
                     <EditAdvanceButton advance={a} />
                     <RemoveAdvanceButton advanceId={a.id} />
                   </div>
@@ -1554,36 +1793,150 @@ export function FolioClient({
 
           {open && canTakeAdvance && (
             addingAdvance ? (
-              <AddAdvanceForm stayId={view.stay_id} onDone={() => setAddingAdvance(false)} />
+              <div style={{ background: "var(--color-canvas-soft)" }}>
+                <AddAdvanceForm stayId={view.stay_id} onDone={() => setAddingAdvance(false)} />
+              </div>
             ) : (
-              <button
-                type="button"
-                onClick={() => setAddingAdvance(true)}
-                className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs border-t"
-                style={{ borderColor: "var(--color-hairline)", color: "var(--color-primary)" }}
-              >
-                <Plus size={13} /> Take an advance
-              </button>
+              <div className="px-4 py-3 border-t" style={{ borderColor: "var(--color-hairline)" }}>
+                <ActionButton icon={<Plus size={15} />} onClick={() => setAddingAdvance(true)} full>
+                  Take an advance
+                </ActionButton>
+              </div>
             )
           )}
+        </Card>
+      )}
+
+      {/* ─── 6. Bill ───────────────────────────────────────────────────────────
+          Each part's total, then the grand total, any deposit against it, and what is
+          left — ending in Pay Now, which opens the payment popup like a table's bill. */}
+      <Card icon={<Receipt size={16} />} title="Bill">
+        <div className="flex flex-col gap-2 px-4 py-3">
+          <BillRow label="Room charges" amount={f.roomTotal} />
+          {f.extrasTotal > 0 && <BillRow label="Extras & services" amount={f.extrasTotal} />}
+          <BillRow label="Food & beverage" amount={f.foodTotal} />
         </div>
-      )}
-
-      {open && f.open && (
-        <p className="text-xs text-center" style={{ color: "var(--color-ink-mute)" }}>
-          The room charge is billed to right now, and grows by one night every 24 hours.
-        </p>
-      )}
-
-      {/* Check out */}
-      {open && canCheckOut && (
+        <div className="flex flex-col gap-2 px-4 py-3 border-t" style={{ borderColor: "var(--color-hairline)" }}>
+          <BillRow label="Subtotal" amount={f.subtotal} strong />
+          {canEditDiscount ? (
+            // Discount, right on the bill: ₹ / % toggle and the figure. The popup's own
+            // discount field shows the same value.
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor="bill_discount" className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
+                  Discount
+                </label>
+                <div className="flex items-center gap-2">
+                  <DiscountUnitToggle
+                    mode={discountMode}
+                    onChange={(m) => {
+                      if (m === discountMode) return;
+                      setDiscountMode(m);
+                      setDiscountAmt("");
+                    }}
+                  />
+                  <input
+                    id="bill_discount"
+                    type="number"
+                    min="0"
+                    max={discountMode === "percent" ? 100 : f.subtotal}
+                    step="0.01"
+                    inputMode="decimal"
+                    value={discountAmt}
+                    onChange={(e) => setDiscountAmt(e.target.value)}
+                    placeholder={discountMode === "percent" ? "0" : "0.00"}
+                    className="h-9 w-[110px] rounded-lg border px-2.5 text-sm text-right tabular"
+                    style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+                  />
+                </div>
+              </div>
+              {liveDiscount > 0 && (
+                <p className="text-xs text-right tabular" style={{ color: "var(--color-ink-mute)" }}>
+                  − {cur.money2(liveDiscount)}
+                  {discountMode === "amount" ? ` (${formatPercent(liveDiscount, f.subtotal)})` : ""}
+                  {" · "}PIN asked at Pay Now
+                </p>
+              )}
+            </div>
+          ) : (
+            f.discount > 0 && <BillRow label="Discount" amount={-f.discount} />
+          )}
+          {billTax > 0 && <BillRow label={`Tax (${f.taxPercent}%)`} amount={billTax} />}
+          {billService > 0 && <BillRow label={`Service charge (${f.servicePercent}%)`} amount={billService} />}
+        </div>
         <div
-          className="rounded-2xl border px-5 py-4"
-          style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+          className="flex items-baseline justify-between px-4 py-3 border-t"
+          style={{ borderColor: "var(--color-hairline)", background: wash(INK, 8) }}
         >
-          <p className="text-sm font-medium mb-3" style={{ color: "var(--color-ink)" }}>
-            Check out &amp; settle
-          </p>
+          <span className="text-base font-bold" style={{ color: "var(--color-ink)" }}>Grand total</span>
+          <span className="text-2xl font-bold tabular" style={{ color: INK }}>{cur.money2(billTotal)}</span>
+        </div>
+
+        {/* A deposit is a PAYMENT against the bill, so it sits below the grand total
+            rather than reducing it — the sale recorded at checkout is the whole stay. */}
+        {f.advancePaid > 0 && (
+          <div className="flex flex-col gap-2 px-4 py-3 border-t" style={{ borderColor: "var(--color-hairline)" }}>
+            <BillRow
+              label="Advance received"
+              detail={[
+                advanceCash > 0 ? `Cash ${cur.money2(advanceCash)}` : null,
+                advanceOnline > 0 ? `Online ${cur.money2(advanceOnline)}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || undefined}
+              amount={-f.advancePaid}
+            />
+            <BillRow
+              label={billRefund > 0 ? "Refund due" : "Balance payable"}
+              amount={billRefund > 0 ? billRefund : billBalance}
+              strong
+            />
+          </div>
+        )}
+
+        {open && (
+          <div className="px-4 py-3 border-t flex flex-col gap-2" style={{ borderColor: "var(--color-hairline)" }}>
+            {canCheckOut && (
+              <button
+                type="button"
+                onClick={() => setPaying(true)}
+                className="w-full h-12 rounded-xl text-base font-semibold inline-flex items-center justify-center gap-2 transition-all hover:brightness-110 active:scale-[0.99]"
+                style={{ background: FILL, color: "#fff" }}
+              >
+                <Wallet size={18} /> Pay Now · {cur.money2(billOwed)}
+              </button>
+            )}
+            {f.open && (
+              <p className="text-xs text-center" style={{ color: "var(--color-ink-mute)" }}>
+                The room charge is billed to right now, and grows by one night every 24 hours.
+              </p>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {open && canCheckOut && paying && (
+        <PaymentPopup onClose={() => setPaying(false)}>
+          <div className="flex items-center gap-3 mb-4">
+            <span
+              className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+              style={{ background: FILL, color: "#fff" }}
+            >
+              <Wallet size={21} strokeWidth={1.9} />
+            </span>
+            <p className="text-lg font-semibold flex-1" style={{ color: "var(--color-ink)" }}>
+              Check out &amp; collect payment
+            </p>
+            <button
+              type="button"
+              onClick={() => setPaying(false)}
+              aria-label="Close"
+              className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-canvas-soft"
+              style={{ color: "var(--color-ink-mute)" }}
+            >
+              <X size={18} />
+            </button>
+          </div>
           <CheckOutForm
             view={view}
             canDiscount={canDiscount}
@@ -1594,30 +1947,34 @@ export function FolioClient({
             discountMode={discountMode}
             setDiscountMode={setDiscountMode}
           />
-        </div>
+        </PaymentPopup>
       )}
 
-      {/* Cancel the stay — ends it WITHOUT billing it and settles the deposit.
-          Its own permission, never implied by check-in or checkout, and the
-          server demands the Security PIN on top. Placed under checkout, not
-          beside it: cancelling is the exception, and it should not sit where a
-          receptionist's hand goes for the everyday action. */}
+      {/* ─── 7. Cancel the stay ────────────────────────────────────────────────
+          Ends it WITHOUT billing it and settles the deposit. Its own permission,
+          never implied by check-in or checkout, and the server demands the Security
+          PIN on top. Last and quiet: cancelling is the exception, and it should not sit
+          where a receptionist's hand goes for the everyday action. */}
       {open && canCancelStay && (
-        <div
-          className="rounded-2xl border px-5 py-4"
+        <section
+          className="rounded-2xl border px-4 py-3.5 flex flex-col sm:flex-row sm:items-center gap-3"
           style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
         >
-          <p className="text-sm font-medium mb-1" style={{ color: "var(--color-ink)" }}>
-            Cancel this stay
-          </p>
-          <p className="text-xs mb-3" style={{ color: "var(--color-ink-mute)" }}>
-            The guest is not staying. Writes off the bill so far and refunds the deposit — or keeps
-            part of it as a cancellation charge.
-          </p>
-          <Button type="button" variant="secondary" size="sm" onClick={() => setCancelling(true)}>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold" style={{ color: "var(--color-ink)" }}>Cancel this stay</p>
+            <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+              Guest not staying — writes off the bill and refunds the deposit, or keeps part as a charge.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCancelling(true)}
+            className="shrink-0 w-full sm:w-auto inline-flex items-center justify-center gap-1.5 h-10 sm:h-9 px-3.5 rounded-lg border text-sm font-semibold"
+            style={{ borderColor: "var(--color-ruby)", color: "var(--color-ruby)", background: "var(--color-canvas)" }}
+          >
             <XCircle size={14} /> Cancel stay
-          </Button>
-        </div>
+          </button>
+        </section>
       )}
 
       <Modal
@@ -1655,8 +2012,8 @@ export function FolioClient({
         <button
           type="button"
           onClick={() => setBillOpen(true)}
-          className="inline-flex items-center justify-center gap-1.5 text-sm px-4 py-2 rounded-pill border"
-          style={{ borderColor: "var(--color-hairline)", color: "var(--color-ink)" }}
+          className="w-full inline-flex items-center justify-center gap-2 h-11 text-sm font-semibold px-4 rounded-xl border-[1.5px] transition-colors"
+          style={{ borderColor: INK, color: INK, background: "var(--color-canvas)", boxShadow: "var(--shadow-card)" }}
         >
           <Printer size={14} /> {paid ? "Print receipt" : "Print bill"}
         </button>
@@ -1726,6 +2083,77 @@ export function FolioClient({
           }}
         />
       </PrintModal>
+    </div>
+
+    </div>
+
+    {/* The menu, right of the room — tablet/desktop only (phones use "Add order"). */}
+    {showMenu && (
+      <div
+        className="hidden lg:flex flex-1 min-w-0 flex-col rounded-xl border overflow-hidden"
+        style={{
+          borderColor: "var(--color-hairline-input)",
+          background: "var(--color-canvas)",
+          boxShadow: "var(--shadow-card)",
+        }}
+      >
+        <MenuBrowser
+          sessionId={session!.id}
+          categories={menuData!.categories}
+          items={menuData!.items}
+          variants={menuData!.variants}
+          canAddCustom={menuData!.canAddCustom}
+          workstations={menuData!.workstations}
+          // The room's column refreshes to pull in what was just ordered.
+          onOrderPlaced={() => router.refresh()}
+        />
+      </div>
+    )}
+
+    {/* The menu on a PHONE: a full-screen panel over the room, opened by "Add order".
+        It is part of this page — not the separate add-items route it used to link to —
+        so there is nothing to load when it opens, and widening the window simply hides
+        it (`lg:hidden`) in favour of the desktop menu column: no navigation, no loader. */}
+    {showMenu && phoneMenuOpen && (
+      <div
+        className="lg:hidden fixed inset-x-0 bottom-0 z-30 flex flex-col"
+        style={{ top: NAV_HEIGHT, background: "var(--color-canvas)" }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Add items to Room ${view.room_number}`}
+      >
+        <div
+          className="flex items-center gap-3 px-4 py-3 border-b shrink-0"
+          style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+        >
+          <button
+            type="button"
+            onClick={() => setPhoneMenuOpen(false)}
+            className="inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 -ml-1 rounded-lg transition-colors hover:brightness-110 active:brightness-95"
+            style={{ color: "#fff", background: "var(--color-primary)" }}
+          >
+            <ChevronLeft size={15} />
+            Back
+          </button>
+          <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
+            Add items · Room {view.room_number}
+          </span>
+        </div>
+        <MenuBrowser
+          sessionId={session!.id}
+          categories={menuData!.categories}
+          items={menuData!.items}
+          variants={menuData!.variants}
+          canAddCustom={menuData!.canAddCustom}
+          workstations={menuData!.workstations}
+          // Back to the room, which refreshes to show what was just ordered.
+          onOrderPlaced={() => {
+            setPhoneMenuOpen(false);
+            router.refresh();
+          }}
+        />
+      </div>
+    )}
     </div>
   );
 }

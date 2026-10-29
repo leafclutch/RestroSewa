@@ -153,6 +153,14 @@ almost everything is reached through the **service_role** client or **RPCs** (RL
 - **finance_openings** — the ONE stored figure finance can't derive: the opening cash/online
   seed (PK = restaurant_id), `effective_from`. Everything else is derived by `finance_report`.
 - **payroll** tables — salaries, payments, advances; gated on `view_payroll`/`manage_payroll`.
+- **Rota payroll (advanced payout)** — only for restaurants with `settings.payout_mode='advanced'`
+  (`lib/payout-mode.ts`). `staff_hourly_rates` (dated revisions), `rota_shifts` (one row per person
+  per day: `kind` shift/holiday/sick/off, planned + optional actual times, `break_minutes`,
+  holiday `paid_hours`; end ≤ start = past midnight), `rota_pay_periods` (stored, never move;
+  `ensure_rota_period` clips new ones against neighbours). Wages are filed in **`salary_payments`**
+  with `rota_period_id` set, so `finance_report` needs no change; every default-payroll "uncycled
+  month" lookup filters `rota_period_id is null`. `payroll_summary` liability adds
+  `rota_outstanding()`. Hours maths: SQL `rota_shift_hours` ⇔ TS `shiftPaidHours` — keep in sync.
 - **report_deliveries** — daily-report log & exactly-once guard. Unique
   `(restaurant_id, period_type, period_key)`; `status`, `error`, `recipients text[]`,
   `generated_at`, `sent_at`, `attempts`. `period_type='daily'` today; weekly/monthly reuse it

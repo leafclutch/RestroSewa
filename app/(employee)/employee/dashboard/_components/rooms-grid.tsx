@@ -8,7 +8,7 @@ import type { RoomOverview } from "@/app/actions/rooms";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { STATUS_STYLE } from "@/lib/status-colors";
 import { SECTION_ACCENT } from "@/lib/section-colors";
-import { CountPill } from "@/components/ui/count-pill";
+import { usePublishSectionBadges } from "./section-badges";
 import { Button } from "@/components/ui/button";
 import { formatShort } from "@/lib/format-time";
 import { TransferModal } from "@/app/(employee)/employee/_components/transfer-modal";
@@ -286,16 +286,22 @@ const RoomCard = memo(function RoomCard({ room, canCheckIn, canShift, onCheckIn,
         pill: { background: STATUS_STYLE.maintenance.soft, color: STATUS_STYLE.maintenance.color, borderColor: STATUS_STYLE.maintenance.color },
       }
     : {
-        // Available (or an old session with no stay) — teal identity, light.
-        bar: rooms.soft, fg: "var(--color-ink)", sub: "var(--color-ink-mute)",
-        border: rooms.color, rule: "var(--color-hairline)", bed: rooms.color,
-        pill: { background: rooms.soft, color: rooms.color, borderColor: rooms.color },
+        // Available (or an old session with no stay) — a neutral grey strip, so the solid
+        // teal occupied rooms are what the eye lands on. Teal stays in the bed mark and pill.
+        bar: "var(--color-canvas-soft)", fg: "var(--color-ink)", sub: "var(--color-ink-mute)",
+        border: "var(--color-hairline-input)", rule: "var(--color-hairline)", bed: rooms.color,
+        pill: { background: "var(--color-canvas)", color: rooms.color, borderColor: rooms.color },
       };
 
   return (
     <div
-      className="rounded-xl border flex flex-col overflow-hidden"
-      style={{ background: "var(--color-canvas)", borderColor: h.border }}
+      className="rounded-2xl border flex flex-col overflow-hidden"
+      style={{
+        background: "var(--color-canvas)",
+        borderColor: h.border,
+        borderWidth: stay ? 2 : 1.5,
+        boxShadow: "var(--shadow-card)",
+      }}
     >
       <div className="flex items-center gap-2 px-4 py-2.5 border-b" style={{ background: h.bar, borderColor: h.rule }}>
         {/* The teal bed mark is what separates a room card from a table card at a glance —
@@ -538,6 +544,17 @@ export function RoomsGrid({
   const free = rooms.filter((r) => r.status === "available" && !r.stay).length;
   const dirty = rooms.filter((r) => r.status === "cleaning").length;
 
+  usePublishSectionBadges(
+    rooms.length === 0
+      ? null
+      : [
+          { n: rooms.length, label: "total", variant: "soft" },
+          { n: occupied, label: "occupied", variant: "solid", fill: "var(--fill-teal)" },
+          { n: free, label: "free", variant: "muted" },
+          ...(dirty > 0 ? [{ n: dirty, label: "cleaning", variant: "soft" as const, tone: STATUS_STYLE.cleaning }] : []),
+        ]
+  );
+
   if (rooms.length === 0) {
     return (
       <div
@@ -553,15 +570,7 @@ export function RoomsGrid({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-base font-medium" style={{ color: SECTION_ACCENT.rooms.color }}>Rooms</p>
-        <span className="inline-flex items-center gap-1.5 flex-wrap">
-          {free > 0 && <CountPill n={free} label="free" tone={SECTION_ACCENT.rooms} />}
-          {occupied > 0 && <CountPill n={occupied} label="occupied" tone={SECTION_ACCENT.rooms} fill="var(--fill-teal)" />}
-          {dirty > 0 && <CountPill n={dirty} label="cleaning" tone={STATUS_STYLE.cleaning} />}
-          <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>{rooms.length} total</span>
-        </span>
-      </div>
+      <p className="text-sm font-semibold mb-3" style={{ color: "var(--color-ink)" }}>Rooms</p>
 
       {error && (
         <p className="text-xs mb-2" style={{ color: "var(--color-ruby)" }}>{error}</p>

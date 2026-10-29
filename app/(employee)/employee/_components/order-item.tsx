@@ -99,6 +99,9 @@ export function OrderItem({
             if all of it were still coming. "Ordered 3 · Cancelled 1 · Remaining 2" is
             the whole point of the feature being visible at the counter. Null when the
             line is unremarkable, so an ordinary bill doesn't grow a row of noise. */}
+        <p className="sm:hidden text-xs mt-0.5 font-medium" style={{ color: STATUS_COLOR[item.item_status] }}>
+          {STATUS_LABEL[item.item_status]}
+        </p>
         {summary && (
           <p
             className="text-xs mt-0.5"
@@ -124,8 +127,10 @@ export function OrderItem({
         {cur.money(Number(item.item_price) * active)}
       </p>
 
+      {/* Its own column from sm up; on a phone it moves under the name (above), so the
+          name keeps the row's width instead of being squeezed beside it. */}
       <span
-        className="text-xs shrink-0 min-w-[52px] text-center"
+        className="hidden sm:inline text-xs shrink-0 min-w-[52px] text-center"
         style={{ color: STATUS_COLOR[item.item_status] }}
       >
         {STATUS_LABEL[item.item_status]}

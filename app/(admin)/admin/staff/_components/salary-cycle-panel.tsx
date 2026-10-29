@@ -160,7 +160,7 @@ export function SalaryCyclePanel({
         </span>
         {locked ? (
           <span
-            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]"
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px]"
             style={{ background: STATUS_TONE.present.bg, color: STATUS_TONE.present.ink }}
           >
             <Lock className="size-3" /> Verified
@@ -181,7 +181,7 @@ export function SalaryCyclePanel({
         ].map(([k, v]) => (
           <div key={k} className="flex flex-col">
             <dt
-              className="text-[11px] uppercase tracking-wide"
+              className="text-[12px] uppercase tracking-wide"
               style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
             >
               {k}
@@ -211,7 +211,7 @@ export function SalaryCyclePanel({
                   disabled={locked || pending}
                   onClick={() => setPicking(picking === d ? null : d)}
                   title={`${dayLabel(d)} — ${ATTENDANCE_LABEL[status]}`}
-                  className="flex size-9 flex-col items-center justify-center rounded-md text-[11px] leading-none disabled:opacity-60"
+                  className="flex size-9 flex-col items-center justify-center rounded-md text-[12px] leading-none disabled:opacity-60"
                   style={{ background: tone.bg, color: tone.ink }}
                 >
                   <span>{Number(d.slice(8, 10))}</span>

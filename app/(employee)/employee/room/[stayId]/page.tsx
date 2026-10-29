@@ -7,6 +7,7 @@ import { getWorkstations } from "@/app/actions/workstations";
 import { getRestaurantConfig } from "@/lib/restaurant-info";
 import { createServiceClient } from "@/lib/supabase/service";
 import { FolioClient } from "./_components/folio-client";
+import { getAddItemsMenuData } from "@/lib/menu-browser-data";
 import { TransferHistory } from "../../session/(split)/[id]/_components/transfer-history";
 
 /**
@@ -54,7 +55,10 @@ export default async function RoomPage({
     return data?.id ? getSessionDetail(data.id) : null;
   })();
 
-  const [view, config, session, workstations] = await Promise.all([
+  // The menu for the room screen's right-hand column (tablet/desktop), so a room-service
+  // order is taken in place like a table's. Only for staff who can create orders.
+  const canCreateOrders = hasPermission(restaurantUser, PERMISSIONS.CREATE_ORDERS);
+  const [view, config, session, workstations, menuData] = await Promise.all([
     getRoomFolio(stayId),
     // The SAME cached config the session screen reads, instead of this page's own
     // uncached `restaurants` select. It removes a round trip, and it carries two things
@@ -64,6 +68,7 @@ export default async function RoomPage({
     sessionPromise,
     // Station list so each item lands on its own workstation Order Ticket.
     getWorkstations(restaurantUser.restaurant_id),
+    canCreateOrders ? getAddItemsMenuData(restaurantUser) : Promise.resolve(null),
   ]);
   if (!view) notFound();
 
@@ -77,14 +82,11 @@ export default async function RoomPage({
 
   return (
     <>
-    {/* Where this guest has been. Renders nothing unless the stay has been moved.
-        Matches FolioClient's own container so it lines up with the cards below it. */}
-    {session && session.transfers.length > 0 && (
-      <div className="max-w-2xl mx-auto px-3 sm:px-5 pt-4">
-        <TransferHistory transfers={session.transfers} />
-      </div>
-    )}
     <FolioClient
+      // Where this guest has been. Renders nothing unless the stay has been moved.
+      transferHistory={
+        session && session.transfers.length > 0 ? <TransferHistory transfers={session.transfers} /> : null
+      }
       view={view}
       session={session}
       restaurant={{
@@ -105,7 +107,8 @@ export default async function RoomPage({
       staffName={restaurantUser.display_name}
       workstations={workstations}
       canAddCharges={hasPermission(restaurantUser, PERMISSIONS.CREATE_ORDERS)}
-      canCreateOrders={hasPermission(restaurantUser, PERMISSIONS.CREATE_ORDERS)}
+      canCreateOrders={canCreateOrders}
+      menuData={menuData}
       canManageOrders={NAV_ACCESS.canManageOrders(restaurantUser)}
       canCancelOrders={hasPermission(restaurantUser, PERMISSIONS.CANCEL_ORDERS)}
       canCheckOut={hasPermission(restaurantUser, PERMISSIONS.CLOSE_BILLS)}

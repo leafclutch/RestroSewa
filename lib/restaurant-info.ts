@@ -3,6 +3,12 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { tenantCache, revalidateTenant, CACHE } from "@/lib/cache/tenant-cache";
 import { normalizeBusinessType, type BusinessType } from "@/lib/business-type";
 import { normalizeCurrency } from "@/lib/currency";
+import {
+  normalizePayoutMode,
+  normalizeRotaPayPeriod,
+  type PayoutMode,
+  type RotaPayPeriod,
+} from "@/lib/payout-mode";
 
 /**
  * The restaurant's own header/config, cached across requests.
@@ -36,6 +42,10 @@ export type RestaurantConfig = {
   service_charge_percent: number | undefined;
   /** ISO currency code every amount is displayed in (see lib/currency.ts). */
   currency: string;
+  /** Staff payroll: monthly salary ("standard") or rota/hourly ("advanced"). See lib/payout-mode.ts. */
+  payoutMode: PayoutMode;
+  /** How often rota staff are paid — only meaningful when payoutMode is "advanced". */
+  rotaPayPeriod: RotaPayPeriod;
   /** Whether an admin has set a discount PIN. The hash itself never leaves the server. */
   discountEnabled: boolean;
   /** Whether an admin has set a Security PIN — sensitive edits are possible only when true.
@@ -81,6 +91,8 @@ export async function getRestaurantConfig(restaurantId: string): Promise<Restaur
         tax_percent: numFromSettings(s, "tax_percent", "tax_rate", "gst_percent"),
         service_charge_percent: numFromSettings(s, "service_charge_percent", "service_charge"),
         currency: normalizeCurrency(s?.currency),
+        payoutMode: normalizePayoutMode(s),
+        rotaPayPeriod: normalizeRotaPayPeriod(s),
         discountEnabled: !!rest?.discount_pin_hash,
         securityEnabled: !!rest?.security_pin_hash,
       } satisfies RestaurantConfig;

@@ -695,7 +695,7 @@ export function VendorsClient({
                       {s.credit_balance > 0 ? cur.money(s.credit_balance) : "Settled"}
                     </p>
                     {s.credit_balance > 0 && (
-                      <p className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>outstanding</p>
+                      <p className="text-[11px]" style={{ color: "var(--color-ink-mute)" }}>outstanding</p>
                     )}
                   </div>
                 </div>

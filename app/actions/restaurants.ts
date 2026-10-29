@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { revalidateRestaurantInfo } from "@/lib/restaurant-info";
 import { subscriptionDaysRemaining } from "@/lib/subscription";
+import { parsePayoutForm } from "@/lib/payout-mode";
 
 // The (superadmin) layout guards page RENDERING. A server action is a POST
 // endpoint in its own right — reachable without ever loading that layout — so
@@ -164,6 +165,9 @@ export async function createRestaurant(
   const validQrModes = ["ordering_enabled", "ordering_no_pin", "view_only"];
   if (!validQrModes.includes(qrMode)) return { error: "Invalid ordering mode." };
 
+  const payout = parsePayoutForm(formData);
+  if (!payout) return { error: "Invalid staff payout option." };
+
   // Defaults the subscription clock to today rather than leaving it null — a
   // superadmin who forgets to touch it still gets a real countdown, and can
   // correct the date later if the actual install happened on a different day.
@@ -184,6 +188,7 @@ export async function createRestaurant(
       customer_ordering_enabled: orderingEnabled,
       qr_mode: qrMode,
       install_date: installDate,
+      settings: payout,
     })
     .select("id")
     .single();
@@ -261,11 +266,27 @@ export async function updateRestaurant(
   const maxTables = maxTablesRaw ? parseInt(maxTablesRaw, 10) : null;
   const maxRooms = maxRoomsRaw ? parseInt(maxRoomsRaw, 10) : null;
 
+  const payout = parsePayoutForm(formData);
+  if (!payout) return { error: "Invalid staff payout option." };
+
   const service = createServiceClient();
+
+  // `settings` is one JSON blob shared with the admin's own Settings page (currency,
+  // tax, printing…). Merge into what is there — never replace it.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: current, error: readError } = await (service as any)
+    .from("restaurants")
+    .select("settings")
+    .eq("id", id)
+    .maybeSingle();
+  if (readError) return { error: readError.message };
+  if (!current) return { error: "Restaurant not found." };
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any)
     .from("restaurants")
     .update({
+      settings: { ...(current.settings ?? {}), ...payout },
       name,
       logo_url: logoUrl,
       pan_vat_number: panVat,

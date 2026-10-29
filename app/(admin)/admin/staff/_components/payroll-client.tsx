@@ -57,7 +57,7 @@ function StatusPill({ status }: { status: PayrollCycleRow["status"] }) {
   const tone = PAYROLL_STATUS_COLOR[status];
   return (
     <span
-      className="text-[11px] px-2 py-0.5 rounded-full shrink-0"
+      className="text-[12px] px-2 py-0.5 rounded-full shrink-0"
       style={{ color: tone, background: `${tone}14`, border: `1px solid ${tone}33` }}
     >
       {PAYROLL_STATUS_LABEL[status]}
@@ -464,7 +464,7 @@ function PayrollLine({
               </span>
               {!noSalary && <StatusPill status={row.status} />}
               {!row.is_active && (
-                <span className="text-[11px]" style={{ color: "var(--color-ink-mute)" }}>
+                <span className="text-[12px]" style={{ color: "var(--color-ink-mute)" }}>
                   Inactive
                 </span>
               )}
@@ -488,7 +488,7 @@ function PayrollLine({
                   salary, and showing the salary there made Salary − Paid disagree
                   with Remaining. */}
               <span className="lg:text-right" title={`Monthly salary ${cur.money(row.monthly_salary ?? 0)}`}>
-                <span className="block text-[10px]" style={{ color: "var(--color-ink-mute)" }}>
+                <span className="block text-[11px]" style={{ color: "var(--color-ink-mute)" }}>
                   {row.payableAmount < (row.monthly_salary ?? 0) - 0.005 ? "Payable" : "Salary"}
                 </span>
                 <span className="block text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>
@@ -496,7 +496,7 @@ function PayrollLine({
                 </span>
               </span>
               <span className="lg:text-right">
-                <span className="block text-[10px]" style={{ color: "var(--color-ink-mute)" }}>
+                <span className="block text-[11px]" style={{ color: "var(--color-ink-mute)" }}>
                   Advance
                 </span>
                 <span
@@ -511,7 +511,7 @@ function PayrollLine({
                 </span>
               </span>
               <span className="lg:text-right">
-                <span className="block text-[10px]" style={{ color: "var(--color-ink-mute)" }}>
+                <span className="block text-[11px]" style={{ color: "var(--color-ink-mute)" }}>
                   Paid
                 </span>
                 <span
@@ -526,7 +526,7 @@ function PayrollLine({
                 </span>
               </span>
               <span className="lg:text-right">
-                <span className="block text-[10px]" style={{ color: "var(--color-ink-mute)" }}>
+                <span className="block text-[11px]" style={{ color: "var(--color-ink-mute)" }}>
                   Remaining
                 </span>
                 <span

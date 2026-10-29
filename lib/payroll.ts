@@ -494,6 +494,10 @@ export const PAYROLL_ERRORS: Record<string, string> = {
   REVISION_NOT_FOUND: "That salary change no longer exists. Refresh and try again.",
   LAST_REVISION:
     "This is their only salary, so it can be changed but not removed.",
+  // Rota (advanced payout). ALREADY_PAID / AMOUNT_EXCEEDS_REMAINING above read
+  // "this month" — the rota action rewrites those two for "this period".
+  PERIOD_NOT_FOUND: "That pay period no longer exists. Refresh and try again.",
+  INVALID_FREQUENCY: "Choose a weekly, fortnightly or monthly pay period.",
 };
 
 export function payrollError(message: string, fallback: string): string {

@@ -58,11 +58,14 @@ export default async function SessionLayout({ children }: { children: React.Reac
         className="hidden lg:block fixed z-10"
         style={{
           top: NAV_HEIGHT,
-          left: 0,
+          // On the RIGHT edge now (order · menu · rail). The box keeps its leading 12px
+          // as the gap to the menu column, so the split view stops exactly at its edge.
+          right: 0,
           bottom: 0,
           width: RAIL_BOX_WIDTH,
           paddingTop: 12,
           paddingBottom: 12,
+          paddingRight: 12,
           paddingLeft: 12,
         }}
       >
@@ -71,7 +74,7 @@ export default async function SessionLayout({ children }: { children: React.Reac
           style={{
             borderColor: "var(--color-hairline-input)",
             background: "var(--color-canvas)",
-            boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+            boxShadow: "var(--shadow-card)",
           }}
         >
           <SessionRail

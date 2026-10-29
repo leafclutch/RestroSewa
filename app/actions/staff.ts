@@ -2,6 +2,7 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { pinToAuthPassword } from "@/lib/auth/pin-password";
 import { revalidatePath } from "next/cache";
 import { PERMISSIONS } from "@/lib/permissions";
 import type { Permission } from "@/lib/permissions";
@@ -95,7 +96,7 @@ export async function createStaffMember(
 
   const { data: authData, error: authError } = await admin.auth.admin.createUser({
     email: syntheticEmail,
-    password: pin,
+    password: pinToAuthPassword(pin),
     email_confirm: true,
   });
 
@@ -157,11 +158,12 @@ export async function resetStaffPin(
   // collision, and there's never a moment where the staff member has no working login.
   if (authUserId) {
     const { error: updateErr } = await admin.auth.admin.updateUserById(authUserId, {
-      password: newPin,
+      password: pinToAuthPassword(newPin),
     });
     if (!updateErr) return null;
-    // Some GoTrue versions reject short passwords on updateUserById (min-length check)
-    // even though createUser accepts a 4-digit PIN. Fall through to recreate the account.
+    // Couldn't change it in place (e.g. a stale/missing auth user). Fall through to
+    // recreate the account. The PIN is mapped through `pinToAuthPassword`, so Supabase's
+    // minimum-length rule no longer rejects it on either path.
   }
 
   // Fallback / no existing account. The synthetic email is unique, so any stale account
@@ -173,7 +175,7 @@ export async function resetStaffPin(
 
   const { data: newAuthUser, error: createErr } = await admin.auth.admin.createUser({
     email: syntheticEmail,
-    password: newPin,
+    password: pinToAuthPassword(newPin),
     email_confirm: true,
   });
   if (createErr) return { error: `Failed to update PIN: ${createErr.message}` };

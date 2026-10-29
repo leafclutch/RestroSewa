@@ -5,6 +5,9 @@ import { getWorkstations } from "@/app/actions/workstations";
 import { getPayrollCycleSheet } from "@/app/actions/payroll";
 import { WorkstationAssign } from "./_components/workstation-assign";
 import { PayrollClient } from "./_components/payroll-client";
+import { RotaPayout } from "./_components/rota/rota-payout";
+import { getRotaPayrollSheet, getRotaWeek } from "@/app/actions/rota";
+import { getRestaurantConfig } from "@/lib/restaurant-info";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
 
 type StaffRow = {
@@ -64,7 +67,15 @@ export default async function AdminStaffPage() {
   // same as seeing what everyone earns. `getPayrollCycleSheet` re-checks this itself,
   // so a caller who slipped past here would still get an empty sheet.
   const canViewPayroll = PAYROLL_ACCESS.canViewPayroll(restaurantUser);
-  const payroll = canViewPayroll ? await getPayrollCycleSheet() : null;
+  // Advanced payout (rota, hourly) replaces the monthly payroll entirely for the
+  // restaurants the super admin switched onto it — see lib/payout-mode.ts.
+  const { payoutMode } = await getRestaurantConfig(restaurant_id);
+  const advanced = payoutMode === "advanced";
+  const [payroll, rotaWeek, rotaSheet] = canViewPayroll
+    ? advanced
+      ? await Promise.all([null, getRotaWeek(), getRotaPayrollSheet()])
+      : [await getPayrollCycleSheet(), null, null]
+    : [null, null, null];
 
   return (
     <div className="p-4 md:p-8 w-full">
@@ -157,6 +168,13 @@ export default async function AdminStaffPage() {
       {payroll && (
         <PayrollClient
           initial={payroll}
+          canManage={PAYROLL_ACCESS.canManagePayroll(restaurantUser)}
+        />
+      )}
+      {rotaWeek && rotaSheet && (
+        <RotaPayout
+          week={rotaWeek}
+          sheet={rotaSheet}
           canManage={PAYROLL_ACCESS.canManagePayroll(restaurantUser)}
         />
       )}
