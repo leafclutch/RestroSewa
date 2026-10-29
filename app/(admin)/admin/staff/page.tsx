@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getWorkstations } from "@/app/actions/workstations";
 import { getPayrollCycleSheet } from "@/app/actions/payroll";
 import { WorkstationAssign } from "./_components/workstation-assign";
+import { PinLock } from "./_components/pin-lock";
 import { PayrollClient } from "./_components/payroll-client";
 import { RotaPayout } from "./_components/rota/rota-payout";
 import { getRotaPayrollSheet, getRotaWeek } from "@/app/actions/rota";
@@ -18,6 +19,8 @@ type StaffRow = {
   is_active: boolean;
   auth_user_id: string | null;
   permissions: string[];
+  pin_failed_attempts: number | null;
+  pin_locked_until: string | null;
 };
 
 type AssignmentRow = {
@@ -35,7 +38,7 @@ export default async function AdminStaffPage() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("restaurant_users")
-      .select("id, display_name, title, role, is_active, auth_user_id, permissions")
+      .select("id, display_name, title, role, is_active, auth_user_id, permissions, pin_failed_attempts, pin_locked_until")
       .eq("restaurant_id", restaurant_id)
       .is("deleted_at", null)
       .order("role")
@@ -62,6 +65,14 @@ export default async function AdminStaffPage() {
     assignments.filter((a) => a.restaurant_user_id === staffId).map((a) => a.workstation_id);
 
   const canAssignWorkstations = restaurantUser.role === "restaurant_admin";
+  // Unlocking a wrong-PIN lockout is the manager's — the same admins (the action re-checks).
+  const canUnlockPins = restaurantUser.role === "restaurant_admin";
+  // Minutes left on each lock, worked out once here so the card just shows a number.
+  const now = Date.now();
+  const lockedMinutes = (s: StaffRow) => {
+    const until = s.pin_locked_until ? new Date(s.pin_locked_until).getTime() : 0;
+    return until > now ? Math.max(1, Math.ceil((until - now) / 60000)) : 0;
+  };
 
   // Payroll is gated separately from `view_staff`: seeing the roster is not the
   // same as seeing what everyone earns. `getPayrollCycleSheet` re-checks this itself,
@@ -130,6 +141,14 @@ export default async function AdminStaffPage() {
                         {s.title}
                       </p>
                     )}
+                    {/* Wrong-PIN lockout, and the manager's Unlock. Nothing shown when clean. */}
+                    <PinLock
+                      staffId={s.id}
+                      restaurantId={restaurant_id}
+                      lockedMinutes={lockedMinutes(s)}
+                      failedAttempts={s.pin_failed_attempts ?? 0}
+                      canUnlock={canUnlockPins}
+                    />
                     {/* Workstation assignment â€” employees only, admins skip all workstations */}
                     {s.role === "restaurant_employee" && canAssignWorkstations && (
                       <div className="mt-1.5">

@@ -157,10 +157,19 @@ export async function resetStaffPin(
   // Preferred path: change the password on the existing auth account in place. No email
   // collision, and there's never a moment where the staff member has no working login.
   if (authUserId) {
+    // The email is set too, not just the password: login looks the account up by
+    // `emp-<staff id>@restrosewa.internal`, so an auth account that drifted to any other
+    // email (e.g. after a data transfer between servers) would take the new PIN and still
+    // never be found — "correct PIN, can't log in", with nothing on screen to say why.
     const { error: updateErr } = await admin.auth.admin.updateUserById(authUserId, {
+      email: syntheticEmail,
+      email_confirm: true,
       password: pinToAuthPassword(newPin),
     });
-    if (!updateErr) return null;
+    if (!updateErr) {
+      await clearPinLockout(service, staffId);
+      return null;
+    }
     // Couldn't change it in place (e.g. a stale/missing auth user). Fall through to
     // recreate the account. The PIN is mapped through `pinToAuthPassword`, so Supabase's
     // minimum-length rule no longer rejects it on either path.
@@ -190,7 +199,19 @@ export async function resetStaffPin(
     await admin.auth.admin.deleteUser(newAuthUser.user.id);
     return { error: "Failed to update staff record." };
   }
+  await clearPinLockout(service, staffId);
   return null;
+}
+
+/**
+ * A PIN reset also lifts any wrong-PIN lockout. Otherwise someone locked out for 30
+ * minutes stays locked even after their PIN is reset — and is refused with the new,
+ * correct PIN too (the lockout is checked before the PIN). `record_pin_attempt` with
+ * success = true is exactly "clear the counter and the lock".
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function clearPinLockout(service: any, staffId: string) {
+  await service.rpc("record_pin_attempt", { p_restaurant_user_id: staffId, p_success: true });
 }
 
 export async function deleteStaffMember(
@@ -278,6 +299,40 @@ export async function softDeleteStaffMember(
     await admin.auth.admin.updateUserById(authUserId, { ban_duration: "876600h" });
   }
 
+  revalidatePath(`/superadmin/restaurants/${restaurantId}`);
+  return null;
+}
+
+/**
+ * A manager lifts a staff member's wrong-PIN lockout (5 wrong PINs → 30 minutes), so they
+ * can sign in again straight away instead of waiting it out — the lock is on the ACCOUNT,
+ * so anyone mistyping at any till can trip it for them.
+ *
+ * Restaurant admin of THAT restaurant, or the super admin. The staff member is looked up
+ * and must belong to the restaurant named — the id alone is never trusted.
+ */
+export async function unlockStaffPin(staffId: string, restaurantId: string): Promise<ActionResult> {
+  const denied = await requireStaffManagerOf(restaurantId);
+  if (denied) return denied;
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: row } = await (service as any)
+    .from("restaurant_users")
+    .select("id")
+    .eq("id", staffId)
+    .eq("restaurant_id", restaurantId)
+    .maybeSingle();
+  if (!row) return { error: "Staff member not found." };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).rpc("record_pin_attempt", {
+    p_restaurant_user_id: staffId,
+    p_success: true,
+  });
+  if (error) return { error: "Could not unlock. Please try again." };
+
+  revalidatePath(`/admin/staff`);
   revalidatePath(`/superadmin/restaurants/${restaurantId}`);
   return null;
 }

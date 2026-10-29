@@ -88,12 +88,26 @@ export function StaffLogin({ staff }: { staff: StaffMember[] }) {
     }
   }, [state]);
 
+  // Whose PIN the last attempt was for. The action's result outlives the screen it came
+  // from, so without this one person's "Too many wrong attempts" (or "Incorrect PIN") was
+  // still shown after going Back and picking somebody else — as if THEY were locked.
+  const [attemptFor, setAttemptFor] = useState<string | null>(null);
+
   const isNavigating = !!(state && "redirectTo" in state);
-  const errorMsg = state && "error" in state ? state.error : null;
+  const errorMsg =
+    state && "error" in state && selected && attemptFor === selected.id ? state.error : null;
 
   function handleDigit(d: string) {
+    // Typing a fresh PIN puts the last attempt's message away — it was about that attempt.
+    if (attemptFor) setAttemptFor(null);
     setPin((p) => (p.length < PIN_LENGTH ? p + d : p));
   }
+
+  // A refused PIN is cleared, so the next try starts from empty dots instead of having to
+  // backspace four digits first.
+  useEffect(() => {
+    if (state && "error" in state) setPin("");
+  }, [state]);
 
   function handleBack() {
     setPin((p) => p.slice(0, -1));
@@ -168,6 +182,7 @@ export function StaffLogin({ staff }: { staff: StaffMember[] }) {
         onClick={() => {
           setSelected(null);
           setPin("");
+          setAttemptFor(null);
         }}
         className="self-start text-sm mb-2"
         style={{ color: "var(--color-ink-mute)" }}
@@ -196,7 +211,12 @@ export function StaffLogin({ staff }: { staff: StaffMember[] }) {
       <Keypad onDigit={handleDigit} onBack={handleBack} />
 
       {/* Hidden form carries the data; React handles the transition via form action */}
-      <form ref={formRef} action={dispatch} className="w-full max-w-[240px] mt-4">
+      <form
+        ref={formRef}
+        action={dispatch}
+        onSubmit={() => setAttemptFor(selected.id)}
+        className="w-full max-w-[240px] mt-4"
+      >
         <input type="hidden" name="restaurant_user_id" value={selected.id} />
         <input type="hidden" name="pin" value={pin} />
         <Button
