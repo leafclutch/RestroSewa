@@ -290,6 +290,7 @@ export function TablesGrid({
   const [error, setError] = useState<string | null>(null);
   const [shifting, setShifting] = useState<TableStatus | null>(null);
   const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
+  const router = useRouter();
 
   // Which table is "current" — a blue ring on its card — read straight off the
   // URL rather than passed down as a prop. This grid now lives in a layout
@@ -477,7 +478,14 @@ export function TablesGrid({
           onClose={() => setShifting(null)}
           // The move fires rs_ev_sessions, so every OTHER dashboard repaints on its own.
           // This one asked for it, so don't make it wait for the round trip.
-          onDone={resync}
+          onDone={({ roomStayId }) => {
+            resync();
+            // Moved onto a room's bill: the session on screen is now closed and empty, so
+            // follow the food to the guest's folio.
+            if (roomStayId && shifting.session_id === activeSessionId) {
+              router.push(`/employee/room/${roomStayId}`);
+            }
+          }}
         />
       )}
     </div>

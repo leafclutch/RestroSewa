@@ -12,7 +12,8 @@ import type { SessionTransferRow } from "@/app/actions/pos";
 export function TransferHistory({ transfers }: { transfers: SessionTransferRow[] }) {
   if (transfers.length === 0) return null;
 
-  const noun = (kind: string) => (kind === "room" ? "Room move" : "Table shift");
+  const noun = (kind: string) =>
+    kind === "room" ? "Room move" : kind === "table_to_room" ? "Moved to room bill" : "Table shift";
 
   return (
     <div
