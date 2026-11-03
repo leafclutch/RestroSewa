@@ -564,6 +564,12 @@ html {
   /* iOS silently inflates text in landscape unless told not to. On a table map,
      that reflows the grid. */
   -webkit-text-size-adjust: 100%;
+  /* The page's own scroller takes overscroll-behavior from the ROOT element, not from
+     <body> — the body rule below never reached it. Without this, scrolling past the end
+     of anything (or on a screen with nothing to scroll) rubber-banded the whole
+     document: the in-flow sticky nav bounced down and back while the room/table
+     screen's `fixed` columns stayed put. */
+  overscroll-behavior-y: none;
 }
 
 body {

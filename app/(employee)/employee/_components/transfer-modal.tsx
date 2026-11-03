@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { ArrowDown, MoveRight } from "lucide-react";
 import { Modal } from "@/app/(admin)/admin/_components/modal";
 import { Button } from "@/components/ui/button";
-import { getTransferTargets, transferSession } from "@/app/actions/transfer";
+import { getTransferTargets, transferSession, transferTableToRoom } from "@/app/actions/transfer";
 import type { TransferTarget } from "@/app/actions/transfer";
 
 /**
@@ -31,7 +31,8 @@ export function TransferModal({
   /** Shown until the server tells us where this session actually is. */
   fallbackLabel: string;
   onClose: () => void;
-  onDone?: () => void;
+  /** `roomStayId` is set when a table's bill went onto a room: the table session is now closed. */
+  onDone?: (result: { roomStayId?: string | null }) => void;
 }) {
   // createPortal needs a document, which does not exist during SSR.
   const [mounted, setMounted] = useState(false);
@@ -40,6 +41,9 @@ export function TransferModal({
   const [kind, setKind] = useState<"table" | "room">("table");
   const [currentLabel, setCurrentLabel] = useState(fallbackLabel);
   const [targets, setTargets] = useState<TransferTarget[] | null>(null);
+  // A table session can also go onto an in-house guest's room bill.
+  const [roomTargets, setRoomTargets] = useState<TransferTarget[]>([]);
+  const [dest, setDest] = useState<"table" | "room">("table");
   const [picked, setPicked] = useState<TransferTarget | null>(null);
   const [reason, setReason] = useState("");
   const [upgrade, setUpgrade] = useState("");
@@ -56,8 +60,15 @@ export function TransferModal({
         return;
       }
       setKind(res.kind);
+      // No free table but a guest to charge: open on the list that has something in it.
+      setDest(
+        res.kind === "table" && res.targets.length === 0 && res.room_targets.length > 0
+          ? "room"
+          : res.kind
+      );
       setCurrentLabel(res.current_label);
       setTargets(res.targets);
+      setRoomTargets(res.room_targets);
     });
     return () => {
       cancelled = true;
@@ -65,31 +76,39 @@ export function TransferModal({
   }, [sessionId]);
 
   const noun = kind === "room" ? "room" : "table";
+  // Table → room: the room is occupied and the food joins its guest's bill.
+  const toRoom = kind === "table" && dest === "room";
+  const shown = toRoom ? roomTargets : targets;
 
   const confirm = useCallback(() => {
     if (!picked) return;
     setError(null);
     startTransition(async () => {
       const amount = Number(upgrade);
-      const res = await transferSession({
-        sessionId,
-        destTableId: kind === "table" ? picked.id : null,
-        destRoomId: kind === "room" ? picked.id : null,
-        reason: reason || null,
-        upgradeAmount: kind === "room" && Number.isFinite(amount) && amount > 0 ? amount : null,
-      });
+      const res = toRoom
+        ? await transferTableToRoom({ sessionId, destRoomId: picked.id, reason: reason || null })
+        : await transferSession({
+            sessionId,
+            destTableId: kind === "table" ? picked.id : null,
+            destRoomId: kind === "room" ? picked.id : null,
+            reason: reason || null,
+            upgradeAmount: kind === "room" && Number.isFinite(amount) && amount > 0 ? amount : null,
+          });
       if ("error" in res) {
         setError(res.error);
         // Send them back to the list: the destination is usually gone, not the intent.
         setPicked(null);
         const fresh = await getTransferTargets(sessionId);
-        if (!("error" in fresh)) setTargets(fresh.targets);
+        if (!("error" in fresh)) {
+          setTargets(fresh.targets);
+          setRoomTargets(fresh.room_targets);
+        }
         return;
       }
-      onDone?.();
+      onDone?.({ roomStayId: (res as { roomStayId?: string | null }).roomStayId ?? null });
       onClose();
     });
-  }, [picked, sessionId, kind, reason, upgrade, onClose, onDone]);
+  }, [picked, sessionId, kind, toRoom, reason, upgrade, onClose, onDone]);
 
   if (!mounted) return null;
 
@@ -109,7 +128,34 @@ export function TransferModal({
         </p>
       )}
 
-      {targets === null ? (
+      {kind === "table" && roomTargets.length > 0 && !picked && (
+        <div className="flex gap-2 mb-3" role="group" aria-label="Move to">
+          {(["table", "room"] as const).map((d) => {
+            const active = dest === d;
+            return (
+              <button
+                key={d}
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setDest(d);
+                }}
+                aria-pressed={active}
+                className="px-3 py-1.5 rounded-full border text-sm transition-colors"
+                style={{
+                  borderColor: active ? "var(--color-primary)" : "var(--color-hairline)",
+                  background: active ? "var(--color-primary)" : "var(--color-canvas)",
+                  color: active ? "#fff" : "var(--color-ink)",
+                }}
+              >
+                {d === "table" ? "Table" : "Room"}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {shown === null ? (
         <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
           Loading…
         </p>
@@ -122,12 +168,19 @@ export function TransferModal({
             </span>
             <ArrowDown size={18} style={{ color: "var(--color-ink-mute)" }} />
             <span className="text-2xl font-medium" style={{ color: "var(--color-ink)" }}>
-              {picked.label}
+              {toRoom ? `Room ${picked.label}` : picked.label}
             </span>
+            {toRoom && picked.sub && (
+              <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
+                {picked.sub}
+              </span>
+            )}
           </div>
 
           <p className="text-sm text-center mb-4" style={{ color: "var(--color-ink-mute)" }}>
-            The bill, orders and tickets all move with the guest. Nothing is re-charged.
+            {toRoom
+              ? `The orders and tickets are added to Room ${picked.label}'s bill, paid at check-out. Table ${currentLabel} is closed and sent for cleaning.`
+              : "The bill, orders and tickets all move with the guest. Nothing is re-charged."}
           </p>
 
           <input
@@ -180,10 +233,12 @@ export function TransferModal({
             </Button>
           </div>
         </>
-      ) : targets.length === 0 ? (
+      ) : shown.length === 0 ? (
         <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
           {error
             ? "Nothing to move to."
+            : toRoom
+            ? "No checked-in guests to charge right now."
             : `No free ${noun}s right now. A ${noun} has to be empty and clean before a session can move onto it.`}
         </p>
       ) : (
@@ -191,10 +246,10 @@ export function TransferModal({
           {/* Step 1 — pick. Buttons rather than a <select>: nothing employee-facing in
               this app uses one, and a grid of numbers reads like the floor plan. */}
           <p className="text-sm mb-3" style={{ color: "var(--color-ink-mute)" }}>
-            Move this session to:
+            {toRoom ? "Charge this table to a checked-in guest's room:" : "Move this session to:"}
           </p>
           <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(88px, 1fr))" }}>
-            {targets.map((t) => (
+            {shown.map((t) => (
               <button
                 key={t.id}
                 type="button"
@@ -213,6 +268,14 @@ export function TransferModal({
                   <MoveRight size={13} style={{ color: "var(--color-ink-mute)" }} />
                   {t.label}
                 </span>
+                {t.sub && (
+                  <span
+                    className="block text-xs truncate mt-0.5"
+                    style={{ color: "var(--color-ink-mute)" }}
+                  >
+                    {t.sub}
+                  </span>
+                )}
               </button>
             ))}
           </div>

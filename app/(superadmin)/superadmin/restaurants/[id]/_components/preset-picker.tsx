@@ -2,9 +2,9 @@
 
 import { STAFF_PRESETS } from "@/lib/permissions";
 
-// A row of one-click job-type presets that fill the permission checkboxes.
+// A row of one-click job-type presets that set every section's access level.
 // Applying a preset replaces the current selection; the admin can then still
-// edit any individual permission below. `activeKey` (from matchPreset) marks
+// change any section below. `activeKey` (from matchPreset) marks
 // the preset that exactly matches the current selection — null means custom.
 export function PresetPicker({
   activeKey,
@@ -38,8 +38,8 @@ export function PresetPicker({
       </div>
       <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
         {activeKey
-          ? "Preset applied — fine-tune individual permissions below if needed."
-          : "Pick a preset to auto-fill permissions, or set them manually below."}
+          ? "Preset applied — change any section below if needed."
+          : "Pick a preset to set every section at once, or set each section below."}
       </p>
     </div>
   );

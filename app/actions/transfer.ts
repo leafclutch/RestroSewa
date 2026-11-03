@@ -19,12 +19,17 @@ import type { RestaurantUserCtx } from "@/lib/auth/get-restaurant-user";
  * Its own file rather than more weight in pos.ts, which is already ~2,000 lines.
  */
 
-export type TransferTarget = { id: string; label: string };
+export type TransferTarget = { id: string; label: string; sub?: string | null };
 
 export type TransferOptions = {
   kind: "table" | "room";
   current_label: string;
   targets: TransferTarget[];
+  /**
+   * Table sessions only: occupied rooms whose guest the table's bill can be charged to
+   * (transferTableToRoom). Empty when the user can't see or charge any room.
+   */
+  room_targets: TransferTarget[];
 };
 
 export type TransferInput = {
@@ -78,6 +83,11 @@ function explain(message: string, code?: string): string {
     ROOM_UNAVAILABLE: "That room is out of service.",
     STAY_NOT_FOUND: "That guest stay no longer exists.",
     STAY_ALREADY_CLOSED: "That guest has already checked out.",
+    ROOM_NOT_OCCUPIED: "That room has no guest checked in.",
+    ROOM_HAS_NO_SESSION: "That room's guest has no open bill to add to.",
+    SESSION_NOT_ACTIVE: "This table's order is still waiting for approval. Approve it first.",
+    SESSION_ALREADY_PAID: "A payment has already been taken on this table, so it can't be moved to a room.",
+    NOTHING_TO_MOVE: "This table has no orders to move.",
   };
 
   for (const key of Object.keys(map)) {
@@ -149,6 +159,7 @@ export async function getTransferTargets(
   );
 
   let targets: TransferTarget[] = [];
+  let roomTargets: TransferTarget[] = [];
   let currentLabel = "";
 
   if (kind === "table") {
@@ -172,6 +183,35 @@ export async function getTransferTargets(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     currentLabel = (session as any).restaurant_tables?.number ?? "—";
+
+    // Charge-to-room: the opposite filter to a room move — the room must be OCCUPIED,
+    // with a live stay and its open session, because the food joins that guest's bill.
+    // A pending_activation table is left out: transfer_table_to_room refuses it.
+    if (session.status === "active" && mayTransfer(ru, "room")) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: roomSessions } = await (service as any)
+        .from("sessions")
+        .select("room_id, rooms ( number ), room_stays!inner ( guest_name, status )")
+        .eq("restaurant_id", ru.restaurant_id)
+        .neq("status", "closed")
+        .not("room_id", "is", null)
+        .eq("room_stays.status", "active");
+
+      roomTargets = (
+        (roomSessions ?? []) as {
+          room_id: string;
+          rooms: { number: string } | null;
+          room_stays: { guest_name: string | null } | null;
+        }[]
+      )
+        .filter((s) => visibility.seesAll || visibility.canSeeRoom(s.room_id))
+        .map((s) => ({
+          id: s.room_id,
+          label: s.rooms?.number ?? "—",
+          sub: s.room_stays?.guest_name ?? null,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
+    }
   } else {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: rooms } = await (service as any)
@@ -203,7 +243,7 @@ export async function getTransferTargets(
     currentLabel = (session as any).rooms?.number ?? "—";
   }
 
-  return { kind, current_label: currentLabel, targets };
+  return { kind, current_label: currentLabel, targets, room_targets: roomTargets };
 }
 
 /** Move the session. One RPC; the function is the transaction. */
@@ -263,4 +303,67 @@ export async function transferSession(
   revalidatePath(`/employee/session/${sessionId}`);
   revalidatePath("/employee/queue");
   return { ok: true };
+}
+
+/**
+ * Charge a table's bill to an in-house guest: the table's orders join the room's open
+ * session and the table session closes. One RPC; transfer_table_to_room
+ * (20261103000000_table_to_room_transfer.sql) is the transaction.
+ */
+export async function transferTableToRoom(input: {
+  sessionId: string;
+  destRoomId: string;
+  reason?: string | null;
+}): Promise<{ ok: true; roomStayId: string | null } | { error: string }> {
+  const ru = await getRestaurantUser();
+  const service = createServiceClient();
+
+  const { sessionId, destRoomId, reason } = input;
+  if (!destRoomId) return { error: "Pick somewhere to move to." };
+
+  // Both sides of the bill change hands, so both permissions are needed.
+  if (!mayTransfer(ru, "table") || !mayTransfer(ru, "room")) {
+    return { error: "You don't have permission to move sessions." };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: session } = await (service as any)
+    .from("sessions")
+    .select("id, table_id")
+    .eq("id", sessionId)
+    .eq("restaurant_id", ru.restaurant_id)
+    .maybeSingle();
+  if (!session) return { error: "That session no longer exists." };
+  // canSeeTable(null) is true (no group boundary), so a walk-in or room session must be
+  // turned away here, not left to slip through the visibility check below.
+  if (!session.table_id) return { error: "Only a table's bill can be moved to a room." };
+
+  // Both ends, for the same reason as transferSession.
+  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  if (
+    !visibility.seesAll &&
+    !(visibility.canSeeTable(session.table_id) && visibility.canSeeRoom(destRoomId))
+  ) {
+    return { error: "That isn't in your section." };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (service as any).rpc("transfer_table_to_room", {
+    p_restaurant_id: ru.restaurant_id,
+    p_session_id: sessionId,
+    p_dest_room_id: destRoomId,
+    p_created_by: ru.id,
+    p_reason: reason?.trim() || null,
+  });
+
+  if (error) {
+    return { error: explain(error.message ?? "", error.code) };
+  }
+
+  revalidatePath("/employee/dashboard");
+  revalidatePath(`/employee/session/${sessionId}`);
+  const roomStayId: string | null = data?.room_stay_id ?? null;
+  if (roomStayId) revalidatePath(`/employee/room/${roomStayId}`);
+  revalidatePath("/employee/queue");
+  return { ok: true, roomStayId };
 }

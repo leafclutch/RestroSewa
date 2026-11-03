@@ -22,8 +22,8 @@ const VALID_PERMISSIONS = new Set<string>(Object.values(PERMISSIONS));
 // assigns workstations and runs payroll; every create/edit/delete/PIN control lives on the
 // superadmin surface. So the authority is `isSuperAdmin`, NOT a restaurant permission —
 // `getRestaurantUser()` would wrongly reject the super admin, who is not a restaurant_user.
-// (create_staff / edit_staff / delete_staff therefore remain unused today; they are kept
-// for a future in which a restaurant admin is allowed to manage their own staff.)
+// (create_staff / edit_staff / delete_staff were never checked and were removed on
+// 2026-11-03; add a permission back when a restaurant admin may manage their own staff.)
 
 const DENIED = { error: "Permission denied." } as const;
 

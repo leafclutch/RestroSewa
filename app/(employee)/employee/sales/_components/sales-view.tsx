@@ -430,6 +430,17 @@ export function SalesView({
           : `${report.orderCount} bill${report.orderCount !== 1 ? "s" : ""}`}
       </p>
 
+      {/* Today-only staff (Sales: Today only) get no period choice at all. The server
+          already forces today; hiding the picker just stops offering what it refuses. */}
+      {report.todayOnly ? (
+        <p
+          className="text-xs rounded-lg px-3 py-2 mb-4"
+          style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink-mute)" }}
+        >
+          You can see today&apos;s sales only.
+        </p>
+      ) : (
+      <>
       {/* Period cards double as the filter — click one to scope everything below.
           Auto-fit so they reflow to the available width instead of cramming into
           a fixed 5 columns. */}
@@ -490,6 +501,8 @@ export function SalesView({
           </button>
         </div>
       </div>
+      </>
+      )}
 
       {/* Period stats */}
       <div

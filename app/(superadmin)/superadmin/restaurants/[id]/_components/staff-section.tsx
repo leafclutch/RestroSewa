@@ -3,10 +3,11 @@
 import { useState, useTransition } from "react";
 import { ExternalLink, ShieldCheck, Pencil, Trash2, PowerOff, Power } from "lucide-react";
 import type { StaffRow } from "@/app/actions/restaurants";
-import type { BusinessType } from "@/lib/business-type";
+import { hasRooms, type BusinessType } from "@/lib/business-type";
 import { EditPermissionsForm } from "./edit-permissions-form";
 import { EditStaffForm } from "./edit-staff-form";
 import { toggleStaffStatus, deleteStaffMember } from "@/app/actions/staff";
+import { STAFF_PRESETS, countSectionsWithAccess, matchPreset } from "@/lib/permissions";
 
 function Badge({
   children,
@@ -31,12 +32,14 @@ function StaffCard({
   restaurantId,
   onEdit,
   onEditPermissions,
+  businessType,
 }: {
   s: StaffRow;
   restaurantSlug: string;
   restaurantId: string;
   onEdit: (s: StaffRow) => void;
   onEditPermissions: (s: StaffRow) => void;
+  businessType: BusinessType;
 }) {
   const [, startToggle] = useTransition();
   const [, startDelete] = useTransition();
@@ -49,6 +52,12 @@ function StaffCard({
     .slice(0, 2);
 
   const safePermissions = Array.isArray(s.permissions) ? s.permissions : [];
+  // The job preset when the access matches one exactly, else how many sections it opens.
+  const presetKey = matchPreset(safePermissions);
+  const sectionCount = countSectionsWithAccess(safePermissions, hasRooms(businessType));
+  const accessLabel = presetKey
+    ? STAFF_PRESETS.find((p) => p.key === presetKey)?.label
+    : `${sectionCount} section${sectionCount !== 1 ? "s" : ""}`;
 
   return (
     <div
@@ -89,7 +98,7 @@ function StaffCard({
       {s.role === "restaurant_employee" && (
         <button
           type="button"
-          title={`${safePermissions.length} permissions — click to edit`}
+          title={`Access: ${accessLabel} — click to edit`}
           onClick={() => onEditPermissions(s)}
           className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors"
           style={{
@@ -99,7 +108,7 @@ function StaffCard({
           }}
         >
           <ShieldCheck size={11} />
-          {safePermissions.length}
+          {accessLabel}
         </button>
       )}
 
@@ -214,6 +223,7 @@ export function StaffSection({
                     restaurantId={restaurantId}
                     onEdit={(m) => setEditingStaff(m)}
                     onEditPermissions={(m) => setEditingPermissions(m)}
+                    businessType={businessType}
                   />
                   {editingStaff?.id === s.id && (
                     <EditStaffForm
@@ -243,6 +253,7 @@ export function StaffSection({
                     restaurantId={restaurantId}
                     onEdit={(m) => setEditingStaff(m)}
                     onEditPermissions={(m) => setEditingPermissions(m)}
+                    businessType={businessType}
                   />
                   {editingStaff?.id === s.id && (
                     <EditStaffForm

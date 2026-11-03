@@ -9,8 +9,8 @@ import { Input } from "@/components/ui/input";
 import { X } from "lucide-react";
 import { PermissionPicker } from "./permission-picker";
 import { PresetPicker } from "./preset-picker";
-import { matchPreset } from "@/lib/permissions";
-import type { BusinessType } from "@/lib/business-type";
+import { matchPreset, countSectionsWithAccess } from "@/lib/permissions";
+import { hasRooms, type BusinessType } from "@/lib/business-type";
 
 const PIN_LENGTH = 4;
 const KEYPAD = ["1","2","3","4","5","6","7","8","9","","0","⌫"] as const;
@@ -169,7 +169,7 @@ export function EditStaffForm({
         {role === "restaurant_employee" && (
           <div className="flex flex-col gap-2">
             <p className={labelCls} style={labelStyle}>
-              Permissions <span className="normal-case ml-1" style={{ color: "var(--color-ink-mute)" }}>({permissions.length} selected)</span>
+              Access <span className="normal-case ml-1" style={{ color: "var(--color-ink-mute)" }}>({countSectionsWithAccess(permissions, hasRooms(businessType))} sections)</span>
             </p>
             <div
               className="rounded-lg border px-4 py-3 flex flex-col gap-4"

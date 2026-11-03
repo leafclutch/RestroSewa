@@ -170,7 +170,7 @@ export default async function EmployeeDashboardPage({
   }
 
   // 2. Tables.
-  if (navKeys.has("tables")) {
+  if (NAV_ACCESS.canSeeTables(restaurantUser)) {
     sections.push({
       key: "tables",
       title: "Tables",

@@ -15,6 +15,9 @@ calls. A table's live state is derived from its session. See `architecture.md` �
   parks in **Cleaning** (`modules/rooms.md` shares the cleaning palette).
 - **Table shifting** — move a live session to another table keeping bill/orders/tickets/customer
   (`transfer_session`; see `session-transfer`).
+- **Table → room** — charge an unpaid, approved table bill to a checked-in guest: its orders and
+  tickets merge into the room's open session (lands on the folio), the table session closes and
+  the table goes to Cleaning (`transfer_table_to_room`, kind `table_to_room` in `session_transfers`).
 - **Cleaning** — table shows Cleaning until marked clean; only `cleaning_since` stored.
 - **Staff assignment** — per group; **"Assign all"** one-tap shortcut (Admin → Tables) toggles the
   whole team (`setTableGroupWaiters`).
