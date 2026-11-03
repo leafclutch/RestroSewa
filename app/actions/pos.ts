@@ -2208,6 +2208,12 @@ export type SalesReport = {
   businessToday: string;
   /** Yesterday's, so the client needs no date arithmetic of its own at all. */
   businessYesterday: string;
+  /**
+   * The viewer holds Sales: Today only (NAV_ACCESS.salesTodayOnly). The report has
+   * already been forced to today and the wider overview totals zeroed; this just tells
+   * the screen to stop offering other periods.
+   */
+  todayOnly: boolean;
 };
 
 /**
@@ -2270,8 +2276,14 @@ export async function getSalesReport(params?: {
         new Date(businessPeriodBounds("yesterday", ru.dayRule).from),
         ru.dayRule
       ),
+      todayOnly: false,
     };
   }
+
+  // Today-only staff get TODAY, whatever was asked for. Decided here rather than by
+  // hiding the picker, so a hand-made request for last week still answers with today.
+  const todayOnly = NAV_ACCESS.salesTodayOnly(ru);
+  if (todayOnly) params = { period: "today", from: null, to: null };
 
   const period = params?.period ?? "today";
   const service = createServiceClient();
@@ -2502,7 +2514,8 @@ export async function getSalesReport(params?: {
     period,
     from: params?.from ?? null,
     to: params?.to ?? null,
-    overview,
+    // The week/month/year/all-time cards would each reveal other days' takings.
+    overview: todayOnly ? { today: overview.today, week: 0, month: 0, year: 0, total: 0 } : overview,
     periodTotal,
     orderCount,
     avgOrderValue,
@@ -2524,6 +2537,7 @@ export async function getSalesReport(params?: {
       new Date(businessPeriodBounds("yesterday", ru.dayRule).from),
       ru.dayRule
     ),
+    todayOnly,
   };
 }
 
@@ -2563,6 +2577,8 @@ export async function exportSalesCsv(params?: {
   if (!NAV_ACCESS.canSeeSales(ru)) {
     return { error: "You don't have permission to export sales." };
   }
+  // Same rule as getSalesReport: a today-only holder exports today, whatever was asked.
+  if (NAV_ACCESS.salesTodayOnly(ru)) params = { period: "today", from: null, to: null };
 
   const period = params?.period ?? "today";
   const service = createServiceClient();
@@ -2810,6 +2826,16 @@ export async function getPaidBill(paymentId: string): Promise<PaidBill | { error
   const isCreditBill = Array.isArray(p.credits) ? p.credits.length > 0 : !!p.credits;
   if (!canSeeSales && !isCreditBill) {
     return { error: "You don't have permission to view bills." };
+  }
+  // A today-only holder may open today's bills only — an old bill id would otherwise
+  // show another day's sale in full. The exception is the credits route: a credit bill
+  // opened by someone who holds Credits, which is that permission's own business.
+  if (
+    NAV_ACCESS.salesTodayOnly(ru) &&
+    !(isCreditBill && NAV_ACCESS.canManageCredits(ru)) &&
+    businessDate(new Date(p.created_at), ru.dayRule) !== businessToday(ru.dayRule)
+  ) {
+    return { error: "You can only view today's bills." };
   }
 
   // Items via the session's orders (the same records the bill was totalled from).

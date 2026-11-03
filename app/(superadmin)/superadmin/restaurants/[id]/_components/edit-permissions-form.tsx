@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
 import { PermissionPicker } from "./permission-picker";
 import { PresetPicker } from "./preset-picker";
-import { matchPreset } from "@/lib/permissions";
-import type { BusinessType } from "@/lib/business-type";
+import { matchPreset, countSectionsWithAccess } from "@/lib/permissions";
+import { hasRooms, type BusinessType } from "@/lib/business-type";
 
 export function EditPermissionsForm({
   staffId,
@@ -107,7 +107,7 @@ export function EditPermissionsForm({
           <input type="hidden" name="restaurant_id" value={restaurantId} />
           <input type="hidden" name="permissions" value={JSON.stringify(permissions)} />
           <Button type="submit" variant="primary" disabled={pending} className="flex-1">
-            {pending ? "Saving…" : `Save — ${permissions.length} permission${permissions.length !== 1 ? "s" : ""}`}
+            {pending ? "Saving…" : `Save — ${countSectionsWithAccess(permissions, hasRooms(businessType))} section${countSectionsWithAccess(permissions, hasRooms(businessType)) !== 1 ? "s" : ""}`}
           </Button>
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancel

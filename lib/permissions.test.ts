@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PERMISSIONS, PERMISSION_GROUPS, STOCK_ACCESS, PAYROLL_ACCESS, ROOM_ACCESS } from "./permissions.ts";
+import {
+  PERMISSIONS, PERMISSION_GROUPS, STOCK_ACCESS, PAYROLL_ACCESS, ROOM_ACCESS, NAV_ACCESS,
+  ACCESS_SECTIONS, STAFF_PRESETS, detectLevel, applyLevel, matchPreset,
+} from "./permissions.ts";
 
 // The Extra Expenses gates, tested directly.
 //
@@ -128,4 +131,124 @@ test("cancelling does not leak the other room rights", () => {
 test("cancel_room_stay is grantable in the UI", () => {
   const keys = PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => i.key));
   assert.ok(keys.includes(PERMISSIONS.CANCEL_ROOM_STAY));
+});
+
+// The section editor. Presets, levels and the stored list must round-trip exactly, or
+// the editor shows "Custom" for a staffer nobody customised.
+
+test("every preset reads back as a clean level in every section", () => {
+  for (const preset of STAFF_PRESETS) {
+    for (const section of ACCESS_SECTIONS) {
+      assert.notEqual(
+        detectLevel(section, preset.permissions),
+        "custom",
+        `${preset.key} lands on Custom in ${section.key}`
+      );
+    }
+    assert.equal(matchPreset(preset.permissions), preset.key);
+  }
+});
+
+test("presets are a ladder: each role can do everything the one below it can", () => {
+  const byKey = new Map(STAFF_PRESETS.map((p) => [p.key, p.permissions as string[]]));
+  const ladder = ["waiter", "cashier", "receptionist", "manager"];
+  for (let i = 1; i < ladder.length; i++) {
+    const lower = byKey.get(ladder[i - 1])!;
+    const upper = byKey.get(ladder[i])!;
+    for (const p of lower) assert.ok(upper.includes(p), `${ladder[i]} is missing ${ladder[i - 1]}'s ${p}`);
+  }
+});
+
+test("a waiter adds items everywhere but can't take money", () => {
+  const waiter = staff(...STAFF_PRESETS.find((p) => p.key === "waiter")!.permissions);
+  assert.equal(NAV_ACCESS.canSeeTables(waiter), true);
+  assert.ok(waiter.permissions.includes(PERMISSIONS.CREATE_ORDERS));
+  assert.ok(waiter.permissions.includes(PERMISSIONS.MANAGE_WALKINS));
+  assert.equal(ROOM_ACCESS.canViewRooms(waiter), true);
+  for (const p of [PERMISSIONS.CLOSE_BILLS, PERMISSIONS.PROCESS_PAYMENTS]) {
+    assert.ok(!waiter.permissions.includes(p), `waiter must not hold ${p}`);
+  }
+  assert.equal(NAV_ACCESS.canSeeSales(waiter), false);
+  assert.equal(NAV_ACCESS.canManageCredits(waiter), false);
+});
+
+test("every level key is a real permission and belongs to one section only", () => {
+  const real = new Set<string>(Object.values(PERMISSIONS));
+  const home = new Map<string, string>();
+  for (const s of ACCESS_SECTIONS) {
+    assert.equal(s.levels[0].permissions.length, 0, `${s.key}: first level must be None`);
+    for (const l of s.levels) {
+      for (const p of l.permissions) {
+        assert.ok(real.has(p), `${p} is not in PERMISSIONS`);
+        const prev = home.get(p);
+        assert.ok(!prev || prev === s.key, `${p} is in both ${prev} and ${s.key}`);
+        home.set(p, s.key);
+      }
+    }
+  }
+});
+
+test("every permission is grantable from the editor", () => {
+  const grantable = new Set<string>(PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => i.key)));
+  for (const p of Object.values(PERMISSIONS)) assert.ok(grantable.has(p), `${p} has no control`);
+});
+
+test("changing one section leaves the others alone", () => {
+  const orders = ACCESS_SECTIONS.find((s) => s.key === "orders")!;
+  const next = applyLevel([PERMISSIONS.VIEW_SALES, PERMISSIONS.VIEW_ORDERS], orders, "full");
+  assert.ok(next.includes(PERMISSIONS.VIEW_SALES));
+  assert.equal(detectLevel(orders, next), "full");
+  assert.equal(detectLevel(orders, applyLevel(next, orders, "kitchen")), "kitchen");
+});
+
+test("None clears the section's extras too", () => {
+  const orders = ACCESS_SECTIONS.find((s) => s.key === "orders")!;
+  assert.deepEqual(applyLevel([PERMISSIONS.VIEW_ORDERS, PERMISSIONS.CANCEL_ORDERS], orders, "none"), []);
+});
+
+test("a hand-made list is Custom, not silently rounded to a level", () => {
+  const billing = ACCESS_SECTIONS.find((s) => s.key === "billing")!;
+  assert.equal(detectLevel(billing, [PERMISSIONS.CLOSE_BILLS]), "custom");
+});
+
+test("Sales and Credits are their own permissions, not billing riders", () => {
+  const billing = staff(PERMISSIONS.CLOSE_BILLS, PERMISSIONS.PROCESS_PAYMENTS);
+  assert.equal(NAV_ACCESS.canSeeSales(billing), false);
+  assert.equal(NAV_ACCESS.canManageCredits(billing), false);
+  assert.equal(NAV_ACCESS.canSeeSales(staff(PERMISSIONS.VIEW_SALES)), true);
+  assert.equal(NAV_ACCESS.canManageCredits(staff(PERMISSIONS.MANAGE_CREDITS)), true);
+  // Seeing Sales does not reach customer debt.
+  assert.equal(NAV_ACCESS.canManageCredits(staff(PERMISSIONS.VIEW_SALES)), false);
+});
+
+test("rooms-only staff do not get the floor plan", () => {
+  assert.equal(NAV_ACCESS.canSeeTables(staff(PERMISSIONS.VIEW_ROOMS, PERMISSIONS.CHECK_IN)), false);
+  assert.equal(NAV_ACCESS.canSeeTables(staff(PERMISSIONS.VIEW_TABLES)), true);
+});
+
+// Sales: Today only. One predicate decides it for the report, the CSV and the bill view.
+
+test("today-only opens Sales but is restricted to today", () => {
+  const u = staff(PERMISSIONS.VIEW_SALES_TODAY);
+  assert.equal(NAV_ACCESS.canSeeSales(u), true);
+  assert.equal(NAV_ACCESS.salesTodayOnly(u), true);
+});
+
+test("All days lifts the today-only restriction, and the owner is never restricted", () => {
+  assert.equal(NAV_ACCESS.salesTodayOnly(staff(PERMISSIONS.VIEW_SALES)), false);
+  assert.equal(NAV_ACCESS.salesTodayOnly(staff(PERMISSIONS.VIEW_SALES, PERMISSIONS.VIEW_SALES_TODAY)), false);
+  assert.equal(NAV_ACCESS.salesTodayOnly(owner), false);
+});
+
+test("today-only does not reach credits", () => {
+  assert.equal(NAV_ACCESS.canManageCredits(staff(PERMISSIONS.VIEW_SALES_TODAY)), false);
+});
+
+test("the Sales row offers None / Today only / All days", () => {
+  const sales = ACCESS_SECTIONS.find((s) => s.key === "sales")!;
+  assert.deepEqual(sales.levels.map((l) => l.key), ["none", "today", "view"]);
+  assert.equal(detectLevel(sales, [PERMISSIONS.VIEW_SALES_TODAY]), "today");
+  assert.equal(detectLevel(sales, [PERMISSIONS.VIEW_SALES]), "view");
+  // Switching up replaces the narrow key rather than stacking both.
+  assert.deepEqual(applyLevel([PERMISSIONS.VIEW_SALES_TODAY], sales, "view"), [PERMISSIONS.VIEW_SALES]);
 });

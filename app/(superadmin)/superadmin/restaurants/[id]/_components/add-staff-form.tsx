@@ -7,9 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { X } from "lucide-react";
 import { PermissionPicker } from "./permission-picker";
-import type { BusinessType } from "@/lib/business-type";
+import { hasRooms, type BusinessType } from "@/lib/business-type";
 import { PresetPicker } from "./preset-picker";
-import { matchPreset } from "@/lib/permissions";
+import { matchPreset, countSectionsWithAccess } from "@/lib/permissions";
 
 const PIN_LENGTH = 4;
 const KEYPAD = ["1","2","3","4","5","6","7","8","9","","0","⌫"] as const;
@@ -219,10 +219,10 @@ export function AddStaffForm({ restaurantId, businessType }: { restaurantId: str
                 className="text-xs uppercase tracking-wide font-medium"
                 style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
               >
-                Permissions
+                Access
               </p>
               <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                {permissions.length} selected
+                {countSectionsWithAccess(permissions, hasRooms(businessType))} sections
               </span>
             </div>
             <div

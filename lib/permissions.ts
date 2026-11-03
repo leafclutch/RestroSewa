@@ -1,11 +1,8 @@
 export const PERMISSIONS = {
-  // Dashboard
-  VIEW_DASHBOARD:   "view_dashboard",
   // Orders
   VIEW_ORDERS:      "view_orders",
   MANAGE_ORDERS:    "manage_orders",
   CREATE_ORDERS:    "create_orders",
-  EDIT_ORDERS:      "edit_orders",
   CANCEL_ORDERS:    "cancel_orders",
   CLOSE_BILLS:      "close_bills",
   // Custom items — adding a manual, off-menu line with a STAFF-TYPED price. Held apart from
@@ -19,7 +16,6 @@ export const PERMISSIONS = {
   // Security-PIN gated on top — this decides who is offered it, the PIN authorizes it.
   PRINT_MOCK_BILLS: "print_mock_bills",
   // Menu
-  VIEW_MENU:        "view_menu",
   MANAGE_MENU:      "manage_menu",
   // Tables
   VIEW_TABLES:      "view_tables",
@@ -37,7 +33,16 @@ export const PERMISSIONS = {
   // Billing
   PROCESS_PAYMENTS: "process_payments",
   APPLY_DISCOUNTS:  "apply_discounts",
-  REFUND_BILLS:     "refund_bills",
+  // Sales and Credits each have their OWN permission. They used to ride on billing
+  // (Sales on any of process_payments/close_bills/view_reports, Credits on both of the
+  // first two), which meant neither could be granted or withheld on its own.
+  // Backfilled from the old rule by 20261103100000_simplify_staff_permissions.sql.
+  VIEW_SALES:       "view_sales",
+  // The narrow Sales level: today's takings and bills only, never another day. The
+  // server forces the period (see NAV_ACCESS.salesTodayOnly), so the restriction holds
+  // whatever the client asks for. view_sales, when also held, lifts it.
+  VIEW_SALES_TODAY: "view_sales_today",
+  MANAGE_CREDITS:   "manage_credits",
   // Stock & Finance
   VIEW_STOCK:       "view_stock",
   MANAGE_STOCK:     "manage_stock",
@@ -58,188 +63,390 @@ export const PERMISSIONS = {
   MANAGE_EXPENSES:  "manage_expenses",
   ADD_EXPENSES:     "add_expenses",
   VIEW_FINANCE:     "view_finance",
-  // Reports
-  VIEW_REPORTS:     "view_reports",
   // Staff
   VIEW_STAFF:       "view_staff",
-  CREATE_STAFF:     "create_staff",
-  EDIT_STAFF:       "edit_staff",
-  DELETE_STAFF:     "delete_staff",
   // Payroll — deliberately separate from view_staff. Seeing the team is not the
   // same as seeing what everyone earns.
   VIEW_PAYROLL:     "view_payroll",
   MANAGE_PAYROLL:   "manage_payroll",
-  // NOTE: view_customers/manage_customers and view_settings/manage_settings were removed
-  // 2026-07-23 — they gated nothing. Customer accounts run through Credits (gated on
-  // process_payments + close_bills); Settings gates on admin ROLE. Do not reintroduce
-  // them without wiring them to something.
+  // REMOVED 2026-11-03 (20261103100000_simplify_staff_permissions.sql), because they
+  // gated nothing or duplicated another key:
+  //   view_menu, refund_bills, create_staff, edit_staff, delete_staff — checked nowhere
+  //   view_dashboard → view_tables, edit_orders → manage_orders (identical effect)
+  //   view_reports → view_sales (it only ever opened Sales)
+  // And earlier (2026-07-23): view/manage_customers, view/manage_settings.
+  // Do not reintroduce a key without wiring it to something.
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
+// ─── Access sections: what the staff editor shows ─────────────────────────────
+// The editor is ONE control per section of the app, not a wall of checkboxes. Each
+// section has LEVELS (pick exactly one) and optional EXTRAS (independent switches that
+// only make sense once the section is on). A level is just a named set of permission
+// keys, so enforcement everywhere else keeps checking the same keys it always did.
+//
+// Levels are CUMULATIVE sets — "Full" lists the view key too — so a stored list maps back
+// to exactly one level. A stored list that matches no level (hand-edited, or from before
+// this model) is shown as "Custom" and left untouched until someone picks a level.
+
+export type AccessLevel = {
+  key: string;
+  label: string;
+  /** One line: what this level lets the person do. */
+  hint: string;
+  permissions: Permission[];
+};
+
+export type AccessExtra = { key: Permission; label: string; hint: string };
+
+export type AccessSection = {
+  key: string;
+  label: string;
+  area: "front" | "back";
+  /** First level is always "None" (no permissions). */
+  levels: AccessLevel[];
+  extras?: AccessExtra[];
+  /** Hidden when the business has no hotel side. */
+  roomsOnly?: boolean;
+};
+
+const P = PERMISSIONS;
+const NONE: AccessLevel = { key: "none", label: "None", hint: "No access.", permissions: [] };
+
+export const ACCESS_SECTIONS: AccessSection[] = [
+  // ── Front of house ──
+  {
+    key: "tables",
+    label: "Tables",
+    area: "front",
+    levels: [
+      NONE,
+      { key: "view", label: "View", hint: "See the floor plan and table bills.", permissions: [P.VIEW_TABLES] },
+      {
+        key: "full",
+        label: "Full",
+        hint: "Also shift tables, close a table with orders, and edit tables.",
+        permissions: [P.VIEW_TABLES, P.MANAGE_TABLES],
+      },
+    ],
+  },
+  {
+    key: "orders",
+    label: "Orders",
+    area: "front",
+    levels: [
+      NONE,
+      { key: "view", label: "View", hint: "See the order queue only.", permissions: [P.VIEW_ORDERS] },
+      {
+        key: "take",
+        label: "Take orders",
+        // Walk-ins also need Walk-ins: Full — submitOrder refuses a walk-in session
+        // without manage_walkins (walkInWriteBlocked), whatever the Orders level.
+        hint: "Add items to tables and rooms (walk-ins also need Walk-ins: Full).",
+        permissions: [P.VIEW_ORDERS, P.CREATE_ORDERS],
+      },
+      {
+        key: "kitchen",
+        label: "Kitchen",
+        hint: "Update item status (preparing, ready, served). Can't add items.",
+        permissions: [P.VIEW_ORDERS, P.MANAGE_ORDERS],
+      },
+      {
+        key: "full",
+        label: "Full",
+        hint: "Take orders and update their status.",
+        permissions: [P.VIEW_ORDERS, P.CREATE_ORDERS, P.MANAGE_ORDERS],
+      },
+    ],
+    extras: [
+      { key: P.CANCEL_ORDERS, label: "Cancel orders", hint: "Remove unserved items from a bill." },
+      { key: P.MANAGE_CUSTOM_ITEMS, label: "Add custom items", hint: "Off-menu lines with a typed price." },
+    ],
+  },
+  {
+    key: "walkins",
+    label: "Walk-ins",
+    area: "front",
+    levels: [
+      NONE,
+      { key: "view", label: "View", hint: "See takeaway / phone / delivery orders.", permissions: [P.VIEW_WALKINS] },
+      {
+        key: "full",
+        label: "Full",
+        // Closing a walk-in's bill is still gated on Billing (closeSessionWithPayment
+        // checks close_bills on its own), so a waiter can hold this safely.
+        hint: "Open walk-ins and add items. Taking payment needs Billing.",
+        permissions: [P.VIEW_WALKINS, P.MANAGE_WALKINS],
+      },
+    ],
+  },
+  {
+    key: "rooms",
+    label: "Rooms",
+    area: "front",
+    roomsOnly: true,
+    levels: [
+      NONE,
+      { key: "view", label: "View", hint: "See rooms and guest folios.", permissions: [P.VIEW_ROOMS] },
+      {
+        key: "checkin",
+        label: "Front desk",
+        hint: "Check guests in, run stays, mark rooms clean.",
+        permissions: [P.VIEW_ROOMS, P.CHECK_IN],
+      },
+      {
+        key: "full",
+        label: "Full",
+        hint: "Also create and edit rooms and room types.",
+        permissions: [P.VIEW_ROOMS, P.CHECK_IN, P.MANAGE_ROOMS],
+      },
+    ],
+    extras: [
+      // Ending a stay WITHOUT billing it, and deciding how much of the deposit the hotel
+      // keeps. Not implied by Full: configuring rooms and writing off a guest's bill are
+      // different acts. Always ALSO gated on the Security PIN — see lib/security/authorize.ts.
+      { key: P.CANCEL_ROOM_STAY, label: "Cancel a checked-in stay", hint: "Needs the Security PIN too." },
+    ],
+  },
+  {
+    key: "billing",
+    label: "Billing",
+    area: "front",
+    levels: [
+      NONE,
+      {
+        key: "full",
+        label: "Take payments",
+        hint: "Take payment, close bills, check guests out.",
+        permissions: [P.CLOSE_BILLS, P.PROCESS_PAYMENTS],
+      },
+    ],
+    extras: [
+      { key: P.APPLY_DISCOUNTS, label: "Apply discounts", hint: "Reduce a bill at payment." },
+      // Off every preset on purpose — a mock bill prints indistinguishably from a real one,
+      // so nobody should acquire it by inheriting a job template.
+      { key: P.PRINT_MOCK_BILLS, label: "Print mock bills", hint: "Demo bills. Needs the Security PIN too." },
+    ],
+  },
+  {
+    key: "sales",
+    label: "Sales",
+    area: "front",
+    levels: [
+      NONE,
+      // Not cumulative, unlike most sections: the two are alternatives, and holding
+      // view_sales_today alongside view_sales would grant nothing extra.
+      {
+        key: "today",
+        label: "Today only",
+        hint: "Today's takings and bills only — no other days.",
+        permissions: [P.VIEW_SALES_TODAY],
+      },
+      { key: "view", label: "All days", hint: "Takings and paid bills for any period.", permissions: [P.VIEW_SALES] },
+    ],
+  },
+  {
+    key: "credits",
+    label: "Credits",
+    area: "front",
+    levels: [
+      NONE,
+      {
+        key: "full",
+        label: "Full",
+        hint: "Bill to customer accounts and take repayments.",
+        permissions: [P.MANAGE_CREDITS],
+      },
+    ],
+  },
+  {
+    key: "menu",
+    label: "Menu",
+    area: "front",
+    levels: [
+      NONE,
+      {
+        key: "full",
+        label: "Full",
+        hint: "Edit items, prices and availability.",
+        permissions: [P.MANAGE_MENU],
+      },
+    ],
+  },
+  // ── Back office ──
+  {
+    key: "stock",
+    label: "Stock",
+    area: "back",
+    levels: [
+      NONE,
+      // View Stock also opens the Purchases and Vendors LISTS (read-only) — a storekeeper
+      // checks what arrived. See STOCK_ACCESS.canViewPurchases / canViewVendors.
+      { key: "view", label: "View", hint: "See stock, plus the purchases and vendors lists.", permissions: [P.VIEW_STOCK] },
+      {
+        key: "full",
+        label: "Full",
+        hint: "Add products, adjust stock, link recipes.",
+        permissions: [P.VIEW_STOCK, P.MANAGE_STOCK],
+      },
+    ],
+  },
+  {
+    key: "purchases",
+    label: "Purchases",
+    area: "back",
+    levels: [
+      NONE,
+      { key: "full", label: "Full", hint: "Record supplier bills.", permissions: [P.MANAGE_PURCHASES] },
+    ],
+  },
+  {
+    key: "vendors",
+    label: "Vendors",
+    area: "back",
+    levels: [
+      NONE,
+      { key: "full", label: "Full", hint: "Add, edit and pay vendors.", permissions: [P.MANAGE_VENDORS] },
+    ],
+  },
+  {
+    key: "expenses",
+    label: "Extra expenses",
+    area: "back",
+    levels: [
+      NONE,
+      // The narrow one: file an expense or a saving and see TODAY's entries only — never a
+      // running total or a saving pot's balance. See STOCK_ACCESS.expensesTodayOnly.
+      {
+        key: "add",
+        label: "Add only",
+        hint: "File expenses and savings; sees only today's entries.",
+        permissions: [P.ADD_EXPENSES],
+      },
+      {
+        key: "full",
+        label: "Full",
+        hint: "See, correct and delete all expenses.",
+        permissions: [P.ADD_EXPENSES, P.MANAGE_EXPENSES],
+      },
+    ],
+  },
+  {
+    key: "finance",
+    label: "Finance report",
+    area: "back",
+    levels: [
+      NONE,
+      // Kept apart from Stock: the daily report exposes takings, margins and every
+      // outstanding debt, which a storekeeper has no business seeing.
+      { key: "view", label: "View", hint: "Daily takings, margins and debts.", permissions: [P.VIEW_FINANCE] },
+    ],
+  },
+  {
+    key: "itemSales",
+    label: "Item sales",
+    area: "back",
+    levels: [
+      NONE,
+      { key: "view", label: "View", hint: "Units sold per menu item.", permissions: [P.VIEW_ITEM_SALES] },
+    ],
+  },
+  {
+    key: "staff",
+    label: "Staff",
+    area: "back",
+    levels: [
+      NONE,
+      { key: "view", label: "View", hint: "See the team and assign workstations.", permissions: [P.VIEW_STAFF] },
+    ],
+  },
+  {
+    key: "payroll",
+    label: "Payroll",
+    area: "back",
+    levels: [
+      NONE,
+      // Salaries are the most sensitive thing on the staff record — held apart from Staff,
+      // and off every preset, so payroll is only ever granted on purpose.
+      { key: "view", label: "View", hint: "See salaries and payment history.", permissions: [P.VIEW_PAYROLL] },
+      {
+        key: "full",
+        label: "Full",
+        hint: "Set salaries, record payments and advances.",
+        permissions: [P.VIEW_PAYROLL, P.MANAGE_PAYROLL],
+      },
+    ],
+  },
+];
+
+/** Every permission a section's levels can grant (extras excluded). */
+export function sectionLevelKeys(section: AccessSection): Permission[] {
+  return [...new Set(section.levels.flatMap((l) => l.permissions))];
+}
+
+/**
+ * Which level a stored permission list is at for this section — or "custom" when the
+ * section's keys match no level exactly. Extras are ignored here.
+ */
+export function detectLevel(section: AccessSection, selected: readonly string[]): string {
+  const keys = sectionLevelKeys(section);
+  const mine = keys.filter((k) => selected.includes(k)).sort().join(",");
+  const hit = section.levels.find((l) => [...l.permissions].sort().join(",") === mine);
+  return hit ? hit.key : "custom";
+}
+
+/**
+ * Set one section to a level, leaving every other section alone. Choosing None also
+ * clears that section's extras — an extra without its section is a dead switch.
+ */
+export function applyLevel(
+  selected: readonly string[],
+  section: AccessSection,
+  levelKey: string
+): string[] {
+  const level = section.levels.find((l) => l.key === levelKey);
+  if (!level) return [...selected];
+  const drop = new Set<string>(sectionLevelKeys(section));
+  if (level.permissions.length === 0) for (const e of section.extras ?? []) drop.add(e.key);
+  return [...selected.filter((p) => !drop.has(p)), ...level.permissions];
+}
+
+/**
+ * How many sections this list grants any access to — the editor's summary count.
+ * `includeRooms: false` for a business with no hotel side, where the editor hides the
+ * Rooms row: presets still carry view_rooms, and counting a row nobody can see reads
+ * as one section too many.
+ */
+export function countSectionsWithAccess(selected: readonly string[], includeRooms = true): number {
+  return ACCESS_SECTIONS.filter(
+    (s) => (includeRooms || !s.roomsOnly) && detectLevel(s, selected) !== "none"
+  ).length;
+}
+
+// Every grantable key with its label, one group per section. Derived from
+// ACCESS_SECTIONS so the two cannot drift; kept because tests and the save-side
+// whitelist reason about "what can be granted" as a flat list.
 export type PermissionGroupDef = {
   label: string;
   items: { key: Permission; label: string }[];
 };
 
-export const PERMISSION_GROUPS: PermissionGroupDef[] = [
-  {
-    label: "Dashboard",
-    items: [{ key: "view_dashboard", label: "View Dashboard" }],
-  },
-  {
-    label: "Orders",
-    items: [
-      { key: "view_orders",    label: "View Orders" },
-      { key: "manage_orders",  label: "Manage Orders" },
-      { key: "create_orders",  label: "Create Orders" },
-      { key: "edit_orders",    label: "Edit Orders" },
-      { key: "cancel_orders",  label: "Cancel Orders" },
-      { key: "close_bills",    label: "Close Bills" },
-    ],
-  },
-  {
-    label: "Custom Items",
-    items: [
-      // Adding a manual/off-menu line with a staff-typed price. Separate from Create Orders
-      // because it lets staff put an arbitrary amount on a bill.
-      { key: "manage_custom_items", label: "Add Custom Items" },
-    ],
-  },
-  {
-    label: "Mock Billing",
-    items: [
-      // Off every preset on purpose — like Payroll, this is only ever granted deliberately.
-      // A mock bill prints indistinguishably from a real one, so nobody should acquire the
-      // ability by inheriting a job template.
-      { key: "print_mock_bills", label: "Print Mock Bills" },
-    ],
-  },
-  {
-    label: "Menu",
-    items: [
-      { key: "view_menu",   label: "View Menu" },
-      { key: "manage_menu", label: "Manage Menu" },
-    ],
-  },
-  {
-    label: "Tables",
-    items: [
-      { key: "view_tables",   label: "View Tables" },
-      { key: "manage_tables", label: "Manage Tables" },
-    ],
-  },
-  {
-    label: "Walk-ins",
-    items: [
-      // Manage Walk-ins automatically includes View Walk-ins — see WALKIN_ACCESS.
-      { key: "view_walkins",   label: "View Walk-ins" },
-      { key: "manage_walkins", label: "Manage Walk-ins" },
-    ],
-  },
-  {
-    label: "Rooms",
-    items: [
-      // Three tiers: view is read-only; check-in starts stays (front desk) without room
-      // configuration; manage is full CRUD (managers). See ROOM_ACCESS below.
-      { key: "view_rooms",   label: "View Rooms" },
-      { key: "check_in",     label: "Check-in" },
-      { key: "manage_rooms", label: "Manage Rooms" },
-      // Ending a stay WITHOUT billing it, and deciding how much of the deposit
-      // the hotel keeps. Its own permission and NOT implied by manage_rooms:
-      // configuring rooms and writing off a guest's bill are different acts.
-      // The owner passes automatically (hasPermission is true for admins), which
-      // is what makes them the default canceller with no extra wiring.
-      // Always ALSO gated on the Security PIN — see lib/security/authorize.ts.
-      { key: "cancel_room_stay", label: "Cancel a Checked-in Stay" },
-    ],
-  },
-  {
-    label: "Billing",
-    items: [
-      { key: "process_payments", label: "Process Payments" },
-      { key: "apply_discounts",  label: "Apply Discounts" },
-      { key: "refund_bills",     label: "Refund Bills" },
-    ],
-  },
-  {
-    label: "Stock",
-    items: [
-      // Manage Stock automatically includes View Stock — see STOCK_ACCESS.canViewStock,
-      // which passes on either permission. Ticking Manage alone is enough.
-      { key: "view_stock",   label: "View Stock" },
-      { key: "manage_stock", label: "Manage Stock" },
-    ],
-  },
-  {
-    label: "Purchases",
-    items: [
-      // Recording supplier bills (moves stock, cash and vendor credit). Write
-      // implies the read of the Purchases page. See STOCK_ACCESS.canManagePurchases.
-      { key: "manage_purchases", label: "Manage Purchases" },
-    ],
-  },
-  {
-    label: "Vendors",
-    items: [
-      // Creating/editing/deleting vendors and paying what they're owed. Write
-      // implies the read of the Vendors page. See STOCK_ACCESS.canManageVendors.
-      { key: "manage_vendors", label: "Manage Vendors" },
-    ],
-  },
-  {
-    label: "Item Sales",
-    items: [
-      // Units sold per menu item, by category, with the best sellers. Read-only.
-      { key: "view_item_sales", label: "View Item Sales" },
-    ],
-  },
-  {
-    label: "Extra Expenses",
-    items: [
-      // Recording rent, electricity and the rest. Write implies the read of the
-      // Extra Expenses page. See STOCK_ACCESS.canManageExpenses.
-      { key: "manage_expenses", label: "Manage Extra Expenses" },
-      // The narrow one: file an expense or a saving, see TODAY's entries only,
-      // and nothing else. Given to whoever actually pays the bills without
-      // showing them the running totals — in particular, never a saving pot's
-      // balance. Granting `manage_expenses` as well makes this one irrelevant.
-      { key: "add_expenses", label: "Add Expenses & Saving" },
-    ],
-  },
-  {
-    label: "Finance",
-    items: [
-      // Kept apart from Stock: the daily report exposes takings, margins and every
-      // outstanding debt, which a storekeeper has no business seeing.
-      { key: "view_finance", label: "View Daily Finance Report" },
-    ],
-  },
-  {
-    label: "Reports",
-    items: [{ key: "view_reports", label: "View Reports" }],
-  },
-  {
-    label: "Staff",
-    items: [
-      { key: "view_staff",   label: "View Staff" },
-      { key: "create_staff", label: "Create Staff" },
-      { key: "edit_staff",   label: "Edit Staff" },
-      { key: "delete_staff", label: "Delete Staff" },
-    ],
-  },
-  {
-    label: "Payroll",
-    items: [
-      // Salaries are the most sensitive thing on the staff record — a colleague
-      // who can see the roster must not thereby see what everyone is paid. Held
-      // apart from `view_staff` for exactly that reason, and off every preset by
-      // default, so payroll is only ever granted on purpose.
-      { key: "view_payroll",   label: "View Payroll & Salaries" },
-      { key: "manage_payroll", label: "Set Salaries & Record Payments" },
-    ],
-  },
-];
+export const PERMISSION_GROUPS: PermissionGroupDef[] = ACCESS_SECTIONS.map((s) => {
+  const items: { key: Permission; label: string }[] = [];
+  const seen = new Set<string>();
+  for (const level of s.levels) {
+    for (const key of level.permissions) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({ key, label: `${s.label}: ${level.label}` });
+    }
+  }
+  for (const e of s.extras ?? []) {
+    if (!seen.has(e.key)) items.push({ key: e.key, label: e.label });
+  }
+  return { label: s.label, items };
+});
 
 // restaurant_admin role always bypasses permission checks.
 // Only restaurant_employee role is subject to per-permission enforcement.
@@ -300,14 +507,16 @@ export const STAFF_NAV: StaffNavItem[] = [
     label: "Tables",
     href: "/employee/dashboard",
     exact: true,
-    anyOf: [P_.VIEW_DASHBOARD, P_.VIEW_TABLES, P_.VIEW_ROOMS],
+    // The dashboard HOME. The Tables section on it is gated separately
+    // (NAV_ACCESS.canSeeTables), so rooms or walk-in staff don't get the floor plan.
+    anyOf: [P_.VIEW_TABLES, P_.MANAGE_TABLES, P_.VIEW_ROOMS, P_.CHECK_IN, P_.MANAGE_ROOMS, P_.VIEW_WALKINS, P_.MANAGE_WALKINS],
   },
   {
     key: "orders",
     label: "Orders",
     href: "/employee/queue",
     exact: false,
-    anyOf: [P_.VIEW_ORDERS, P_.MANAGE_ORDERS, P_.CREATE_ORDERS, P_.EDIT_ORDERS],
+    anyOf: [P_.VIEW_ORDERS, P_.MANAGE_ORDERS, P_.CREATE_ORDERS],
   },
   {
     key: "menu",
@@ -321,23 +530,22 @@ export const STAFF_NAV: StaffNavItem[] = [
     label: "Sales",
     href: "/employee/sales",
     exact: false,
-    anyOf: [P_.PROCESS_PAYMENTS, P_.CLOSE_BILLS, P_.VIEW_REPORTS],
+    anyOf: [P_.VIEW_SALES, P_.VIEW_SALES_TODAY],
   },
   {
     key: "credits",
     label: "Credits",
     href: "/employee/credits",
     exact: false,
-    // Billing + Close Bills, both required — see `allOf` above.
-    anyOf: [P_.PROCESS_PAYMENTS],
-    allOf: [P_.PROCESS_PAYMENTS, P_.CLOSE_BILLS],
+    anyOf: [P_.MANAGE_CREDITS],
   },
   {
     key: "notifications",
     label: "Notifications",
     href: "/employee/notifications",
     exact: false,
-    anyOf: [P_.VIEW_DASHBOARD, P_.VIEW_ORDERS, P_.MANAGE_ORDERS, P_.VIEW_TABLES, P_.CREATE_ORDERS, P_.EDIT_ORDERS],
+    // Anyone working the floor: guest calls come from tables, rooms and walk-ins.
+    anyOf: [P_.VIEW_TABLES, P_.VIEW_ORDERS, P_.MANAGE_ORDERS, P_.CREATE_ORDERS, P_.VIEW_ROOMS, P_.VIEW_WALKINS],
   },
 ];
 
@@ -353,15 +561,27 @@ export function getStaffNav(user: { role: string; permissions: string[] }): Staf
 // Convenience booleans used by page guards so nav ↔ route protection stay in sync.
 export const NAV_ACCESS = {
   canSeeOrders: (u: { role: string; permissions: string[] }) =>
-    hasAnyPermission(u, [P_.VIEW_ORDERS, P_.MANAGE_ORDERS, P_.CREATE_ORDERS, P_.EDIT_ORDERS]),
+    hasAnyPermission(u, [P_.VIEW_ORDERS, P_.MANAGE_ORDERS, P_.CREATE_ORDERS]),
   canManageOrders: (u: { role: string; permissions: string[] }) =>
-    hasAnyPermission(u, [P_.MANAGE_ORDERS, P_.EDIT_ORDERS]),
+    hasPermission(u, P_.MANAGE_ORDERS),
+  /** The Tables section of the dashboard (the floor plan). */
+  canSeeTables: (u: { role: string; permissions: string[] }) =>
+    hasAnyPermission(u, [P_.VIEW_TABLES, P_.MANAGE_TABLES]),
+  /** Opens the Sales section at all — either level. */
   canSeeSales: (u: { role: string; permissions: string[] }) =>
-    hasAnyPermission(u, [P_.PROCESS_PAYMENTS, P_.CLOSE_BILLS, P_.VIEW_REPORTS]),
-  // Customer credits — create, view, take repayments, settle. Deliberately
-  // stricter than Sales: a reports-only viewer must NOT reach customer debt.
+    hasAnyPermission(u, [P_.VIEW_SALES, P_.VIEW_SALES_TODAY]),
+  /**
+   * True for the TODAY-ONLY holder: every sales read is forced to today's business day
+   * and no wider total (week/month/year/all) is returned. One predicate, used by the
+   * report, the CSV export and the single-bill view, so none of them can forget it.
+   * `restaurant_admin` never lands here: hasPermission(VIEW_SALES) is true for owners.
+   */
+  salesTodayOnly: (u: { role: string; permissions: string[] }) =>
+    hasPermission(u, P_.VIEW_SALES_TODAY) && !hasPermission(u, P_.VIEW_SALES),
+  // Customer credits — create, view, take repayments, settle. Its own permission:
+  // seeing Sales must NOT by itself reach customer debt.
   canManageCredits: (u: { role: string; permissions: string[] }) =>
-    hasAllPermissions(u, [P_.PROCESS_PAYMENTS, P_.CLOSE_BILLS]),
+    hasPermission(u, P_.MANAGE_CREDITS),
 };
 
 // ─── Stock & Finance (Admin Dashboard module) ─────────────────────────────────
@@ -510,11 +730,11 @@ export const PAYROLL_ACCESS = {
 };
 
 // ─── Staff Presets ────────────────────────────────────────────────────────────
-// Job-type templates that pre-fill the permission checkboxes with a sensible
-// set for common restaurant/hotel roles. Presets are a convenience only —
-// after applying one, the admin can still tick/untick any individual
-// permission. The chosen preset is NOT stored; only the resulting permission
-// list is persisted on the staff record.
+// Job-type templates that set every section in one click. Written as SECTION LEVELS
+// (not raw keys) so a preset is always something the editor can show exactly — and
+// matchPreset can recognise it again. Presets are a convenience only: the admin can
+// still change any section afterwards. The chosen preset is NOT stored; only the
+// resulting permission list is persisted on the staff record.
 
 export type StaffPresetDef = {
   key: string;
@@ -523,110 +743,74 @@ export type StaffPresetDef = {
   permissions: Permission[];
 };
 
-const P = PERMISSIONS;
+function preset(
+  key: string,
+  label: string,
+  description: string,
+  levels: Record<string, string>,
+  extras: Permission[] = []
+): StaffPresetDef {
+  const permissions = new Set<Permission>(extras);
+  for (const [sectionKey, levelKey] of Object.entries(levels)) {
+    const level = ACCESS_SECTIONS.find((s) => s.key === sectionKey)?.levels.find((l) => l.key === levelKey);
+    if (!level) throw new Error(`preset ${key}: unknown level ${sectionKey}.${levelKey}`);
+    for (const p of level.permissions) permissions.add(p);
+  }
+  return { key, label, description, permissions: [...permissions] };
+}
+
+// Presets are a LADDER: each front-of-house role is the one below it plus what the job
+// adds, so a cashier can always do anything a waiter can.
+//   Waiter       — sees tables, walk-ins and rooms, adds items, marks them served.
+//                  Cannot take payment or close a bill (that is the Billing section).
+//   Cashier      — Waiter + take payment / close bills, Sales, Credits, discounts.
+//   Receptionist — Cashier + the rooms front desk (check guests in and out).
+//   Manager      — Receptionist + full tables/rooms/menu, cancel orders, staff list.
+const WAITER_LEVELS = { tables: "view", orders: "full", walkins: "full", rooms: "view" };
+const CASHIER_LEVELS = { ...WAITER_LEVELS, billing: "full", sales: "view", credits: "full" };
+const CASHIER_EXTRAS: Permission[] = [P.APPLY_DISCOUNTS, P.MANAGE_CUSTOM_ITEMS];
+const RECEPTIONIST_LEVELS = { ...CASHIER_LEVELS, rooms: "checkin" };
 
 export const STAFF_PRESETS: StaffPresetDef[] = [
-  {
-    key: "waiter",
-    label: "Waiter",
-    description: "Takes and serves orders. View-only on menu, tables and rooms.",
-    permissions: [
-      P.VIEW_DASHBOARD,
-      P.VIEW_ORDERS,
-      P.MANAGE_ORDERS,
-      P.CREATE_ORDERS,
-      P.EDIT_ORDERS,
-      P.VIEW_MENU,
-      P.VIEW_TABLES,
-      P.VIEW_ROOMS,
-    ],
-  },
-  {
-    key: "cashier",
-    label: "Cashier",
-    description: "Handles billing and payments. Can create orders and close bills.",
-    permissions: [
-      P.VIEW_DASHBOARD,
-      P.VIEW_ORDERS,
-      P.CREATE_ORDERS,
-      P.VIEW_MENU,
-      P.VIEW_TABLES,
-      P.MANAGE_WALKINS,
-      P.CLOSE_BILLS,
-      P.PROCESS_PAYMENTS,
-      P.APPLY_DISCOUNTS,
-      P.MANAGE_CUSTOM_ITEMS,
-    ],
-  },
-  {
-    key: "receptionist",
-    label: "Receptionist",
-    description: "Front desk: checks guests in, runs room sessions and takes payment. No room configuration.",
-    permissions: [
-      P.VIEW_DASHBOARD,
-      P.VIEW_ORDERS,
-      P.CREATE_ORDERS,
-      P.VIEW_MENU,
-      P.VIEW_TABLES,
-      P.MANAGE_WALKINS,
-      P.VIEW_ROOMS,
-      P.CHECK_IN,
-      P.CLOSE_BILLS,
-      P.PROCESS_PAYMENTS,
-      P.APPLY_DISCOUNTS,
-    ],
-  },
-  {
-    key: "chef",
-    label: "Chef / Kitchen",
-    description: "Works the kitchen queue. Sees orders and toggles menu availability.",
-    permissions: [
-      P.VIEW_DASHBOARD,
-      P.VIEW_ORDERS,
-      P.MANAGE_ORDERS,
-      P.VIEW_MENU,
-      P.MANAGE_MENU,
-    ],
-  },
-  {
-    key: "manager",
-    label: "Manager",
-    description: "Broad operational access across orders, billing, menu, tables and reports.",
-    permissions: [
-      P.VIEW_DASHBOARD,
-      P.VIEW_ORDERS,
-      P.MANAGE_ORDERS,
-      P.CREATE_ORDERS,
-      P.EDIT_ORDERS,
-      P.CANCEL_ORDERS,
-      P.CLOSE_BILLS,
-      P.MANAGE_CUSTOM_ITEMS,
-      P.VIEW_MENU,
-      P.MANAGE_MENU,
-      P.VIEW_TABLES,
-      P.MANAGE_TABLES,
-      P.MANAGE_WALKINS,
-      P.VIEW_ROOMS,
-      // Explicit for clarity; MANAGE_ROOMS already implies it via ROOM_ACCESS.canCheckIn.
-      P.CHECK_IN,
-      P.MANAGE_ROOMS,
-      P.PROCESS_PAYMENTS,
-      P.APPLY_DISCOUNTS,
-      P.REFUND_BILLS,
-      P.VIEW_REPORTS,
-      P.VIEW_STAFF,
-    ],
-  },
-  {
-    key: "host",
-    label: "Host / Guest",
-    description: "View-only access to the dashboard, tables and menu.",
-    permissions: [
-      P.VIEW_DASHBOARD,
-      P.VIEW_TABLES,
-      P.VIEW_MENU,
-    ],
-  },
+  preset(
+    "waiter",
+    "Waiter",
+    "Sees tables, walk-ins and rooms and adds items to them. Can't take payment or close a bill.",
+    WAITER_LEVELS
+  ),
+  preset(
+    "cashier",
+    "Cashier",
+    "Everything a waiter can, plus taking payment, closing bills, Sales and Credits.",
+    CASHIER_LEVELS,
+    CASHIER_EXTRAS
+  ),
+  preset(
+    "receptionist",
+    "Receptionist",
+    "Everything a cashier can, plus checking guests in and out. No room configuration.",
+    RECEPTIONIST_LEVELS,
+    CASHIER_EXTRAS
+  ),
+  preset(
+    "chef",
+    "Chef / Kitchen",
+    "Works the kitchen queue and toggles menu availability.",
+    { tables: "view", orders: "kitchen", menu: "full" }
+  ),
+  preset(
+    "manager",
+    "Manager",
+    "Everything a receptionist can, plus full tables, rooms and menu, cancelling orders and the staff list.",
+    { ...RECEPTIONIST_LEVELS, tables: "full", rooms: "full", menu: "full", staff: "view" },
+    [...CASHIER_EXTRAS, P.CANCEL_ORDERS]
+  ),
+  preset(
+    "host",
+    "Host / Guest",
+    "View-only access to the tables.",
+    { tables: "view" }
+  ),
 ];
 
 // Returns the preset key whose permission set exactly matches the given

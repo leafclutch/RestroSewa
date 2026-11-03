@@ -2,7 +2,7 @@
 
 # Overview
 The complete permission architecture. `lib/permissions.ts` is the **single source of truth** —
-constants, groups (the super-admin checkbox editor is data-driven off them), `*_ACCESS`
+constants, `ACCESS_SECTIONS` (the super-admin editor is data-driven off them), `*_ACCESS`
 helpers, and job presets. See `decisions.md` → "Permission model" for the *why*; this file is
 the reference for *what* and *how*.
 
@@ -19,28 +19,37 @@ the reference for *what* and *how*.
 3. **restaurant_employee** — gated by `permissions text[]`.
 4. **customer** — no account (see `modules/qr.md`).
 
-# Permission groups (constants)
-- Dashboard: `view_dashboard`
-- Orders: `view_orders`, `manage_orders`, `create_orders`, `edit_orders`, `cancel_orders`, `close_bills`
-- Custom items: `manage_custom_items` (own group) — add an off-menu line with a STAFF-TYPED price.
-  Held apart from `create_orders` because a normal order can never set its own price
-  (`lib/order-items.ts`); Cashier + Manager presets include it. See `modules/custom-items.md`.
-- Mock Billing: `print_mock_bills` (own group, 2026-08-07) — opens the PIN-gated mock billing
-  screen. Standalone, NOT a rider on `close_bills`, and **on NO preset** (like Payroll): a mock bill
-  prints indistinguishably from a real one, so it is only ever granted deliberately. Being holdable
-  alone is the point — that is how you make a demo/sales account with no other access. See
-  `modules/mock-bill.md`.
-- Menu: `view_menu`, `manage_menu`
-- Tables: `view_tables`, `manage_tables`
-- Walk-ins: `view_walkins`, `manage_walkins`
-- Rooms: `view_rooms`, `check_in`, `manage_rooms`, `cancel_room_stay`
-- Billing: `process_payments`, `apply_discounts`, `refund_bills`
-- Stock: `view_stock`, `manage_stock`
-- Purchases: `manage_purchases` · Vendors: `manage_vendors` · Extra Expenses: `manage_expenses`,
-  `add_expenses` · Finance: `view_finance`
-- Reports: `view_reports`
-- Staff: `view_staff`, `create_staff`, `edit_staff`, `delete_staff`
-- Payroll: `view_payroll`, `manage_payroll`
+# The editor: sections × levels (2026-11-03)
+The super-admin staff editor is ONE row per section, each with a single LEVEL (None / View /
+Full, or the section's own steps) plus optional EXTRAS. `ACCESS_SECTIONS` defines them; a level
+is just a named, CUMULATIVE set of keys (Full includes the view key) so a stored list reads back
+as exactly one level (`detectLevel`). A list matching no level shows **Custom** and is left
+untouched until a level is picked (`applyLevel`; picking None also clears that section's extras).
+Enforcement still checks the same keys — the sections are only how they are granted.
+
+| Section | Levels | Extras |
+|---|---|---|
+| Tables | View `view_tables` · Full +`manage_tables` | |
+| Orders | View `view_orders` · Take orders +`create_orders` · Kitchen +`manage_orders` · Full (both) | `cancel_orders`, `manage_custom_items` |
+| Walk-ins | View `view_walkins` · Full +`manage_walkins` | |
+| Rooms | View `view_rooms` · Front desk +`check_in` · Full +`manage_rooms` | `cancel_room_stay` (PIN) |
+| Billing | Take payments `close_bills`+`process_payments` | `apply_discounts`, `print_mock_bills` (PIN, no preset) |
+| Sales | Today only `view_sales_today` · All days `view_sales` (alternatives, not cumulative) | |
+| Credits | Full `manage_credits` | |
+| Menu | Full `manage_menu` | |
+| Stock | View `view_stock` (also opens Purchases/Vendors lists) · Full +`manage_stock` | |
+| Purchases / Vendors | Full `manage_purchases` / `manage_vendors` | |
+| Extra expenses | Add only `add_expenses` · Full +`manage_expenses` | |
+| Finance report / Item sales / Staff | View `view_finance` / `view_item_sales` / `view_staff` | |
+| Payroll | View `view_payroll` · Full +`manage_payroll` | |
+
+**Sales and Credits have their own permissions** (they used to ride on billing: Sales on any of
+process_payments/close_bills/view_reports, Credits on both of the first two).
+**Removed** (20261103100000_simplify_staff_permissions.sql, which rewrote every stored list with
+access unchanged): `view_menu`, `refund_bills`, `create/edit/delete_staff` (checked nowhere);
+`view_dashboard`→`view_tables`, `edit_orders`→`manage_orders`, `view_reports`→`view_sales`.
+The Tables section of the dashboard is `NAV_ACCESS.canSeeTables`; the dashboard home and
+Notifications open for anyone on tables, orders, rooms or walk-ins.
 
 # Permission inheritance (write-implies-read)
 Helpers encode tiers so a manager needn't tick a read box under a write box:
@@ -67,8 +76,8 @@ Helpers encode tiers so a manager needn't tick a read box under a write box:
   (open/edit/order/bill/close). Enforced type-aware in shared session actions (`pos.ts`
   `walkInWriteBlocked`) since walk-ins reuse the table session pipeline.
 - **PAYROLL_ACCESS**: `canViewPayroll` (view|manage) · `canManagePayroll`.
-- **NAV_ACCESS**: `canSeeOrders`, `canManageOrders`, `canSeeSales`, `canManageCredits`
-  (credits require BOTH `process_payments` + `close_bills`).
+- **NAV_ACCESS**: `canSeeOrders`, `canManageOrders` (`manage_orders`), `canSeeTables`,
+  `canSeeSales` (`view_sales`), `canManageCredits` (`manage_credits`).
 
 # Assignment scoping (who sees WHICH tables/rooms) — distinct from permissions
 Permissions decide WHAT you may do; **assignment** decides WHICH tables/rooms you may do it to.
@@ -100,14 +109,26 @@ Permissions decide WHAT you may do; **assignment** decides WHICH tables/rooms yo
 
 # Presets (job templates)
 `STAFF_PRESETS`: waiter, cashier, **receptionist** (front desk incl. `check_in`), chef,
-manager, host. A preset only pre-fills checkboxes; the stored value is the resulting list, not
-the preset. `matchPreset` labels a selection.
+manager, host. Written as section levels (`preset(...)`), so every preset reads back as clean
+levels — a test enforces it. Front of house is a **ladder** (tested): Waiter (sees tables,
+walk-ins, rooms; adds items; no payment) → Cashier (+billing, Sales, Credits, discounts, custom
+items) → Receptionist (+rooms front desk) → Manager (+full tables/rooms/menu, cancel orders,
+staff list). A preset only pre-fills the editor; the stored value is the resulting
+list, not the preset. `matchPreset` labels a selection (shown on the staff list badge).
 
 # Known Limitations
-- `create_staff` / `edit_staff` / `delete_staff` exist but are **unused** — staff CRUD is
-  super-admin only today. Reserved for a future in-admin staff surface (see `roadmap.md`).
+- Staff CRUD is super-admin only; there is no create/edit/delete-staff permission (removed
+  2026-11-03 — they were never checked). Add one when an in-admin staff surface exists.
 - Orphan permission strings on old rows are inert (nothing reads removed perms).
 
 # Future Improvements
-- Wire `create/edit/delete_staff` to an admin staff-management screen.
+- An admin staff-management screen (would need a new staff-management section).
 - Optional per-permission audit log of grants/changes.
+
+# Sales: Today only (2026-11-03)
+`view_sales_today` opens Sales restricted to the current business day. `NAV_ACCESS.salesTodayOnly`
+(`today && !view_sales`; never true for the owner) is the ONE predicate, applied server-side in
+`getSalesReport` and `exportSalesCsv` (params forced to `today`, week/month/year/all overview
+zeroed) and `getPaidBill` (only today's bills, except a credit bill opened by a Credits holder).
+`SalesReport.todayOnly` tells `SalesView` to hide the period tiles and custom range. No migration:
+existing `view_sales` holders are unaffected.
