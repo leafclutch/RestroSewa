@@ -41,14 +41,16 @@ export function RestaurantSearch() {
   }, [query]);
 
   return (
-    <div className="mt-6 pt-5 border-t" style={{ borderColor: "var(--color-hairline)" }}>
-      <label
-        className="block text-sm mb-2"
-        style={{ color: "var(--color-ink)" }}
-        htmlFor="rs-restaurant-search"
-      >
+    <div className="mt-7">
+      <div className="mb-5 flex items-center gap-3 text-xs text-[#64748d]" aria-hidden>
+        <span className="h-px flex-1 bg-[#e3e8ee]" />
+        or
+        <span className="h-px flex-1 bg-[#e3e8ee]" />
+      </div>
+      <label className="block text-sm font-medium text-[#0d1b33]" htmlFor="rs-restaurant-search">
         Staff sign in
       </label>
+      <p className="mb-2.5 mt-0.5 text-xs text-[#64748d]">Find your restaurant, then sign in with your PIN.</p>
 
       <div className="relative">
         <Search
@@ -63,7 +65,7 @@ export function RestaurantSearch() {
           placeholder="Search your restaurant's name"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="w-full text-sm pl-9 pr-9 py-2.5 rounded-lg border"
+          className="h-11 w-full rounded-xl border pl-9 pr-9 text-sm outline-none transition-shadow focus:border-[#22c55e] focus:ring-2 focus:ring-[#22c55e]/20"
           style={{
             borderColor: "var(--color-hairline)",
             background: "var(--color-canvas)",
@@ -80,12 +82,12 @@ export function RestaurantSearch() {
       </div>
 
       {results.length > 0 && (
-        <ul className="mt-2 rounded-lg border overflow-hidden" style={{ borderColor: "var(--color-hairline)" }}>
+        <ul className="mt-2 overflow-hidden rounded-xl border" style={{ borderColor: "var(--color-hairline)" }}>
           {results.map((r) => (
             <li key={r.slug}>
               <Link
                 href={`/login?mode=staff&slug=${encodeURIComponent(r.slug)}`}
-                className="block px-3 py-2.5 text-sm border-b last:border-b-0"
+                className="block border-b px-3.5 py-3 text-sm transition-colors last:border-b-0 hover:bg-[#f0fdf4]"
                 style={{ borderColor: "var(--color-hairline)", color: "var(--color-ink)" }}
               >
                 {r.name}
