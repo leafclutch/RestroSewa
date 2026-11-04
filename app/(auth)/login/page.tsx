@@ -9,7 +9,7 @@ import {
   signOutStrandedSession,
 } from "@/app/actions/auth";
 import { getAuthUser, getCurrentStaff, isSuperAdmin } from "@/lib/auth/current-user";
-import { PlatformLogo, PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
+import { PoweredBy } from "@/components/branding/platform-logo";
 import { InstallPrompt } from "@/components/pwa/install-prompt";
 
 export default async function LoginPage({
@@ -63,26 +63,15 @@ export default async function LoginPage({
   const isStaffMode = explicitStaffMode || !!staff;
 
   return (
-    <div className="w-full max-w-[420px] mx-auto">
-      {/* Logo / wordmark — the dark auth background is exactly what the emblem is designed for. */}
-      <div className="mb-6 sm:mb-8 flex flex-col items-center gap-3">
-        <PlatformLogo size={68} priority />
-        <PlatformWordmark size={22} tone="light" letterSpacing="-0.4px" />
-      </div>
+    <div className="w-full max-w-[440px] mx-auto">
+      {/* The brand lives in the auth layout (panel on desktop, header on phones). */}
 
       {/* Offered here and nowhere else: it is the one screen a staff member is
           looking at while NOT mid-service. It hides itself when already installed,
           when dismissed, and in browsers with no install path at all. */}
       <InstallPrompt />
 
-      <div
-        className="rounded-xl border px-5 py-6 sm:px-8 sm:py-8"
-        style={{
-          background: "var(--color-canvas)",
-          borderColor: "var(--color-hairline)",
-          boxShadow: "0 4px 24px 0 rgba(28,30,84,0.07)",
-        }}
-      >
+      <div className="rounded-3xl border border-[#e3e8ee] bg-white px-5 py-7 shadow-[0_24px_60px_-28px_rgba(11,18,48,0.35)] sm:px-9 sm:py-9">
         {strandedSession ? (
           /* A valid session that resolves to nobody — the state that used to loop.
              Say so, and offer the one action that fixes it. Signing out has to be a
@@ -111,12 +100,10 @@ export default async function LoginPage({
           </div>
         ) : isStaffMode && staff ? (
           <>
-            <h1
-              className="text-lg mb-6 text-center"
-              style={{ color: "var(--color-ink)", fontWeight: 400, letterSpacing: "-0.3px" }}
-            >
-              Staff sign in
-            </h1>
+            <div className="mb-6 text-center">
+              <h1 className="text-2xl font-semibold tracking-[-0.02em] text-[#0d1b33]">Staff sign in</h1>
+              <p className="mt-1 text-sm text-[#64748d]">Pick your name, then enter your PIN</p>
+            </div>
             <StaffLogin staff={staff} />
           </>
         ) : isStaffMode && !staff ? (
@@ -134,17 +121,11 @@ export default async function LoginPage({
           </div>
         ) : (
           <>
-            <h1
-              className="text-lg mb-1"
-              style={{ color: "var(--color-ink)", fontWeight: 400, letterSpacing: "-0.3px" }}
-            >
-              Sign in
+            <h1 className="text-2xl font-semibold tracking-[-0.02em] text-[#0d1b33] sm:text-[28px]">
+              Welcome back
             </h1>
-            <p
-              className="text-sm mb-6"
-              style={{ color: "var(--color-ink-mute)" }}
-            >
-              Admin &amp; restaurant manager access
+            <p className="mt-1 mb-7 text-sm text-[#64748d]">
+              Sign in as a restaurant owner or manager
             </p>
             <AdminLoginForm />
             {/* The way back in for staff who have no manager's link — see RestaurantSearch. */}
@@ -153,8 +134,14 @@ export default async function LoginPage({
         )}
       </div>
 
-      <div className="flex justify-center mt-6">
-        <PoweredBy height={13} tone="light" />
+      <p className="mt-6 text-center text-xs text-[#64748d]">
+        New to HRestroSewa?{" "}
+        <Link href="/#pricing" className="font-semibold text-[#15803d] hover:underline">
+          See plans &amp; pricing
+        </Link>
+      </p>
+      <div className="flex justify-center mt-5">
+        <PoweredBy height={16} />
       </div>
     </div>
   );

@@ -87,8 +87,20 @@ export function PlatformLogo({
       width={size}
       height={size}
       priority={priority}
+      // Full quality: at the default 75 the re-encode softened the thin yellow cloche and green
+      // cutlery lines, which is what made the mark look dull at nav size.
+      quality={100}
       className={className}
-      style={{ width: size, height: size, objectFit: "contain" }}
+      style={{
+        width: size,
+        height: size,
+        objectFit: "contain",
+        // The emblem is a navy tile, and it usually sits on a navy surface, where its edge vanished
+        // and it read as a dim blob. A hairline light edge + soft shadow lifts the tile off the
+        // background; on light surfaces the edge is invisible and only the shadow shows.
+        borderRadius: "22%",
+        boxShadow: "0 0 0 1px rgba(255,255,255,0.16), 0 4px 14px -4px rgba(0,0,0,0.45)",
+      }}
     />
   );
 }
@@ -140,7 +152,10 @@ export function PoweredBy({
         // The credit is never above the fold on any screen that matters, so it
         // must never compete with the page for bandwidth.
         loading="lazy"
-        style={{ height, width: "auto" }}
+        // Both dimensions explicit. With `width: auto` the browser laid it out at a fractional
+        // width (e.g. 57.97px for a 58px attribute), which next/image reads as "width modified but
+        // not height" and warns about. `contain` absorbs the sub-pixel difference.
+        style={{ height, width, objectFit: "contain" }}
       />
     </span>
   );

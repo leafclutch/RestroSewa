@@ -1,0 +1,744 @@
+/* --- Theme tokens ----------------------------------------------------------------------------
+ * The light-section colours of the landing page. Follows the device by default; a stored choice
+ * pins it via data-theme on the root (see _components/theme-toggle.tsx). Navy sections (hero,
+ * header, contact card, loader) are dark in both themes and don't use these. */
+.root {
+  --l-page: #ffffff;
+  --l-surface: #ffffff;
+  --l-soft: #f6f9fc;
+  --l-ink: #0d1b33;
+  --l-body: #3e4a60;
+  --l-mute: #64748d;
+  --l-faint: #bfcbdb;
+  --l-line: #e3e8ee;
+  --l-green: #15803d;
+  --l-green-ink: #166534;
+  --l-green-soft: #dcfce7;
+  --l-green-wash: #f0fdf4;
+  --l-green-ring: #bbf7d0;
+  --l-indigo: #4434d4;
+  --l-indigo-soft: #eef2ff;
+  --l-orange: #c2410c;
+  --l-orange-wash: #fff7ed;
+  --l-orange-ring: #fed7aa;
+  --l-strong-bg: #0b1230;
+  --l-strong-fg: #ffffff;
+  --l-strong-hover: #1c1e54;
+  --l-card-hover-line: #bbf7d0;
+  --l-row-hover: #f6f9fc;
+  --l-shadow: rgba(11, 18, 48, 0.28);
+  --l-card-line: #d8e0ea;
+  --l-card-shadow: 0 1px 2px rgba(11, 18, 48, 0.05), 0 12px 32px -14px rgba(11, 18, 48, 0.2);
+  --l-card-shadow-hover: 0 2px 4px rgba(11, 18, 48, 0.06), 0 26px 48px -18px rgba(11, 18, 48, 0.32);
+  --l-card-sheen: none;
+  --l-card-edge: transparent;
+  --l-icon-ring: transparent;
+  --l-section-glow: none;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  .root:not([data-theme="light"]) {
+    --l-page: #060a18;
+    --l-surface: #0e1631;
+    --l-soft: #091021;
+    --l-ink: #eef2f8;
+    --l-body: #b8c2d4;
+    --l-mute: #8d98ad;
+    --l-faint: #3a4664;
+    --l-line: #1f2a47;
+    --l-green: #4ade80;
+    --l-green-ink: #86efac;
+    --l-green-soft: rgba(34, 197, 94, 0.15);
+    --l-green-wash: rgba(34, 197, 94, 0.08);
+    --l-green-ring: rgba(74, 222, 128, 0.28);
+    --l-indigo: #a5b4fc;
+    --l-indigo-soft: rgba(99, 102, 241, 0.18);
+    --l-orange: #fdba74;
+    --l-orange-wash: rgba(249, 115, 22, 0.1);
+    --l-orange-ring: rgba(251, 146, 60, 0.3);
+    --l-strong-bg: #e8edf7;
+    --l-strong-fg: #0b1230;
+    --l-strong-hover: #ffffff;
+    --l-card-hover-line: rgba(74, 222, 128, 0.4);
+    --l-row-hover: rgba(255, 255, 255, 0.03);
+    --l-shadow: rgba(0, 0, 0, 0.6);
+    --l-card-line: rgba(148, 163, 184, 0.16);
+    --l-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 18px 40px -18px rgba(0, 0, 0, 0.85);
+    --l-card-shadow-hover: 0 2px 6px rgba(0, 0, 0, 0.5), 0 28px 56px -18px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(74, 222, 128, 0.25), 0 0 36px -10px rgba(34, 197, 94, 0.35);
+    --l-card-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0) 55%);
+    --l-card-edge: rgba(255, 255, 255, 0.07);
+    --l-icon-ring: rgba(255, 255, 255, 0.08);
+    --l-section-glow: radial-gradient(55% 45% at 50% 0%, rgba(83, 58, 253, 0.14) 0%, transparent 70%);
+    color-scheme: dark;
+  }
+}
+.root[data-theme="dark"] {
+  --l-page: #060a18;
+  --l-surface: #0e1631;
+  --l-soft: #091021;
+  --l-ink: #eef2f8;
+  --l-body: #b8c2d4;
+  --l-mute: #8d98ad;
+  --l-faint: #3a4664;
+  --l-line: #1f2a47;
+  --l-green: #4ade80;
+  --l-green-ink: #86efac;
+  --l-green-soft: rgba(34, 197, 94, 0.15);
+  --l-green-wash: rgba(34, 197, 94, 0.08);
+  --l-green-ring: rgba(74, 222, 128, 0.28);
+  --l-indigo: #a5b4fc;
+  --l-indigo-soft: rgba(99, 102, 241, 0.18);
+  --l-orange: #fdba74;
+  --l-orange-wash: rgba(249, 115, 22, 0.1);
+  --l-orange-ring: rgba(251, 146, 60, 0.3);
+  --l-strong-bg: #e8edf7;
+  --l-strong-fg: #0b1230;
+  --l-strong-hover: #ffffff;
+  --l-card-hover-line: rgba(74, 222, 128, 0.4);
+  --l-row-hover: rgba(255, 255, 255, 0.03);
+  --l-shadow: rgba(0, 0, 0, 0.6);
+  --l-card-line: rgba(148, 163, 184, 0.16);
+  --l-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 18px 40px -18px rgba(0, 0, 0, 0.85);
+  --l-card-shadow-hover: 0 2px 6px rgba(0, 0, 0, 0.5), 0 28px 56px -18px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(74, 222, 128, 0.25), 0 0 36px -10px rgba(34, 197, 94, 0.35);
+  --l-card-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0) 55%);
+  --l-card-edge: rgba(255, 255, 255, 0.07);
+  --l-icon-ring: rgba(255, 255, 255, 0.08);
+  --l-section-glow: radial-gradient(55% 45% at 50% 0%, rgba(83, 58, 253, 0.14) 0%, transparent 70%);
+  color-scheme: dark;
+}
+.root {
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
+}
+
+/* Swap between tone-specific brand marks (wordmark / Powered-by) with the theme. */
+.onlyDark {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  .root:not([data-theme="light"]) .onlyLight {
+    display: none;
+  }
+  .root:not([data-theme="light"]) .onlyDark {
+    display: contents;
+  }
+}
+.root[data-theme="dark"] .onlyLight {
+  display: none;
+}
+.root[data-theme="dark"] .onlyDark {
+  display: contents;
+}
+
+/* Landing-page motion + focus. Every animation is switched off under prefers-reduced-motion. */
+
+/* Keyboard focus that is visible on both the navy and white sections. */
+.root a:focus-visible,
+.root summary:focus-visible {
+  outline: 2px solid #22c55e;
+  outline-offset: 3px;
+  border-radius: 9999px;
+}
+.root summary:focus-visible {
+  border-radius: 8px;
+}
+
+/* --- Hero entrance: one orchestrated moment on load --------------------------------------- */
+.rise {
+  animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.rise2 {
+  animation: rise 0.7s 0.12s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.rise3 {
+  animation: rise 0.7s 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.riseMock {
+  animation: rise 0.9s 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- Floating customer chips around the hero mockup -------------------------------------- */
+.float {
+  animation: float 6s ease-in-out infinite;
+}
+.floatSlow {
+  animation: float 7.5s ease-in-out -2s infinite;
+}
+.floatAlt {
+  animation: float 6.8s ease-in-out -4s infinite;
+}
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* A table that just got a new order. */
+.ping {
+  position: relative;
+}
+.ping::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 2px solid #4ade80;
+  animation: ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes ping {
+  0% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  80%,
+  100% {
+    opacity: 0;
+    transform: scale(1.18);
+  }
+}
+
+.liveDot {
+  animation: blink 1.8s ease-in-out infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* --- Customer strip: an endless, slow drift; pauses when hovered ------------------------- */
+.marquee {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+.track {
+  display: flex;
+  width: max-content;
+  animation: marquee var(--marquee-duration, 40s) linear infinite;
+}
+.marquee:hover .track {
+  animation-play-state: paused;
+}
+@keyframes marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .rise2,
+  .rise3,
+  .riseMock,
+  .float,
+  .floatSlow,
+  .floatAlt,
+  .liveDot,
+  .ping::after {
+    animation: none;
+  }
+  /* No drift: show the list once, wrapped, instead of an endless track. */
+  .marquee {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .track {
+    animation: none;
+    width: auto;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .track [data-dup] {
+    display: none;
+  }
+}
+
+/* --- Initial page loader ------------------------------------------------------------------
+ * Pure CSS on purpose: it fades itself out on a timer, so it can never get stuck covering the
+ * page (no JS needed, works if hydration fails), and the real content is already rendered
+ * underneath for search engines and for a fast first paint. */
+.loader {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: #0b1230;
+  animation: loaderOut 0.45s ease-in 1.1s forwards;
+}
+.loaderMark {
+  animation: loaderPulse 1.1s ease-in-out infinite;
+}
+.loaderBar {
+  width: 140px;
+  height: 3px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.loaderBar::after {
+  content: "";
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #22c55e, #4ade80);
+  transform-origin: left;
+  animation: loaderFill 1.1s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+@keyframes loaderOut {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+@keyframes loaderPulse {
+  50% {
+    transform: scale(0.94);
+    opacity: 0.85;
+  }
+}
+@keyframes loaderFill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loader {
+    animation: loaderOut 0.2s linear 0.4s forwards;
+  }
+  .loaderMark,
+  .loaderBar::after {
+    animation: none;
+  }
+}
+
+/* --- Hover: cards lift, icons pop -------------------------------------------------------- */
+.card {
+  border-color: var(--l-card-line);
+  box-shadow: var(--l-card-shadow), inset 0 1px 0 var(--l-card-edge);
+  transition:
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.3s ease,
+    border-color 0.3s ease;
+}
+.card:not(.cardDark) {
+  background-image: var(--l-card-sheen);
+}
+.card:hover {
+  transform: translateY(-6px);
+  border-color: var(--l-card-hover-line);
+  box-shadow: var(--l-card-shadow-hover), inset 0 1px 0 var(--l-card-edge);
+}
+/* Tables, FAQ and customer chips: same surface treatment, no lift. */
+.panel {
+  border-color: var(--l-card-line);
+  background-image: var(--l-card-sheen);
+  box-shadow: var(--l-card-shadow), inset 0 1px 0 var(--l-card-edge);
+}
+/* Light-grey sections pick up a faint indigo glow at the top in dark mode. */
+.glow {
+  background-image: var(--l-section-glow);
+}
+/* Icon tiles get a hairline in dark mode so they don't float as blobs. */
+.icon {
+  box-shadow: inset 0 0 0 1px var(--l-icon-ring);
+}
+.cardDark:hover {
+  border-color: transparent;
+  box-shadow:
+    0 26px 50px -18px rgba(11, 18, 48, 0.55),
+    0 0 0 1px rgba(74, 222, 128, 0.35),
+    0 0 40px -6px rgba(34, 197, 94, 0.35);
+}
+.icon {
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.card:hover .icon {
+  transform: scale(1.12) rotate(-6deg);
+}
+
+/* Buttons rise a touch and the shadow deepens; pressing settles them back. */
+.btn {
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
+}
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px -10px rgba(11, 18, 48, 0.45);
+}
+.btn:active {
+  transform: translateY(0);
+}
+
+/* Text links: an underline that draws in from the left. */
+.link {
+  background: linear-gradient(currentColor, currentColor) 0 100% / 0 1px no-repeat;
+  transition:
+    background-size 0.3s ease,
+    color 0.2s ease;
+}
+.link:hover {
+  background-size: 100% 1px;
+}
+
+/* Table rows and FAQ items light up under the pointer. */
+.row {
+  transition: background-color 0.2s ease;
+}
+.row:hover {
+  background-color: var(--l-row-hover);
+}
+.faq {
+  transition: background-color 0.2s ease;
+}
+.faq:hover {
+  background-color: var(--l-row-hover);
+}
+.faq[open] > p {
+  animation: faqIn 0.35s ease both;
+}
+@keyframes faqIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* Trust-bar ticks and mockup tables respond to the pointer too. */
+.trust {
+  transition: color 0.2s ease;
+}
+.trust:hover {
+  color: var(--l-ink);
+}
+.trust:hover svg {
+  transform: scale(1.2);
+}
+.trust svg {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.tile {
+  transition: transform 0.2s ease;
+}
+.tile:hover {
+  transform: scale(1.08);
+}
+
+/* --- Scroll reveal ------------------------------------------------------------------------
+ * Only armed once JS has run (the Reveal component adds .js-reveal to <html>), so without JS
+ * everything is simply visible. Uses the `translate` property so it composes with the hover
+ * `transform` on cards instead of fighting it. */
+:global(.js-reveal) .root [data-reveal] {
+  opacity: 0;
+  translate: 0 28px;
+  transition:
+    opacity 0.7s ease var(--rd, 0ms),
+    translate 0.8s cubic-bezier(0.22, 1, 0.36, 1) var(--rd, 0ms),
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.3s ease,
+    border-color 0.3s ease,
+    background-color 0.2s ease;
+}
+:global(.js-reveal) .root [data-reveal][data-revealed] {
+  opacity: 1;
+  translate: 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .card:hover,
+  .btn:hover,
+  .tile:hover,
+  .card:hover .icon,
+  .trust:hover svg {
+    transform: none;
+  }
+  .faq[open] > p {
+    animation: none;
+  }
+  :global(.js-reveal) .root [data-reveal] {
+    opacity: 1;
+    translate: none;
+  }
+}
+
+/* --- Floating WhatsApp chat launcher (bottom-right) ---------------------------------------- */
+.waFab {
+  animation: waPop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 2.2s both;
+}
+.waIcon {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.waFab:hover .waIcon,
+.waFab:focus-visible .waIcon {
+  transform: scale(1.08) rotate(-8deg);
+}
+/* Two soft rings pulsing out from the launcher. */
+.waIcon::before,
+.waIcon::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid #25d366;
+  animation: waRing 2.6s ease-out 3s infinite;
+}
+.waIcon::after {
+  animation-delay: 4.3s;
+}
+
+/* The "Book a free demo" pill and the launcher share ONE 10s loop, so they stay in step:
+ *   0%     launcher jerks  -> pill pops out (with a little overshoot), shine sweeps across it
+ *   ~50%   launcher jerks  -> pill shrinks back into the launcher and fades
+ *   50-100% quiet, then it all repeats.
+ * Both animations use the same duration + delay; never change one without the other. Hover or
+ * keyboard focus pins the pill open. */
+.waPill {
+  transform-origin: bottom right;
+  box-shadow:
+    0 16px 34px -12px rgba(11, 18, 48, 0.5),
+    0 6px 18px -8px rgba(37, 211, 102, 0.45);
+  animation: waPillLoop 10s ease 2.8s infinite both;
+  transition:
+    transform 0.25s ease,
+    box-shadow 0.25s ease,
+    opacity 0.2s ease;
+}
+.waPill::after {
+  /* little tail pointing at the launcher */
+  content: "";
+  position: absolute;
+  right: -5px;
+  bottom: 9px;
+  width: 11px;
+  height: 11px;
+  background: #fff;
+  transform: rotate(45deg);
+  border-radius: 2px;
+}
+/* The shine lives in its own clipped layer so the pill's tail isn't cut off. It sweeps once,
+ * right after the pill has popped out, on the same 10s loop. */
+.waShine::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(37, 211, 102, 0.22) 50%, transparent 65%);
+  transform: translateX(-120%);
+  animation: waShine 10s ease-in-out 2.8s infinite;
+}
+.waFab:hover .waPill,
+.waFab:focus-visible .waPill {
+  animation: none;
+  opacity: 1;
+  transform: translateX(-4px);
+  box-shadow:
+    0 20px 40px -12px rgba(11, 18, 48, 0.55),
+    0 8px 22px -8px rgba(37, 211, 102, 0.6);
+}
+.waFab:hover .waShine::before,
+.waFab:focus-visible .waShine::before {
+  animation: waShineOnce 0.9s ease-out;
+}
+.waDot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: #25d366;
+  animation: waDotPing 1.8s cubic-bezier(0, 0, 0.2, 1) 3s infinite;
+}
+/* Uses the `rotate`/`scale` properties so it composes with the hover `transform` on the icon. */
+.waIcon {
+  animation: waJerk 10s ease-in-out 2.8s infinite;
+}
+
+/* Launcher: a sharp jerk at 0% (show) and at 50% (hide). */
+@keyframes waJerk {
+  0%,
+  6%,
+  50%,
+  56%,
+  100% {
+    rotate: 0deg;
+    scale: 1;
+  }
+  1.2%,
+  51.2% {
+    rotate: -18deg;
+    scale: 1.12;
+  }
+  2.6%,
+  52.6% {
+    rotate: 14deg;
+    scale: 1.08;
+  }
+  4%,
+  54% {
+    rotate: -7deg;
+    scale: 1.03;
+  }
+}
+/* Pill: hidden -> pops out as the first jerk lands -> stays -> tucks back in on the second. */
+@keyframes waPillLoop {
+  0%,
+  2% {
+    opacity: 0;
+    transform: translate(18px, 6px) scale(0.4);
+  }
+  6% {
+    opacity: 1;
+    transform: translate(-3px, 0) scale(1.06);
+  }
+  8.5%,
+  51% {
+    opacity: 1;
+    transform: none;
+  }
+  53% {
+    opacity: 1;
+    transform: translate(-3px, 0) scale(1.04);
+  }
+  57%,
+  100% {
+    opacity: 0;
+    transform: translate(18px, 6px) scale(0.4);
+  }
+}
+@keyframes waShine {
+  0%,
+  9% {
+    transform: translateX(-120%);
+  }
+  20%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+@keyframes waShineOnce {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(120%);
+  }
+}
+@keyframes waDotPing {
+  0% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  80%,
+  100% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+}
+
+@keyframes waPop {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes waRing {
+  0% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  80%,
+  100% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waFab,
+  .waPill,
+  .waIcon,
+  .waShine::before,
+  .waDot::after {
+    animation: none;
+  }
+  .waShine::before {
+    display: none;
+  }
+  .waPill {
+    opacity: 1;
+    transform: none;
+  }
+  .waIcon::before,
+  .waIcon::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* "Pro plan" badge in Who it's for: a premium indigo-to-violet gradient with a soft glow and a
+ * slow sheen, reading well on the light and dark card alike. */
+.proBadge {
+  /* no position here: each badge sets relative/absolute itself (an unlayered position
+   * would override Tailwind's and pull the pricing badge out of its corner) */
+  overflow: hidden;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 55%, #a855f7 100%);
+  box-shadow:
+    0 6px 16px -6px rgba(124, 58, 237, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transition: box-shadow 0.3s ease;
+}
+.proBadge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.35) 50%, transparent 70%);
+  transform: translateX(-130%);
+  animation: proSheen 4.5s ease-in-out 1.5s infinite;
+}
+.card:hover .proBadge {
+  box-shadow:
+    0 8px 22px -6px rgba(124, 58, 237, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+@keyframes proSheen {
+  0% {
+    transform: translateX(-130%);
+  }
+  30%,
+  100% {
+    transform: translateX(130%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .proBadge::after {
+    animation: none;
+    display: none;
+  }
+}

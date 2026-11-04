@@ -24,11 +24,7 @@ export function AdminLoginForm() {
   return (
     <form action={action} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
-        <label
-          htmlFor="email"
-          className="text-xs font-medium tracking-wide uppercase"
-          style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
-        >
+        <label htmlFor="email" className="text-sm font-medium text-[#0d1b33]">
           Email
         </label>
         <Input
@@ -38,15 +34,12 @@ export function AdminLoginForm() {
           autoComplete="email"
           required
           placeholder="you@example.com"
+          className="h-11 rounded-xl border-[#d5dde8] px-3.5 focus-visible:border-[#22c55e] focus-visible:ring-[#22c55e]/20"
         />
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <label
-          htmlFor="password"
-          className="text-xs font-medium tracking-wide uppercase"
-          style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
-        >
+        <label htmlFor="password" className="text-sm font-medium text-[#0d1b33]">
           Password
         </label>
         <Input
@@ -56,12 +49,13 @@ export function AdminLoginForm() {
           autoComplete="current-password"
           required
           placeholder="••••••••"
+          className="h-11 rounded-xl border-[#d5dde8] px-3.5 focus-visible:border-[#22c55e] focus-visible:ring-[#22c55e]/20"
         />
       </div>
 
       {errorMsg && (
         <p
-          className="text-sm rounded-md px-3 py-2"
+          className="text-sm rounded-xl px-3.5 py-2.5"
           style={{ color: "var(--color-ruby)", background: "#fff0f4" }}
         >
           {errorMsg}
@@ -71,7 +65,7 @@ export function AdminLoginForm() {
       <Button
         type="submit"
         variant="primary"
-        className="w-full mt-2"
+        className="mt-2 h-11 w-full rounded-full bg-[#22c55e] text-[15px] font-semibold text-[#052e16] hover:bg-[#4ade80] active:bg-[#16a34a] focus-visible:ring-[#22c55e]"
         disabled={pending || isNavigating}
       >
         {pending || isNavigating ? "Signing in…" : "Sign in"}

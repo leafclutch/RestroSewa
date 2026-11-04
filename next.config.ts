@@ -79,6 +79,10 @@ const nextConfig: NextConfig = {
     // of the 4-hour default, which made the self-hosted storage (≈1s per request) the
     // bottleneck again several times a day.
     minimumCacheTTL: 2678400,
+    // Next 16 only serves qualities listed here. 75 is the default for everything; 100 is used
+    // by the HRestroSewa emblem (components/branding/platform-logo.tsx), whose thin line art
+    // went visibly soft at 75.
+    qualities: [75, 100],
   },
 
   // `pg` powers the real-time LISTEN connection (lib/realtime/bus.ts). It does
